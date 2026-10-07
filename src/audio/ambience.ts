@@ -1,5 +1,11 @@
 import { Mixer, filter, gain, hit, osc, panner, pick, rand, sweep } from './mixer';
 
+/** The wind bed's centre (Hz), how far a gust lifts it, its soft top and its overall level. */
+const WIND_LOW = 340;
+const WIND_GUST = 260;
+const WIND_TOP = 900;
+const WIND_LEVEL = 0.7;
+
 type Call = 'chirps' | 'whistle' | 'trill' | 'warble';
 
 interface Bird {
@@ -44,11 +50,11 @@ interface Calls {
 }
 
 /**
- * The world's bed of sound. Day: wind in the leaves and a few birds that each
+ * The world's bed of sound. Day: a soft wind and a few birds that each
  * keep their own song. Night: crickets and the odd owl. The braziers crackle
  * louder the closer you stand.
  *
- * Two halves: the beds (wind, leaves, the fire's roar, the brook's rush) are a
+ * Two halves: the beds (wind, the fire's roar, the brook's rush) are a
  * few endless noise loops whose levels move live; the calls (every bird, cricket,
  * crackle and bubble) are written a chunk at a time into a baked stream, so the
  * live audio thread never builds them note by note.
@@ -59,7 +65,6 @@ export class Ambience {
   private nature: GainNode;
   private wind: GainNode;
   private windTone: BiquadFilterNode;
-  private leaves: GainNode;
   private fire: GainNode;
   private bubbles: GainNode;
   private gurgle: StereoPannerNode;
@@ -71,7 +76,6 @@ export class Ambience {
   private outdoors = 1;
   private fireLevel = 0;
   private nextGust = 0;
-  private nextRustle = 0;
   private gust = 0.3;
   private nextCrackle = 0;
   private nextOwl = 0;
@@ -87,20 +91,14 @@ export class Ambience {
     const ctx = m.ctx;
     this.nature = gain(ctx, 1, m.ambience);
 
-    // Wind: slow pink noise through a wandering bandpass.
+    // Wind: slow pink noise through a low, wandering bandpass and a soft top, so
+    // it is a breath of air under the birds and never a hiss or a brushing.
     this.wind = gain(ctx, 0.3, m.ambience);
-    this.windTone = filter(ctx, 'bandpass', 500, 0.6, this.wind);
+    this.windTone = filter(ctx, 'bandpass', WIND_LOW, 0.6, this.wind);
+    const calm = filter(ctx, 'lowpass', WIND_TOP, 0.5, this.windTone);
     const w = m.noiseLoop(true);
-    w.connect(this.windTone);
+    w.connect(calm);
     w.start();
-
-    // Leaves: bright noise whose level flutters in tiny grains during gusts.
-    this.leaves = gain(ctx, 0, m.ambience);
-    const shelf = filter(ctx, 'highpass', 2400, 0.5, this.leaves);
-    const soft = filter(ctx, 'lowpass', 7000, 0.5, shelf);
-    const l = m.noiseLoop(false);
-    l.connect(soft);
-    l.start();
 
     // Fire bed: a low, breathy roar under the crackles.
     this.fire = gain(ctx, 0, m.ambience);
@@ -196,7 +194,7 @@ export class Ambience {
     this.bubbles.gain.setTargetAtTime(w ? w.stream * this.outdoors : 0, t, 0.4);
   }
 
-  /** The beds' live movement: gusts and the leaves' flutter. */
+  /** The beds' live movement: the wind's gusts. */
   tick(now: number, until: number): void {
     const catchUp = (x: number) => (x < now - 0.5 ? now + rand(0.1, 1) : x);
     this.nextGust = catchUp(this.nextGust);
@@ -204,16 +202,8 @@ export class Ambience {
       const t = this.nextGust;
       this.gust = Math.pow(Math.random(), 1.5);
       this.wind.gain.setTargetAtTime(this.windLevel(), t, 1.2);
-      this.windTone.frequency.setTargetAtTime(rand(320, 520) + this.gust * 500, t, 1.5);
+      this.windTone.frequency.setTargetAtTime(rand(WIND_LOW * 0.8, WIND_LOW * 1.2) + this.gust * WIND_GUST, t, 1.5);
       this.nextGust += rand(2, 5);
-    }
-
-    this.nextRustle = catchUp(this.nextRustle);
-    while (this.nextRustle < until) {
-      const t = this.nextRustle;
-      const amount = (0.35 + 0.65 * this.daylight) * this.gust * this.outdoors;
-      this.leaves.gain.setTargetAtTime(0.09 * amount * Math.pow(Math.random(), 2), t, 0.025);
-      this.nextRustle += rand(0.04, 0.14);
     }
   }
 
@@ -328,7 +318,7 @@ export class Ambience {
   }
 
   private windLevel(): number {
-    return (0.1 + this.gust * 0.35) * (0.6 + 0.4 * this.daylight) * this.outdoors;
+    return (0.1 + this.gust * 0.35) * WIND_LEVEL * (0.6 + 0.4 * this.daylight) * this.outdoors;
   }
 
   /** A creature's voice routed through a pan into nature, with some of it sent into the reverb. */
