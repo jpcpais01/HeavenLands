@@ -13,6 +13,8 @@ A cozy pixel-art world to wander, build and grow in, alone or with friends. Ther
 
 Online, up to four people share a room by its 4-letter code.
 
+An account (a name and a password, from the cloud button on the title screen) keeps your wanderer, wardrobe, Home and everything else safe in the cloud, and brings them to any device you sign in on. Without one, everything stays on the device.
+
 ## Controls
 
 | | Touch | Keyboard |

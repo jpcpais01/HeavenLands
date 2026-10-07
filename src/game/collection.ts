@@ -1,30 +1,21 @@
 // Everything the player has picked up, and the six items they keep equipped.
-// It's kept on the device for guests, and in the player's cloud save once
-// they log in (see cloud.ts); a guest's pickups carry over into the account
-// they log into. Changes save a moment later, so a burst of pickups is one
-// write.
+// In Heaven Lands it's only ever kept on the device, under one key: the
+// cloud save (src/heaven/sync.ts) carries that key along with the rest of
+// the device's save, so the collection never talks to the cloud itself.
 
 import { CRITTER_KEEP, CRITTER_PRICE, critterById } from './critters';
 import { DUST_VALUE, GEAR_SETS, MAX_LEVEL, STAT_KEYS, SLOTS, UPGRADE_REFUND, canUpgrade, dustSpent, gearById, levelled, upgradeCost, type GearDef, type SetId, type StatKey } from './gear';
 import { FORGE_COST } from './forge';
-import { account, cloudReady, loadSave, onAccount, writeSave, type SaveData } from './cloud';
+import { account, type SaveData } from './cloud';
 
 /** One slot per gear type, in the order of SLOTS: equipped[i] holds a SLOTS[i] piece. */
 export const EQUIP_SLOTS = SLOTS.length;
 const LOCAL_PREFIX = 'pixel-battle.save.';
-const SAVE_DELAY = 1500;
 /** Every player starts with this many gems, and is given DAILY_GEMS more on each new day they play. */
 export const START_GEMS = 200;
 export const DAILY_GEMS = 5;
 /** Accounts (by username, lower case) that own every skin. */
 const ADMINS = ['kel'];
-/** One-off gifts of gems or skins ("class:skin") to an account (by username, lower case), each given once and remembered in its save by id. */
-const GRANTS: { id: string; user: string; gems?: number; skins?: string[] }[] = [
-  { id: 'kel-100k', user: 'kel', gems: 100000 },
-  { id: 'keldog-10k', user: 'keldog', gems: 10000 },
-  { id: 'tiago-10k', user: 'tiago', gems: 10000 },
-  { id: 'tiago-porto', user: 'tiago', skins: ['beast:porto'] },
-];
 /** Set once this device has given a guest the welcome gems, so a fresh guest game can't be made again and again for more. */
 const WELCOMED_KEY = 'pixel-battle.welcomed';
 
@@ -133,22 +124,11 @@ type Listener = () => void;
 
 class Collection {
   data: SaveData;
-  /** 'saving' while a cloud write is queued or running, 'error' when the last one failed. */
-  status: 'idle' | 'loading' | 'saving' | 'error' = 'idle';
-  private key: string;
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private key = 'guest';
   private listeners = new Set<Listener>();
 
   constructor() {
-    const a = account();
-    this.key = a ? a.uid : 'guest';
-    this.data = readLocal(this.key) ?? empty(a ? 0 : welcomeGems());
-    if (a) void this.pull();
-    onAccount((acc) => this.switchTo(acc?.uid ?? 'guest'));
-    // Leaving or backgrounding the app saves right away.
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) this.flush();
-    });
+    this.data = readLocal(this.key) ?? empty(welcomeGems());
   }
 
   /** How many of `id` the player has picked up. */
@@ -577,29 +557,15 @@ class Collection {
 
   /**
    * The daily gems, once per calendar day: returns how many were given (0 if
-   * today's are already in, or while the cloud save is still loading, so they
-   * aren't given twice).
+   * today's are already in).
    */
   claimDaily(): number {
-    if (this.status === 'loading') return 0;
     const d = today();
     if (this.data.daily === d) return 0;
     this.data.daily = d;
     this.data.gems += DAILY_GEMS;
     this.changed();
     return DAILY_GEMS;
-  }
-
-  /** Give the logged-in account any gift meant for it that it hasn't had yet (only once its cloud save has loaded, so it is never given twice). */
-  private giveGrants(): void {
-    const a = account();
-    if (!a) return;
-    for (const g of GRANTS) {
-      if (g.user !== a.username.toLowerCase() || this.data.grants.includes(g.id)) continue;
-      this.data.grants.push(g.id);
-      this.data.gems += g.gems ?? 0;
-      for (const id of g.skins ?? []) if (!this.data.skins.includes(id)) this.data.skins.push(id);
-    }
   }
 
   /** Ids of the items in the equip slots, skipping empty ones. */
@@ -652,148 +618,6 @@ class Collection {
   private changed(): void {
     writeLocal(this.key, this.data);
     this.emit();
-    if (this.key === 'guest' || !cloudReady()) return;
-    this.status = 'saving';
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => this.flush(), SAVE_DELAY);
-  }
-
-  /** Write a queued change to the cloud now. */
-  flush(): void {
-    if (!this.timer) return;
-    clearTimeout(this.timer);
-    this.timer = null;
-    const key = this.key;
-    writeSave(this.data).then(
-      () => {
-        if (key === this.key && !this.timer) this.status = 'idle';
-        this.emit();
-      },
-      () => {
-        if (key === this.key) this.status = 'error';
-        this.emit();
-      },
-    );
-  }
-
-  /** Fetch the cloud save and fold it into what's on the device, plus a guest game's pickups. */
-  private async pull(guest?: SaveData): Promise<void> {
-    const key = this.key;
-    this.status = 'loading';
-    this.emit();
-    try {
-      const remote = await loadSave();
-      if (key !== this.key) return;
-      // Pickups made on this device while offline aren't lost: keep the higher count.
-      const local = this.data;
-      const merged = clean(remote);
-      for (const [id, n] of Object.entries(local.items)) merged.items[id] = Math.max(n, merged.items[id] ?? 0);
-      if (!remote) merged.equipped = local.equipped;
-      merged.dust = Math.max(local.dust, merged.dust);
-      for (const [id, picks] of Object.entries(local.upgrades)) if (picks.length > (merged.upgrades[id]?.length ?? 0)) merged.upgrades[id] = picks;
-      // Gems like dust: the higher count wins, so gems found offline aren't lost. Skins are never taken away.
-      merged.gems = Math.max(local.gems, merged.gems);
-      merged.skins = [...new Set([...merged.skins, ...local.skins])];
-      if (local.daily > merged.daily) merged.daily = local.daily;
-      merged.pity = Math.max(local.pity, merged.pity);
-      merged.grants = [...new Set([...merged.grants, ...local.grants])];
-      merged.met = [...new Set([...merged.met, ...local.met])];
-      for (const [cls, n] of Object.entries(local.rift)) merged.rift[cls] = Math.max(n, merged.rift[cls] ?? 0);
-      // The faster time wins.
-      for (const [course, ms] of Object.entries(local.glide)) merged.glide[course] = Math.min(ms, merged.glide[course] ?? Infinity);
-      merged.pets = [...new Set([...merged.pets, ...local.pets])];
-      if (!merged.pet) merged.pet = local.pet;
-      merged.petPity = Math.max(local.petPity, merged.petPity);
-      for (const [set, n] of Object.entries(local.mats)) merged.mats[set] = Math.max(n, merged.mats[set] ?? 0);
-      for (const [id, n] of Object.entries(local.critters)) merged.critters[id] = Math.max(n, merged.critters[id] ?? 0);
-      for (const [id, n] of Object.entries(local.fish)) merged.fish[id] = Math.max(n, merged.fish[id] ?? 0);
-      // Candy like gems: the higher count wins, so candy picked up offline isn't lost.
-      for (const [id, n] of Object.entries(local.candy)) merged.candy[id] = Math.max(n, merged.candy[id] ?? 0);
-      // The pantry like candy: the higher count of each wins. The farm, whichever was tended last.
-      for (const [k, n] of Object.entries(local.pantry)) merged.pantry[k] = Math.max(n, merged.pantry[k] ?? 0);
-      if (local.farmT > merged.farmT) {
-        merged.farm = local.farm;
-        merged.farmT = local.farmT;
-      }
-      if (!merged.lunch) merged.lunch = local.lunch;
-      // The Home: whichever was built on last.
-      if (local.homeT > merged.homeT) {
-        merged.home = local.home;
-        merged.homeT = local.homeT;
-      }
-      // The Everwood's changes the same way.
-      if (local.woodT > merged.woodT) {
-        merged.wood = local.wood;
-        merged.woodT = local.woodT;
-      }
-      // And the explorer's map.
-      if (local.trekT > merged.trekT) {
-        merged.trek = local.trek;
-        merged.trekT = local.trekT;
-      }
-      if (guest) {
-        if (!merged.trek && guest.trek) {
-          merged.trek = guest.trek;
-          merged.trekT = guest.trekT;
-        }
-        if (!merged.wood && guest.wood) {
-          merged.wood = guest.wood;
-          merged.woodT = guest.woodT;
-        }
-        if (!merged.home && guest.home) {
-          merged.home = guest.home;
-          merged.homeT = guest.homeT;
-        }
-        for (const [id, n] of Object.entries(guest.items)) merged.items[id] = (merged.items[id] ?? 0) + n;
-        merged.dust += guest.dust;
-        // A guest game's skins come along; its gems only if it has more, so a guest's welcome gems aren't counted twice.
-        merged.skins = [...new Set([...merged.skins, ...guest.skins])];
-        merged.pets = [...new Set([...merged.pets, ...guest.pets])];
-        merged.met = [...new Set([...merged.met, ...guest.met])];
-        for (const [id, n] of Object.entries(guest.critters)) merged.critters[id] = (merged.critters[id] ?? 0) + n;
-        for (const [id, n] of Object.entries(guest.fish)) merged.fish[id] = (merged.fish[id] ?? 0) + n;
-        for (const [cls, n] of Object.entries(guest.rift)) merged.rift[cls] = Math.max(n, merged.rift[cls] ?? 0);
-        for (const [course, ms] of Object.entries(guest.glide)) merged.glide[course] = Math.min(ms, merged.glide[course] ?? Infinity);
-        for (const [set, n] of Object.entries(guest.mats)) merged.mats[set] = (merged.mats[set] ?? 0) + n;
-        merged.gems = Math.max(merged.gems, guest.gems);
-        for (const [id, n] of Object.entries(guest.candy)) merged.candy[id] = (merged.candy[id] ?? 0) + n;
-        // The starter pouch is given once, so it isn't added twice.
-        for (const [k, n] of Object.entries(guest.pantry)) merged.pantry[k] = k === 'starter' ? 1 : (merged.pantry[k] ?? 0) + n;
-        if (!merged.farm && guest.farm) {
-          merged.farm = guest.farm;
-          merged.farmT = guest.farmT;
-        }
-        if (!merged.lunch) merged.lunch = guest.lunch;
-        if (guest.daily > merged.daily) merged.daily = guest.daily;
-        for (const [id, picks] of Object.entries(guest.upgrades)) if (picks.length > (merged.upgrades[id]?.length ?? 0)) merged.upgrades[id] = picks;
-        guest.equipped.forEach((id, i) => {
-          if (id && !merged.equipped[i]) merged.equipped[i] = id;
-        });
-        writeLocal('guest', null);
-      }
-      this.data = clean(merged);
-      this.status = 'idle';
-      this.giveGrants();
-      this.changed();
-    } catch {
-      if (key === this.key) this.status = 'error';
-      this.emit();
-    }
-  }
-
-  private switchTo(key: string): void {
-    if (key === this.key) return;
-    this.flush();
-    const guest = this.key === 'guest' ? this.data : null;
-    this.key = key;
-    this.data = readLocal(key) ?? empty(key === 'guest' ? welcomeGems() : 0);
-    if (key === 'guest') {
-      this.status = 'idle';
-      this.emit();
-      return;
-    }
-    // Logging in from a guest game brings its pickups along.
-    void this.pull(guest && (Object.keys(guest.items).length || guest.dust || guest.skins.length || guest.pets.length || Object.keys(guest.critters).length || Object.keys(guest.fish).length || Object.keys(guest.mats).length || Object.keys(guest.candy).length || Object.keys(guest.pantry).length) ? guest : undefined);
   }
 }
 

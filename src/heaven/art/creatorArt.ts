@@ -405,6 +405,7 @@ const ICONS: Record<string, string[]> = {
   right: ['W...', 'WW..', 'WWW.', 'WWWW', 'WWW.', 'WW..', 'W...'],
   keep: ['..W..', '..W..', 'WWWWW', '.WWW.', '..W..', 'W...W', 'WWWWW'],
   star: ['..Y..', '.YGY.', 'YGGGY', '.YGY.', '..Y..'],
+  cloud: ['...WWW...', '..WWWWWW.', '.WWWWWWWW', 'WWWWWWWWW', 'LLLLLLLLL'],
 };
 
 const ICON_CELL = 14;
