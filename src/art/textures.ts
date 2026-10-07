@@ -112,6 +112,7 @@ import { BREATH_SHARD, breathShard, buildWyrmSheet } from './wyrm';
 import { DEEP_H, DEEP_W } from '../world/deepLayout';
 import { FLOAT_ROCK_H, FLOAT_ROCK_W, HOLE_SIZE, METEOR_H, METEOR_W, OBELISK_H, OBELISK_W, PLATFORM_H, PLATFORM_W, RAY_H as COSMIC_RAY_H, RAY_W as COSMIC_RAY_W, cosmicRay, floatingRock, lightPool, meteor, obelisk, platformArt, shockRing, singularity, spaceCanvas, streak } from './cosmos';
 import { COSMOS_H, COSMOS_W } from '../world/cosmosLayout';
+import { starwatchTextures } from '../heaven/starwatch/art';
 import { COLUMN_H, COLUMN_W, ISLAND_H, ISLAND_W, ISLETS, column, fallStrip, foam, islandArt, islet, skyCanvas, wisp } from './island';
 import { ISLE_H, ISLE_W } from '../world/islandLayout';
 import { DRAFT_FRAMES, DRAFT_H, DRAFT_W, RING, RING_FRAMES, SEA_TILE, archArt, deckPuff, draftFrame, isletArt, ringFrame, seaTile, streak as windStreak } from './glide';
@@ -1454,7 +1455,7 @@ function* frostTextures(scene: Phaser.Scene): Generator<void, void, void> {
 }
 
 /** The painted arenas' texture sets, each built by one job (see arenaLoader.ts). */
-export type ArenaJob = 'cosmos' | 'island' | 'rift' | 'spirit' | 'temple' | 'deep' | 'glide' | 'forest' | 'frost' | 'worldmap';
+export type ArenaJob = 'cosmos' | 'island' | 'rift' | 'spirit' | 'temple' | 'deep' | 'glide' | 'forest' | 'frost' | 'worldmap' | 'starwatch';
 
 /**
  * Each set's steps, which yield between pieces, and the texture it makes
@@ -1472,6 +1473,7 @@ export const ARENA_JOBS: Record<ArenaJob, { done: string; steps: (scene: Phaser.
   frost: { done: 'fz_done', steps: frostTextures },
   // Not an arena, but built the same way: the arena select's map of the realm.
   worldmap: { done: 'wm_bits', steps: worldMapTextures },
+  starwatch: { done: 'sw_streak', steps: starwatchTextures },
 };
 
 /**

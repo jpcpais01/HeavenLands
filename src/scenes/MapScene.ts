@@ -50,6 +50,8 @@ const EDGE = 10;
 const BUILD_MS = 3;
 const TILE_MS = 2.5;
 const TILE_MS_OPEN = 10;
+/** How often (ms) the open map is drawn again while tiles are still coming in. */
+const REDRAW_MS = 120;
 /** Most monsters marked at once. */
 const MAX_MOBS = 80;
 /** How near (device px) a tap must land to a campfire or shrine to pick it. */
@@ -230,7 +232,8 @@ export class MapScene extends Phaser.Scene {
     this.zone = this.add.zone(0, 0, 1, 1).setOrigin(0).setInteractive({ useHandCursor: true });
     this.zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, () => (cozy.on ? this.openBig() : this.fold(!this.folded)));
 
-    if (forest) {
+    // Heaven Lands opens the big map from the minimap itself, the same in every place: no scroll button beside it.
+    if (forest && !cozy.on) {
       const g = this.add.graphics().setDepth(1);
       const zone = this.add.zone(0, 0, 1, 1).setOrigin(0).setInteractive({ useHandCursor: true });
       const mb: NonNullable<MapScene['mapButton']> = (this.mapButton = { g, zone, r: new Phaser.Geom.Rectangle(), pressed: false });
@@ -270,6 +273,7 @@ export class MapScene extends Phaser.Scene {
       this.scale.off(Phaser.Scale.Events.RESIZE, this.layout, this);
       if (this.big) this.closeBig();
       if (this.trekMap) trek.save();
+      this.trekMap?.destroy();
       this.trekMap = null;
       this.landMap = null;
       this.job = null;
@@ -317,7 +321,7 @@ export class MapScene extends Phaser.Scene {
     this.tex = this.textures.createCanvas(`minimap_${Date.now()}`, n, n);
     this.img.setTexture(this.tex!.key).setPosition(this.rect.x, this.rect.y).setScale(p);
     if (this.frameTex) this.textures.remove(this.frameTex);
-    const ring = ringFrame(n, !!this.trekMap);
+    const ring = ringFrame(n, !!this.trekMap && !cozy.on);
     this.frameTex = this.textures.addCanvas(`minimapring_${Date.now()}`, canvasOf(ring.px, ring.w, ring.w));
     this.frame.setTexture(this.frameTex!.key).setPosition(this.rect.x - RING_M * p, this.rect.y - RING_M * p).setScale(p);
     this.drawn = '';
@@ -739,6 +743,7 @@ function drawLand(ctx: CanvasRenderingContext2D, lm: CozyMap, x0: number, y0: nu
 
 /** Draw the Everwood's map from map pixel (x0, y0), w x h, onto `ctx`. */
 function drawTrek(ctx: CanvasRenderingContext2D, tm: TrekMap, x0: number, y0: number, w: number, h: number): void {
+  tm.begin(x0, y0, w, h);
   for (let cy = Math.floor(y0 / TREK_T); cy <= Math.floor((y0 + h - 1) / TREK_T); cy++) {
     for (let cx = Math.floor(x0 / TREK_T); cx <= Math.floor((x0 + w - 1) / TREK_T); cx++) {
       const t = tm.tile(cx, cy);
@@ -872,6 +877,9 @@ class BigMap {
   private vw = 0;
   private vh = 0;
   private drawn = '';
+  /** Where the sheet was last drawn, and when. */
+  private drawnAt = '';
+  private drawnT = 0;
   private pins: { icon: string; x: number; y: number; fire?: Fire }[] = [];
   private pinsKey = '';
   private picked: Fire | null = null;
@@ -1101,8 +1109,16 @@ class BigMap {
     const tm = this.tm;
     const view = this.view;
     this.keepInside();
-    const key = `${this.x0},${this.y0},${tm ? tm.version : view?.version()},${this.built?.version},${this.bz}`;
-    if (key !== this.drawn && this.tex && !tm && view) {
+    const at = `${this.x0},${this.y0},${this.bz}`;
+    const key = `${at},${tm ? tm.version : view?.version()},${this.built?.version}`;
+    // While tiles stream in, the sheet is drawn again a few times a second, not every frame; moving it is drawn at once.
+    const now = performance.now();
+    const due = at !== this.drawnAt || now - this.drawnT > REDRAW_MS;
+    if (key !== this.drawn && due) {
+      this.drawnAt = at;
+      this.drawnT = now;
+    }
+    if (key !== this.drawn && due && this.tex && !tm && view) {
       this.drawn = key;
       const ctx = this.tex.context;
       ctx.imageSmoothingEnabled = false;
@@ -1110,7 +1126,7 @@ class BigMap {
       ctx.fillRect(0, 0, this.vw, this.vh);
       view.draw(ctx, this.x0, this.y0, this.vw, this.vh);
       this.tex.refresh();
-    } else if (key !== this.drawn && this.tex && tm) {
+    } else if (key !== this.drawn && due && this.tex && tm) {
       this.drawn = key;
       const ctx = this.tex.context;
       ctx.imageSmoothingEnabled = false;
