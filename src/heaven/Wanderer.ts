@@ -153,6 +153,7 @@ export class Wanderer implements Hero {
       this.emotes++;
       this.emoteTag = `${e}:${this.emotes}`;
       emoteHud.playing = e;
+      this.world.petReact(e);
     }
     if (e === 'wave' || e === 'cheer') this.float(e === 'wave' ? 'star' : 'spark', 1);
   }

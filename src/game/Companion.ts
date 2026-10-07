@@ -9,6 +9,7 @@ import { Arc } from './Scientist';
 import { strikeGround } from './ultimate/ink';
 import { FrostNova, ICE, MEND, MendBloom, STORM, TalonRake, TentacleLash, WARD, WardBubble } from './petPowers';
 import type { WorldScene } from '../scenes/WorldScene';
+import { cozy } from './cozy';
 
 // The companion in the world: it trots, hops or flutters after the hero,
 // keeping to one side a little behind, turning to face where it goes. It
@@ -78,6 +79,9 @@ const INK_DROPS = [0xf0e0ff, 0xb890e0, 0x7a4ab0, 0x4a2a7a];
 /** The mimic coughs up a gem of its own this often when gems are picked up. */
 const HOARD_CHANCE = 0.25;
 const COINS = [0xffffff, 0xfff6c0, 0xffd060, 0xd89a28];
+/** Heaven Lands: dancing alongside the wanderer, it hops this often, for this long after the dance starts. */
+const DANCE_HOP = 520;
+const DANCE_FOR = 4200;
 
 /** How long each timed power waits after it is used. */
 const EVERY: Record<Exclude<PetPower, 'ward' | 'hoard'>, number> = { chill: CHILL_EVERY, zap: ZAP_EVERY, mend: MEND_EVERY, dive: DIVE_EVERY, lash: LASH_EVERY };
@@ -130,6 +134,9 @@ export class Companion {
   private low = 1;
   private bubble: WardBubble | null = null;
   private gone = false;
+  /** Heaven Lands: time left hopping along to the wanderer's dance, and to its next hop. */
+  private dance = 0;
+  private danceHop = 0;
 
   constructor(
     private world: WorldScene,
@@ -209,8 +216,18 @@ export class Companion {
     this.leap = Math.max(0, this.leap - dt / 500);
     this.recoil = Math.max(0, this.recoil - dt / 200);
 
-    if (this.def.fights && !heroDown) this.fight(dt, heroX, heroY);
-    if (!heroDown) this.usePower(dt, heroX, heroY);
+    if (this.dance > 0) {
+      this.dance -= dt;
+      this.danceHop -= dt;
+      if (this.danceHop <= 0) {
+        this.danceHop = DANCE_HOP;
+        this.leap = 0.55;
+        this.facing = -this.facing;
+      }
+    }
+    // Heaven Lands has nothing to fight and nobody to mend: its powers sleep.
+    if (this.def.fights && !heroDown && !cozy.on) this.fight(dt, heroX, heroY);
+    if (!heroDown && !cozy.on) this.usePower(dt, heroX, heroY);
     this.updateShards(dt);
     this.sync(daylight, d);
   }
@@ -262,6 +279,30 @@ export class Companion {
         this.world.dropGems(1, mx, this.y - 6);
         sound.spit(this.world.pan(this.x));
       });
+    }
+  }
+
+  /**
+   * Heaven Lands: its wanderer made an emote, and it joins in. A cheer or a
+   * wave and it leaps; a heart and little hearts rise from it too; a dance
+   * and it hops along, turning this way and that; a hug, hearts and a leap.
+   */
+  react(emote: string): void {
+    if (this.gone) return;
+    const x = snap(this.x);
+    const y = snap(this.y);
+    if (emote === 'dance') {
+      this.dance = DANCE_FOR;
+      this.danceHop = 200;
+      return;
+    }
+    this.leap = emote === 'wave' || emote === 'bow' ? 0.5 : 1;
+    if (emote === 'cheer' || emote === 'clap') this.world.debris([0xffffff, this.def.tint, 0xffe27a], x, y - 10, 8, this.y + 10, 'spores');
+    if ((emote === 'heart' || emote === 'hug') && this.world.textures.exists('hl_emote')) {
+      for (let i = 0; i < 2; i++) {
+        const img = this.world.add.image(x + Phaser.Math.Between(-5, 5), y - 18, 'hl_emote', 'heart').setDepth(this.y + 40).setAlpha(0).setScale(0.75);
+        this.world.tweens.add({ targets: img, y: img.y - 12, alpha: { from: 1, to: 0 }, delay: 250 + i * 220, duration: 1000, ease: 'Sine.easeOut', onComplete: () => img.destroy() });
+      }
     }
   }
 
