@@ -12,6 +12,9 @@ import { ensureWanderer, W_ORIGIN } from '../art/sheet';
 import { CLOUD_KINDS, ISLE_H, ISLE_STAND, ISLE_W, cloudSeaTexture, cloudTextures, glowTexture, isleTexture, skyTexture, sunTexture } from '../art/titleArt';
 import { titleLogo } from '../art/heavenTitle';
 import { HEAVEN_BUTTON, HEAVEN_BUTTON_SOFT } from '../ui/style';
+import { PET_H, PET_OX, PET_OY, PET_W } from '../../art/pets';
+import { COMPANIONS, companion, litPets } from '../companions';
+import { CompanionPicker } from '../ui/companionPicker';
 
 /** Clouds drifting across the sky, and their speeds (art px a second). */
 const CLOUDS = 7;
@@ -23,6 +26,9 @@ const BOB_PX = 2;
 const EMOTE_EVERY: [number, number] = [5000, 11000];
 const BUTTON_W = 92;
 const BUTTON_H = 20;
+/** Where the companion sits on the isle, from the wanderer's feet; flyers hover this much higher. */
+const PET_AT = { x: 19, y: 1 };
+const PET_HOVER = 10;
 
 interface Cloud {
   img: Phaser.GameObjects.Image;
@@ -49,6 +55,8 @@ export class TitleScene extends Phaser.Scene {
   private isleY = 0;
   private nextEmote = 0;
   private busy = false;
+  private pet!: Phaser.GameObjects.Sprite;
+  private picker: CompanionPicker | null = null;
 
   constructor() {
     super('home');
@@ -80,6 +88,8 @@ export class TitleScene extends Phaser.Scene {
     this.hero = this.add.sprite(0, 0, this.heroKey, 'idle_down_0').setOrigin(W_ORIGIN.x, W_ORIGIN.y).setDepth(-4);
     this.hero.play(`${this.heroKey}_idle_down`);
     this.hero.on(Phaser.Animations.Events.ANIMATION_COMPLETE, () => this.hero.play(`${this.heroKey}_idle_down`));
+    this.pet = this.add.sprite(0, 0, litPets(this), '__BASE').setOrigin(PET_OX / PET_W, PET_OY / PET_H).setDepth(-4);
+    this.showPet();
     this.nameText = pixelText(this, 0, 0, profile.name, 0x5a3a52).setOrigin(0.5, 0).setDepth(-3);
     this.logo = this.add.image(0, 0, titleLogo(this)).setOrigin(0.5, 0).setDepth(5);
     this.nextEmote = this.time.now + 2500;
@@ -92,13 +102,18 @@ export class TitleScene extends Phaser.Scene {
       new PixelButton(this, 'Go home', BUTTON_W, BUTTON_H, HEAVEN_BUTTON, 'hl_btn_home', go(() => this.leave(() => travel(this, 'home')))),
       new PixelButton(this, 'Explore', BUTTON_W, BUTTON_H, HEAVEN_BUTTON_SOFT, 'hl_btn_soft', go(() => this.leave(() => this.scene.start('atlas'), true))),
       new PixelButton(this, 'Wardrobe', BUTTON_W, BUTTON_H, HEAVEN_BUTTON_SOFT, 'hl_btn_soft', go(() => this.leave(() => this.scene.start('creator', {}), true))),
+      new PixelButton(this, 'Companion', BUTTON_W, BUTTON_H, HEAVEN_BUTTON_SOFT, 'hl_btn_soft', go(() => this.openPicker())),
       new PixelButton(this, 'Join a friend', BUTTON_W, BUTTON_H, HEAVEN_BUTTON_SOFT, 'hl_btn_soft', go(() => this.openTogether())),
     ];
     this.buttons.forEach((b) => b.setDepth(6));
 
     this.layout();
     this.scale.on(Phaser.Scale.Events.RESIZE, this.layout, this);
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scale.off(Phaser.Scale.Events.RESIZE, this.layout, this));
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.scale.off(Phaser.Scale.Events.RESIZE, this.layout, this);
+      this.picker?.destroy();
+      this.picker = null;
+    });
     const kb = this.input.keyboard;
     kb?.on('keydown-ENTER', go(() => this.leave(() => travel(this, 'home'))));
     kb?.on('keydown-M', go(() => this.leave(() => this.scene.start('atlas'), true)));
@@ -111,6 +126,30 @@ export class TitleScene extends Phaser.Scene {
     if (!fade) return fn();
     this.cameras.main.fadeOut(260, 12, 14, 26);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, fn);
+  }
+
+  /** The companion on the isle: the chosen one, or nobody. */
+  private showPet(): void {
+    const def = COMPANIONS.find((p) => p.id === companion.id);
+    this.pet.setVisible(!!def);
+    if (def) this.pet.play(`hlpet_${def.id}`);
+  }
+
+  private openPicker(): void {
+    this.busy = true;
+    this.picker = new CompanionPicker(
+      this,
+      () => {
+        this.showPet();
+        // The wanderer is glad of the company.
+        if (companion.id) this.hero.play(`${this.heroKey}_heart_down`);
+      },
+      () => {
+        this.picker = null;
+        this.busy = false;
+      },
+    );
+    this.picker.layout(this.vw, this.vh);
   }
 
   private openTogether(): void {
@@ -142,19 +181,25 @@ export class TitleScene extends Phaser.Scene {
     this.logo.setPosition(Math.round(wide ? vw * 0.4 : vw / 2), Math.max(6, Math.round(vh * 0.05)));
     const isleTop = this.logo.y + logoH + Math.round(vh * 0.04);
     this.isleX = Math.round(wide ? vw * 0.4 : vw / 2);
-    this.isleY = Math.min(isleTop, vh - ISLE_H - (wide ? 4 : BUTTON_H * 2 + 26));
+    this.isleY = Math.min(isleTop, vh - ISLE_H - (wide ? 4 : BUTTON_H * 3 + 32));
     if (wide) {
       const bx = Math.round(Math.min(vw - BUTTON_W - 14, vw * 0.4 + ISLE_W / 2 + 26));
       const total = this.buttons.length * (BUTTON_H + 6) - 6;
       const by = Math.round(Math.max(this.logo.y + logoH + 4, (vh - total) / 2 + 10));
       this.buttons.forEach((b, i) => b.place(bx, by + i * (BUTTON_H + 6)));
     } else {
+      // Two a row, the main one alone across the top.
       const total = 2 * BUTTON_W + 6;
       const bx = Math.round((vw - total) / 2);
-      const by = vh - (BUTTON_H * 2 + 6) - 10;
-      this.buttons.forEach((b, i) => b.place(bx + (i % 2) * (BUTTON_W + 6), by + Math.floor(i / 2) * (BUTTON_H + 6)));
+      const rows = Math.ceil((this.buttons.length + 1) / 2);
+      const by = vh - (BUTTON_H * rows + 6 * (rows - 1)) - 10;
+      this.buttons.forEach((b, i) => {
+        if (i === 0) return b.place(bx + (BUTTON_W + 6) / 2, by);
+        b.place(bx + ((i - 1) % 2) * (BUTTON_W + 6), by + Math.ceil(i / 2) * (BUTTON_H + 6));
+      });
     }
     this.place(0);
+    this.picker?.layout(vw, vh);
   }
 
   /** The isle, the wanderer on it and the glow behind, at the bob's height. */
@@ -166,6 +211,9 @@ export class TitleScene extends Phaser.Scene {
     const hy = y + ISLE_STAND.y;
     this.hero.setPosition(hx, hy);
     this.nameText.setPosition(hx, hy + 4);
+    const def = COMPANIONS.find((p) => p.id === companion.id);
+    const hover = def?.gait === 'fly' ? PET_HOVER + Math.round(Math.sin(this.time.now / 600)) : 0;
+    this.pet.setPosition(hx + PET_AT.x, hy + PET_AT.y - hover);
   }
 
   update(time: number, delta: number): void {

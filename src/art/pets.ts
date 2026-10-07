@@ -5,6 +5,7 @@
 
 import { FLAT, PixelCanvas, cyl, hex, sphere, type Material, type RGB } from './pixel';
 import { HALLOWS_PET_ART } from './hallowsPets';
+import { HEAVEN_PET_ART } from './heavenPets';
 
 const ramp = (...c: string[]): RGB[] => c.map(hex);
 
@@ -1161,6 +1162,7 @@ export const PET_ART: Record<string, (f: number) => PixelCanvas> = {
   kraken,
   mimic,
   ...HALLOWS_PET_ART,
+  ...HEAVEN_PET_ART,
 };
 
 /** Every frame of every companion, for the sheet. */

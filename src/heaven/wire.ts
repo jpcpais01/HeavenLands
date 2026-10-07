@@ -15,6 +15,7 @@ import { PLACES } from './places';
 import { buildLand, landArena } from './lands';
 import { landMap } from './lands/landMap';
 import { heavenLight } from './glow';
+import { ownCompanions } from './companions';
 
 /** Seed packets in a chest: how many, and the odds a packet is a magic seed rather than a wild one. */
 const CHEST_SEEDS: [number, number] = [2, 3];
@@ -35,6 +36,7 @@ export function wireCozy(): void {
     };
   };
   cozy.on = true;
+  ownCompanions();
   cozy.character = def;
   cozy.spawn = (world, x, y) => new Wanderer(world, x, y, profile.look, true);
   cozy.me = () => ({ name: profile.name, ...lookFields(profile.look) });

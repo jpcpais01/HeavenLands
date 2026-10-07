@@ -1,4 +1,4 @@
-import { Mixer, panner, pick } from './mixer';
+import { Mixer, gain, panner, pick } from './mixer';
 import { Sfx } from './sfx';
 
 /**
@@ -28,6 +28,8 @@ const OfflineCtx: Offline | undefined =
 const SFX_WINDOW = 8;
 /** Takes of each sound, so repeats don't sound identical (the synth is random). */
 const VARIANTS = 3;
+/** Sounds heard over and over (a footstep every third of a second) get more takes, so no two in a row match. */
+const MORE_TAKES: Record<string, number> = { step: 8 };
 /** Sample frames kept across every clip (~24 MB); the least recently heard go first. */
 const BUDGET = 6_000_000;
 /** Quieter than this counts as silence when trimming a clip's tail. */
@@ -43,6 +45,13 @@ interface Clip {
   pending: boolean;
   failed: boolean;
   used: number;
+  last?: AudioBuffer;
+}
+
+/** A take played a touch differently each time: its speed (and so its pitch) and its level. */
+export interface Vary {
+  rate: number;
+  level: number;
 }
 
 /** Numbers rounded so a clip serves every call that sounds the same. */
@@ -71,14 +80,17 @@ export class SfxBaker {
    * Play the sound from a clip, at `t` and on side `pan`. False means it isn't
    * baked yet (it is now queued): the caller synthesizes it live this once.
    */
-  play(method: string, args: unknown[], panAt: number, t: number, pan: number): boolean {
+  play(method: string, args: unknown[], panAt: number, t: number, pan: number, vary?: Vary): boolean {
     if (!OfflineCtx) return false;
     const clip = this.clip(method, args.map((a, i) => (i === panAt ? 0 : settle(a))));
     clip.used = ++this.clock;
     // A sound never baked jumps the queue; extra takes wait their turn.
-    if (clip.takes.length < VARIANTS && !clip.pending && !clip.failed) this.enqueue(clip, !clip.takes.length);
+    if (clip.takes.length < (MORE_TAKES[method] ?? VARIANTS) && !clip.pending && !clip.failed) this.enqueue(clip, !clip.takes.length);
     if (!clip.takes.length) return false;
-    this.start(pick(clip.takes), t, pan);
+    // Never the same take twice running, when there's a choice.
+    const take = clip.takes.length > 1 ? pick(clip.takes.filter((b) => b !== clip.last)) : clip.takes[0];
+    clip.last = take;
+    this.start(take, t, pan, vary);
     return true;
   }
 
@@ -190,15 +202,20 @@ export class SfxBaker {
   }
 
   /** A clip playing: one buffer source, its side, and its send into the shared reverb. */
-  private start(take: AudioBuffer, t: number, pan: number): void {
+  private start(take: AudioBuffer, t: number, pan: number, vary?: Vary): void {
     const ctx = this.live.ctx;
     const src = ctx.createBufferSource();
     src.buffer = take;
+    let head: AudioNode = src;
+    if (vary) {
+      src.playbackRate.value = vary.rate;
+      if (vary.level !== 1) src.connect((head = gain(ctx, vary.level)));
+    }
     const side = panner(ctx, pan * 0.7, this.live.sfx);
-    if (take.numberOfChannels === 1) src.connect(side);
+    if (take.numberOfChannels === 1) head.connect(side);
     else {
       const split = ctx.createChannelSplitter(2);
-      src.connect(split);
+      head.connect(split);
       split.connect(side, 0);
       split.connect(this.live.reverb, 1);
     }
