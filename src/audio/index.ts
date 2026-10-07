@@ -1,9 +1,9 @@
 import { Ambience, type Wild } from './ambience';
-import { SfxBaker, Stream } from './bake';
-import { Mixer, gain } from './mixer';
+import { SfxBaker, Stream, type Vary } from './bake';
+import { Mixer, gain, rand } from './mixer';
 import { CHORD_SECONDS, Music } from './music';
 import { SHOP_CHORD_SECONDS, ShopMusic, type ShopMood } from './shopMusic';
-import { LUTE_NOTES, Sfx, type BeamHum, type FrostSound, type WindBed } from './sfx';
+import { LUTE_NOTES, Sfx, type BeamHum, type Footing, type FrostSound, type WindBed } from './sfx';
 import { note } from '../diagnostics';
 
 const MUTE_KEY = 'pixel-game:muted';
@@ -46,6 +46,7 @@ const CROWD_FREE = 4;
 type Listener = () => void;
 /** The music playing: the game's own, or the shop's. */
 export type Track = 'main' | 'shop';
+export type { Footing } from './sfx';
 
 /**
  * The game's whole soundscape, generated live with Web Audio. Browsers only
@@ -71,6 +72,8 @@ class GameSound {
   private streams: { main: Stream; shop: Stream; calls: Stream } | null = null;
   /** The lute's place in the minstrel's tune. */
   private lute = 0;
+  /** Which foot lands next. */
+  private foot = 0;
   private listeners = new Set<Listener>();
   private lastPlayed = new Map<string, number>();
   private recent: number[] = [];
@@ -469,6 +472,22 @@ class GameSound {
 
   critterRelease(pan = 0): void {
     this.fx('critterRelease', 'critterRelease', [pan], 0);
+  }
+
+  clap(pan = 0): void {
+    this.fx('clap', 'clap', [pan], 0);
+  }
+
+  hug(pan = 0): void {
+    this.fx('hug', 'hug', [pan], 0);
+  }
+
+  shutter(): void {
+    this.fx('shutter', 'shutter', [0], 0);
+  }
+
+  lanternRise(pan = 0): void {
+    this.fx('lanternRise', 'lanternRise', [pan], 0);
   }
 
   stag(kind: 'appear' | 'reveal' | 'flee', pan = 0): void {
@@ -1034,8 +1053,15 @@ class GameSound {
     if (t !== null) this.sfx!.ringSaber(t, pan);
   }
 
-  step(): void {
-    this.fx('step', 'step', []);
+  /**
+   * A footfall on `ground`. Feet take turns (a shade to each side), and each
+   * step lands a few ms early or late, a little faster or slower and louder or
+   * softer: a walk, not a metronome. `level` softens a slow walk or a last step.
+   */
+  step(ground: Footing = 'grass', level = 1): void {
+    this.foot ^= 1;
+    const pan = this.foot ? -0.1 : 0.1;
+    this.fx('step', 'step', [pan, ground, this.foot], 0, { rate: rand(0.94, 1.06), level: level * rand(0.8, 1.05), delay: rand(0, 0.018) });
   }
 
   /**
@@ -1043,13 +1069,14 @@ class GameSound {
    * first time it's heard on this device) synthesized live while it bakes.
    * `panAt` is which of `args` is the side, so one clip serves every side.
    */
-  private fx<K extends OneShot>(slot: string, method: K, args: ShotArgs<K>, panAt = -1): void {
-    const t = this.slot(slot);
-    if (t === null) return;
+  private fx<K extends OneShot>(slot: string, method: K, args: ShotArgs<K>, panAt = -1, vary?: Vary & { delay: number }): void {
+    const now = this.slot(slot);
+    if (now === null) return;
+    const t = now + (vary?.delay ?? 0);
     const list = args as unknown[];
     const pan = panAt >= 0 ? Number(list[panAt]) || 0 : 0;
     let baked = false;
-    safely(`clip ${method}`, () => (baked = this.baker!.play(method, list, panAt, t, pan)));
+    safely(`clip ${method}`, () => (baked = this.baker!.play(method, list, panAt, t, pan, vary)));
     if (!baked) (this.sfx![method] as (t: number, ...a: unknown[]) => void)(t, ...list);
   }
 

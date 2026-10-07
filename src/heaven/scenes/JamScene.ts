@@ -129,7 +129,7 @@ export class JamScene extends Phaser.Scene {
     const kb = this.input.keyboard!;
     const onKey = (ev: KeyboardEvent) => {
       if (this.scene.isPaused('world')) return;
-      if (ev.key === 'Escape' || ev.key === '9') {
+      if (ev.key === 'Escape' || ev.key.toLowerCase() === 'l') {
         jamHud.stop = true;
         return;
       }

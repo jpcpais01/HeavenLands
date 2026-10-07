@@ -21,7 +21,7 @@ const MAX_JARS = 3;
 const FLOWER_CELLS = 4;
 const FLOWER_EACH = 0.15;
 const FLOWER_MAX = 1;
-const FLOWERS = new Set(['roses', 'tulips', 'lavender', 'sunflowers', 'planter', 'arbor', 'blossom', 'bush', 'cacti']);
+const FLOWERS = new Set(['roses', 'tulips', 'lavender', 'sunflowers', 'planter', 'arbor', 'blossom', 'bush', 'cacti', 'hydrangea', 'foxgloves', 'daisies', 'poppies', 'lotus', 'trellis', 'urn', 'herbbed', 'flowercart', 'windowbox', 'lemontree']);
 /** Bees round each hive, and how far they roam from it, px. */
 const BEES = 3;
 const ROAM = 22;

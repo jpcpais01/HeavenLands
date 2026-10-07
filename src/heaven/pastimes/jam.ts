@@ -1,4 +1,4 @@
-// Jamming: the lute, played anywhere from the lute button (or key 9), and the
+// Jamming: the lute, played anywhere from the lute button (or L), and the
 // Home's piano and harp, sat at with E. Its overlay (JamScene) is a row of
 // eight bell pads, keys 1 to 8, all on one pentatonic scale (audio/sfx.ts
 // JAM_SCALE) so anything played sounds sweet, and anything played together

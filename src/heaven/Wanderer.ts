@@ -1,7 +1,9 @@
 // The wanderer: Heaven Lands' one character, dressed however the player
 // likes. It walks, stands, and makes little emotes (a wave, a cheer, a dance,
-// sitting down, a heart) that friends in the same room see too. No fighting:
-// the world never hands it an attack.
+// sitting down, a heart, a hug, a bow, a clap, a sky lantern let go) that
+// friends in the same room see too. A hug turns to the nearest friend close
+// by and wraps its arms round them. No fighting: the world never hands it an
+// attack.
 
 import Phaser from 'phaser';
 import { snap } from '../game/display';
@@ -15,14 +17,19 @@ import { ensureWanderer, W_ORIGIN, type Dir } from './art/sheet';
 
 export type { Dir } from './art/sheet';
 import type { Appearance } from './look';
+import { SkyLantern } from './skyLantern';
 
 /** Walking pace, px a second. */
 const SPEED = 66;
 /** Walk frames where a foot lands. */
 const FOOTFALLS = new Set([1, 4]);
+/** A stop this long (ms) after the last footfall brings the other foot down too. */
+const SETTLE_AFTER = 140;
 
-export type Emote = 'wave' | 'cheer' | 'dance' | 'sit' | 'heart';
-export const EMOTES: Emote[] = ['wave', 'cheer', 'dance', 'sit', 'heart'];
+export type Emote = 'wave' | 'cheer' | 'dance' | 'sit' | 'heart' | 'hug' | 'bow' | 'clap' | 'lantern';
+export const EMOTES: Emote[] = ['wave', 'cheer', 'dance', 'sit', 'heart', 'hug', 'bow', 'clap', 'lantern'];
+/** A friend this near (px) is hugged: the wanderer turns to face them. */
+const HUG_REACH = 30;
 /** The poses a pastime holds the wanderer in (see pastimes/): sat on a seat, strumming the lute, at an instrument, at a telescope. */
 export type Pose = 'sit' | 'strum' | 'play' | 'gaze';
 const POSES = new Set<string>(['sit', 'strum', 'play', 'gaze']);
@@ -70,12 +77,19 @@ export class Wanderer implements Hero {
   private shadow: Phaser.GameObjects.Image;
   private castShadow: Phaser.GameObjects.Sprite;
   private emote: string | null = null;
+  /** The emote's animation playing (a hug can face left or right). */
+  private emoteAnim = '';
   /** Sat on a seat: drawn this much higher than the feet, and this far in front of them (behind, below 0). */
   private lift = 0;
   private depthOff = 0;
   private emotes = 0;
   /** This one is played by this device (the HUD's emotes reach it). */
   private mine: boolean;
+  /** How hard the stick is pushed (0..1): a slow walk treads softer. */
+  private pace = 0;
+  private moving = false;
+  /** ms since a foot last landed. */
+  private sinceStep = 0;
 
   get sprite(): Phaser.GameObjects.Sprite {
     return this.body;
@@ -95,13 +109,22 @@ export class Wanderer implements Hero {
     this.glowLayer = world.add.sprite(x, y, `${k}_e`, 'idle_down_0').setOrigin(ox, oy).setBlendMode(Phaser.BlendModes.ADD);
     this.body.play(`${k}_idle_down`);
     this.body.on(Phaser.Animations.Events.ANIMATION_UPDATE, (anim: Phaser.Animations.Animation, frame: Phaser.Animations.AnimationFrame) => {
-      if (anim.key.startsWith(`${k}_walk`) && FOOTFALLS.has(frame.index - 1) && this.mine) sound.step();
+      if (anim.key.startsWith(`${k}_walk`) && FOOTFALLS.has(frame.index - 1) && this.mine) this.footfall(0.6 + 0.4 * this.pace);
       if (anim.key === `${k}_heart_down` && frame.index === 3) this.float('heart', 3);
       if (anim.key === `${k}_dance_down` && frame.index % 4 === 1) this.float('note', 1);
       if (anim.key === `${k}_cheer_down` && frame.index === 3) this.float('spark', 4);
+      if (anim.key.startsWith(`${k}_hug_`) && frame.index === 4) {
+        this.float('heart', 2);
+        sound.hug(this.world.pan(this.x));
+      }
+      if (anim.key === `${k}_clap_down` && frame.index % 2 === 0) {
+        this.float('spark', 1);
+        sound.clap(this.world.pan(this.x));
+      }
+      if (anim.key === `${k}_lantern_down` && frame.index === 5) sound.lanternRise(this.world.pan(this.x));
     });
     this.body.on(Phaser.Animations.Events.ANIMATION_COMPLETE, (anim: Phaser.Animations.Animation) => {
-      if (this.emote && anim.key === `${k}_${this.emote}_down` && !LASTING.has(this.emote)) this.endEmote();
+      if (this.emote && anim.key === this.emoteAnim && !LASTING.has(this.emote)) this.endEmote();
     });
     if (mine) world.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       emoteHud.want = null;
@@ -118,6 +141,11 @@ export class Wanderer implements Hero {
       if (!moving) this.startEmote(e);
     }
     if (moving && this.emote) this.endEmote();
+    this.sinceStep += dt;
+    if (moving) this.pace = Math.min(1, len);
+    // Coming to a stop, the trailing foot comes down beside the other: a last, softer step.
+    else if (this.moving && this.mine && this.sinceStep > SETTLE_AFTER) this.footfall(0.45);
+    this.moving = moving;
     if (!this.emote) {
       const speed = SPEED * Math.min(1, len);
       if (moving) {
@@ -129,6 +157,11 @@ export class Wanderer implements Hero {
       if (this.body.anims.currentAnim?.key !== key) this.body.play(key, true);
     }
     this.sync();
+  }
+
+  private footfall(level: number): void {
+    this.sinceStep = 0;
+    sound.step(this.world.footing(this.x, this.y), level);
   }
 
   /** What the wanderer is doing now (an emote or a pastime's pose), or null. */
@@ -162,18 +195,38 @@ export class Wanderer implements Hero {
     this.startEmote(what, dir, Number(l) || 0, Number(dp) || 0);
   }
 
-  private startEmote(e: string, dir: Dir = 'down', lift = 0, depth = 0): void {
+  /** The friend nearest this wanderer within a hug's reach, if any: which side they stand. */
+  private hugSide(): 'left' | 'right' | 'down' {
+    let best = HUG_REACH;
+    let side: 'left' | 'right' | 'down' = 'down';
+    for (const m of this.world.mates) {
+      const d = Math.hypot(m.x - this.x, (m.y - this.y) * 1.5);
+      if (d < best) {
+        best = d;
+        side = m.x < this.x ? 'left' : 'right';
+      }
+    }
+    return side;
+  }
+
+  /** Start an emote (facing the viewer, or a hug facing whoever is hugged) or a pastime's pose facing `facing`. */
+  private startEmote(e: string, facing?: Dir, lift = 0, depth = 0): void {
     this.emote = e;
+    const emote = EMOTES.includes(e as Emote);
+    const dir: Dir = e === 'hug' ? (facing ?? (this.mine ? this.hugSide() : 'down')) : emote && e !== 'sit' ? 'down' : (facing ?? 'down');
     this.dir = dir;
     this.lift = lift;
     this.depthOff = depth;
-    this.body.play(`${this.key}_${e}_${dir}`);
+    this.emoteAnim = `${this.key}_${e}_${dir}`;
+    this.body.play(this.emoteAnim);
     if (this.mine) {
       this.emotes++;
       this.emoteTag = `${e}.${dir}.${Math.round(lift)}.${Math.round(depth)}:${this.emotes}`;
-      emoteHud.playing = EMOTES.includes(e as Emote) ? (e as Emote) : null;
+      emoteHud.playing = emote ? (e as Emote) : null;
+      if (emote) this.world.petReact(e as Emote);
     }
     if (e === 'wave' || e === 'cheer') this.float(e === 'wave' ? 'star' : 'spark', 1);
+    if (e === 'lantern') this.world.addEffect(new SkyLantern(this.world, this.x, this.y, () => ({ x: this.x, y: this.y })));
   }
 
   private endEmote(): void {

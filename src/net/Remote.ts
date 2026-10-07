@@ -181,7 +181,10 @@ export class RemotePlayer implements Hurtbox {
     this.state = s;
     this.dress.set = s.ds && s.ds in GEAR_SETS ? s.ds : null;
     if (s.pt !== this.pet?.def.id) this.wearPet(s.pt, s.x, s.y);
-    if (s.em && s.em !== was?.em) this.hero.netEmote?.(s.em);
+    if (s.em && s.em !== was?.em) {
+      this.hero.netEmote?.(s.em);
+      this.pet?.react(s.em.split(':')[0]);
+    }
     this.at = now;
     if (!was) {
       // First word from them: stand where they are.

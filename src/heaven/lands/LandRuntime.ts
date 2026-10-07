@@ -8,7 +8,7 @@
 // A land's own living parts come from its `extra`.
 
 import Phaser from 'phaser';
-import { sound } from '../../audio';
+import { sound, type Footing } from '../../audio';
 import { packAtlas, registerAtlas } from '../../art/atlas';
 import { pixelCanvas } from '../../art/canvas';
 import type { CozyLand } from '../../game/cozy';
@@ -17,7 +17,7 @@ import type { WorldScene } from '../../scenes/WorldScene';
 import { LandWorld } from './landWorld';
 import { paintSteps } from './paint';
 import type { TileAsk, TileDone } from './landWorker';
-import { CHUNK, TILE_H, TILE_W, type FlyerDef, type LandDef, type LandExtra, type LandLight, type LandTile, type SheetDef, type WalkerDef } from './types';
+import { CHUNK, TILE_H, TILE_W, type FlyerDef, type GroundCell, type LandDef, type LandExtra, type LandLight, type LandTile, type SheetDef, type WalkerDef } from './types';
 
 type Img = Phaser.GameObjects.Image;
 type Sprite = Phaser.GameObjects.Sprite;
@@ -115,6 +115,9 @@ export function warmSheets(scene: Phaser.Scene, sheets: SheetDef[], budget: numb
   return true;
 }
 
+/** Scratch for asking the ground what's underfoot. */
+const FOOT_CELL: GroundCell = { kind: 0, height: 0, tone: 0, glow: 0 };
+
 export class LandRuntime implements CozyLand {
   private readonly sheets: Map<string, SheetDef>;
   private tiles = new Map<number, Tile>();
@@ -148,6 +151,12 @@ export class LandRuntime implements CozyLand {
     this.startPool();
     for (const f of def.flyers ?? []) for (let k = 0; k < f.count; k++) this.flyers.push(this.makeFlyer(f, k));
     this.extra = def.extra?.(world, land.gen, adopt) ?? null;
+  }
+
+  footing(x: number, y: number): Footing {
+    const g = this.land.gen.ground;
+    g.cell(x, y, FOOT_CELL);
+    return g.feet?.[FOOT_CELL.kind] ?? 'grass';
   }
 
   update(time: number, dt: number, daylight: number, hero: { x: number; y: number }, view: Phaser.Geom.Rectangle): void {

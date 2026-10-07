@@ -119,6 +119,8 @@ export class HushGen implements LandGen {
     const self = this;
     this.ground = {
       kinds: HUSH_KINDS,
+      // Underfoot, by kind: powder squeaks, the trodden ways crunch, the springs slosh.
+      feet: ['snow', 'crust', 'ice', 'wade', 'stone', 'earth', 'grass', 'grass', 'leaves'],
       cell: (x, y, c) => self.cell(x, y, c),
       decorate: (f) => self.decorate(f),
     };

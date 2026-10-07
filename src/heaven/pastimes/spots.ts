@@ -49,6 +49,7 @@ const SEATS: Record<string, { z: number; dy?: number; apart?: number }> = {
   swing: { z: 11, dy: 2, apart: 8 },
   haybale: { z: 10 },
   stump: { z: 6 },
+  hammock: { z: 9, dy: 1, apart: 10 },
 };
 
 /** Every spot among `land`'s things. */
@@ -89,7 +90,7 @@ export function findSpots(land: BuildLand): Spot[] {
       continue;
     }
     const at = (kind: SpotKind, x: number, y: number, dir: Dir) => out.push({ ...base, kind, key: `${t.x},${t.y}`, x, y, dir, lift: 0, depth: 0 });
-    if (t.id === 'bed' || t.id === 'bigbed') at('bed', cx, y1 + 4, 'down');
+    if (t.id === 'bed' || t.id === 'bigbed' || t.id === 'bunkbed') at('bed', cx, y1 + 4, 'down');
     // At the piano's keys on its bench, from behind; beside the harp, facing its strings; at the telescope's eyepiece.
     else if (t.id === 'piano') at('piano', cx, y1 + 4, 'up');
     else if (t.id === 'harp') at('harp', t.flip ? x0 - 3 : x1 + 3, y1 - 3, t.flip ? 'right' : 'left');
