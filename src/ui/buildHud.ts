@@ -16,7 +16,7 @@
 //
 // Drawn in device pixels like the other touch controls. Keys: B builds,
 // R turns the picked part to face the next way (or mirrors it), X picks the
-// eraser, [ and ] step through the shelves, Ctrl+Z undoes, Esc leaves
+// eraser, < and > (the comma and full stop) step through the shelves, Ctrl+Z undoes, Esc leaves
 // building (see PauseScene); a right click erases.
 
 import Phaser from 'phaser';
@@ -396,8 +396,8 @@ export class BuildHud {
     kb?.on('keydown-B', () => this.toggle());
     kb?.on('keydown-R', () => build.on && this.twist());
     kb?.on('keydown-X', () => build.on && this.pick(0));
-    kb?.on('keydown-OPEN_BRACKET', () => build.on && this.stepShelf(-1));
-    kb?.on('keydown-CLOSED_BRACKET', () => build.on && this.stepShelf(1));
+    kb?.on('keydown-COMMA', () => build.on && this.stepShelf(-1));
+    kb?.on('keydown-PERIOD', () => build.on && this.stepShelf(1));
     kb?.on('keydown-Z', (e: KeyboardEvent) => build.on && (e.ctrlKey || e.metaKey) && (build.undo = true));
     scene.input.on(Phaser.Input.Events.POINTER_WHEEL, (p: Phaser.Input.Pointer, _o: unknown, dx: number, dy: number) => {
       if (build.on && this.panel.contains(p.x, p.y)) this.scrollBy(dy || dx);
@@ -639,7 +639,7 @@ export class BuildHud {
               ? 'Pull up a crop'
               : 'Eraser';
     const mouse = !this.scene.input.activePointer.wasTouch;
-    const keys = [this.twistable() ? (this.turnable() ? 'R TURN' : 'R FLIP') : '', 'X ERASER', '[ ] SHELVES', 'RIGHT CLICK ERASES'].filter(Boolean).join('  ');
+    const keys = [this.twistable() ? (this.turnable() ? 'R TURN' : 'R FLIP') : '', 'X ERASER', '< > SHELVES', 'RIGHT CLICK ERASES'].filter(Boolean).join('  ');
     const tb = this.twistBtn;
     tb.icon!.setTexture(this.turnable() ? 'build_turn' : 'build_flip');
     tb.text!.setText(this.turnable() ? 'TURN' : 'FLIP').setScale(ts);
