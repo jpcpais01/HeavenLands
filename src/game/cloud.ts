@@ -4,12 +4,18 @@
 // Firebase Auth wants an email, so each name maps to a hidden address on a
 // made-up domain, which also keeps names unique. Each player's save is one
 // Firestore document, `players/{uid}`, that only they can read or write.
+//
+// Heaven Lands shares the Firebase project with Myths and Legends (and so its
+// security rules) but has accounts of its own: its names live on their own
+// domain, so a Heaven account is never a Myths one and their saves, each a
+// whole document, can't overwrite each other. What goes in the save is
+// src/heaven/sync.ts's business: here it is one packed string and its time.
 
 import { FIREBASE_CONFIG } from '../firebaseConfig';
 import type { StatKey } from './gear';
 
 const SESSION_KEY = 'pixel-battle.account';
-const EMAIL_DOMAIN = 'players.myths-and-legends.game';
+const EMAIL_DOMAIN = 'players.heaven-lands.game';
 
 export const USERNAME_RULE = /^[a-zA-Z0-9_]{3,16}$/;
 export const MIN_PASSWORD = 6;
@@ -19,7 +25,7 @@ export interface Account {
   username: string;
 }
 
-/** What a player keeps between visits. */
+/** The engine's collection as it keeps it on the device (see collection.ts); Heaven Lands' cloud save carries it inside its snapshot. */
 export interface SaveData {
   /** How many of each item they've picked up, by item id. */
   items: Record<string, number>;
@@ -153,8 +159,8 @@ async function post(url: string, body: object): Promise<Record<string, string>> 
 
 const emailFor = (username: string) => `${username.toLowerCase()}@${EMAIL_DOMAIN}`;
 
-/** Create an account (`create`) or log into one. Resolves with the player's save, if they have one. */
-export async function logIn(username: string, password: string, create: boolean): Promise<LoadedSave | null> {
+/** Create an account (`create`) or log into one. */
+export async function logIn(username: string, password: string, create: boolean): Promise<void> {
   if (!cloudReady()) throw new CloudError('Accounts are not set up yet.');
   if (!USERNAME_RULE.test(username)) throw new CloudError('Names are 3 to 16 letters, numbers or _.');
   if (password.length < MIN_PASSWORD) throw new CloudError(`Password needs at least ${MIN_PASSWORD} characters.`);
@@ -164,19 +170,18 @@ export async function logIn(username: string, password: string, create: boolean)
     password,
     returnSecureToken: true,
   });
-  const s: Session = {
+  setSession({
     uid: data.localId,
     username,
     idToken: data.idToken,
     refreshToken: data.refreshToken,
     expires: Date.now() + Number(data.expiresIn) * 1000,
-  };
-  session = s;
-  const save = create ? null : await loadSave().catch(() => null);
-  // The name as they typed it at sign-up is the one kept in their save.
-  if (save?.username) s.username = save.username;
-  setSession(s);
-  return save;
+  });
+}
+
+/** Keep the name as the account spells it (from its save), whatever case it was typed in at login. */
+export function spellName(username: string): void {
+  if (session && username && username.toLowerCase() === session.username.toLowerCase() && username !== session.username) setSession({ ...session, username });
 }
 
 export function logOut(): void {
@@ -214,168 +219,75 @@ async function token(): Promise<string> {
 const docUrl = (uid: string) =>
   `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/players/${uid}`;
 
-// Firestore's REST API wraps every value in its type.
-type FsValue =
-  | { stringValue: string }
-  | { integerValue: string }
-  | { nullValue: null }
-  | { timestampValue: string }
-  | { mapValue: { fields?: Record<string, FsValue> } }
-  | { arrayValue: { values?: FsValue[] } };
+/** The save as the cloud holds it. */
+export interface CloudSave {
+  /** The packed snapshot ('' in a document without one). */
+  data: string;
+  /** When it was taken (ms, on the device that took it). */
+  t: number;
+  /** The account's name as it was spelt at sign-up. */
+  username: string;
+  /** Firestore's own stamp of the document's last write, for writing only over what was read. */
+  updateTime: string;
+}
 
-/** Load the logged-in player's save; null if they haven't got one yet. */
-/** A save as stored: one from before gems existed has none. */
-export type LoadedSave = Omit<SaveData, 'gems'> & { gems?: number; username?: string };
+/** A write refused because the save changed in the cloud since it was last read (another device saved). */
+export class SaveConflict extends CloudError {}
 
-export async function loadSave(): Promise<LoadedSave | null> {
+const str = (v: unknown): string => (v && typeof v === 'object' && 'stringValue' in v ? String((v as { stringValue: string }).stringValue) : '');
+const int = (v: unknown): number => (v && typeof v === 'object' && 'integerValue' in v ? Number((v as { integerValue: string }).integerValue) || 0 : 0);
+
+/** Load the logged-in player's save; null if there's no document yet. */
+export async function loadCloud(): Promise<CloudSave | null> {
   const s = session;
   if (!s) return null;
   let res: Response;
   try {
-    res = await fetch(docUrl(s.uid), { headers: { Authorization: `Bearer ${await token()}` } });
+    res = await fetch(docUrl(s.uid), { headers: { Authorization: `Bearer ${await token()}` }, cache: 'no-store' });
   } catch (e) {
     throw e instanceof CloudError ? e : new CloudError('No connection.');
   }
   if (res.status === 404) return null;
   if (!res.ok) throw new CloudError('Could not load your save.');
-  const doc = (await res.json()) as { fields?: Record<string, FsValue> };
+  const doc = (await res.json()) as { fields?: Record<string, unknown>; updateTime?: string };
   const f = doc.fields ?? {};
-  const items: Record<string, number> = {};
-  const map = f.items && 'mapValue' in f.items ? (f.items.mapValue.fields ?? {}) : {};
-  for (const [id, v] of Object.entries(map)) if ('integerValue' in v) items[id] = Number(v.integerValue);
-  const list = f.equipped && 'arrayValue' in f.equipped ? (f.equipped.arrayValue.values ?? []) : [];
-  const equipped = list.map((v) => ('stringValue' in v ? v.stringValue : null));
-  const username = f.username && 'stringValue' in f.username ? f.username.stringValue : undefined;
-  const dust = f.dust && 'integerValue' in f.dust ? Number(f.dust.integerValue) : 0;
-  const upgrades: Record<string, StatKey[]> = {};
-  const ups = f.upgrades && 'mapValue' in f.upgrades ? (f.upgrades.mapValue.fields ?? {}) : {};
-  for (const [id, v] of Object.entries(ups)) if ('stringValue' in v && v.stringValue) upgrades[id] = v.stringValue.split(',') as StatKey[];
-  // A save from before gems existed has none: the player is given the welcome gems.
-  const gems = f.gems && 'integerValue' in f.gems ? Number(f.gems.integerValue) : undefined;
-  const skins = f.skins && 'stringValue' in f.skins && f.skins.stringValue ? f.skins.stringValue.split(',') : [];
-  const daily = f.daily && 'stringValue' in f.daily ? f.daily.stringValue : '';
-  const pity = f.pity && 'integerValue' in f.pity ? Number(f.pity.integerValue) : 0;
-  const grants = f.grants && 'stringValue' in f.grants && f.grants.stringValue ? f.grants.stringValue.split(',') : [];
-  // The Rift's best waves as "wizard:12,valkyrie:7".
-  const rift: Record<string, number> = {};
-  if (f.rift && 'stringValue' in f.rift && f.rift.stringValue) {
-    for (const pair of f.rift.stringValue.split(',')) {
-      // The key may carry its own colons (a difficulty: "wizard:hard"), so the wave is after the last.
-      const at = pair.lastIndexOf(':');
-      const cls = pair.slice(0, at);
-      const n = pair.slice(at + 1);
-      if (at > 0 && Number(n) > 0) rift[cls] = Number(n);
-    }
-  }
-  // Sky Glide's best times as "skyfall:52340".
-  const glide: Record<string, number> = {};
-  if (f.glide && 'stringValue' in f.glide && f.glide.stringValue) {
-    for (const pair of f.glide.stringValue.split(',')) {
-      const [course, ms] = pair.split(':');
-      if (course && Number(ms) > 0) glide[course] = Number(ms);
-    }
-  }
-  const pets = f.pets && 'stringValue' in f.pets && f.pets.stringValue ? f.pets.stringValue.split(',') : [];
-  const pet = f.pet && 'stringValue' in f.pet ? f.pet.stringValue : '';
-  const petPity = f.petPity && 'integerValue' in f.petPity ? Number(f.petPity.integerValue) : 0;
-  // Seasonal currencies as "hallows:120".
-  const candy: Record<string, number> = {};
-  if (f.candy && 'stringValue' in f.candy && f.candy.stringValue) {
-    for (const pair of f.candy.stringValue.split(',')) {
-      const [id, n] = pair.split(':');
-      if (id && Number(n) > 0) candy[id] = Number(n);
-    }
-  }
-  // Boss materials as "wraith:4,ember:9".
-  const mats: Record<string, number> = {};
-  if (f.mats && 'stringValue' in f.mats && f.mats.stringValue) {
-    for (const pair of f.mats.stringValue.split(',')) {
-      const [set, n] = pair.split(':');
-      if (set && Number(n) > 0) mats[set] = Number(n);
-    }
-  }
-  // Critters caught as "firefly:3,glowfrog:1".
-  const critters: Record<string, number> = {};
-  if (f.critters && 'stringValue' in f.critters && f.critters.stringValue) {
-    for (const pair of f.critters.stringValue.split(',')) {
-      const [id, n] = pair.split(':');
-      if (id && Number(n) > 0) critters[id] = Number(n);
-    }
-  }
-  // Fish landed, the same way: "minnow:4,koi:1".
-  const fish: Record<string, number> = {};
-  if (f.fish && 'stringValue' in f.fish && f.fish.stringValue) {
-    for (const pair of f.fish.stringValue.split(',')) {
-      const [id, n] = pair.split(':');
-      if (id && Number(n) > 0) fish[id] = Number(n);
-    }
-  }
-  const home = f.home && 'stringValue' in f.home ? f.home.stringValue : '';
-  const homeT = f.homeT && 'integerValue' in f.homeT ? Number(f.homeT.integerValue) : 0;
-  const wood = f.wood && 'stringValue' in f.wood ? f.wood.stringValue : '';
-  const woodT = f.woodT && 'integerValue' in f.woodT ? Number(f.woodT.integerValue) : 0;
-  const trek = f.trek && 'stringValue' in f.trek ? f.trek.stringValue : '';
-  const trekT = f.trekT && 'integerValue' in f.trekT ? Number(f.trekT.integerValue) : 0;
-  const met = f.met && 'stringValue' in f.met && f.met.stringValue ? f.met.stringValue.split(',') : [];
-  // The pantry as "seed.carrot:4,crop.carrot:7,dish.soup:2" (the counts are after the last colon).
-  const pantry: Record<string, number> = {};
-  if (f.pantry && 'stringValue' in f.pantry && f.pantry.stringValue) {
-    for (const pair of f.pantry.stringValue.split(',')) {
-      const at = pair.lastIndexOf(':');
-      const n = Number(pair.slice(at + 1));
-      if (at > 0 && n > 0) pantry[pair.slice(0, at)] = n;
-    }
-  }
-  const farm = f.farm && 'stringValue' in f.farm ? f.farm.stringValue : '';
-  const farmT = f.farmT && 'integerValue' in f.farmT ? Number(f.farmT.integerValue) : 0;
-  const lunch = f.lunch && 'stringValue' in f.lunch ? f.lunch.stringValue : '';
-  return { items, equipped, dust, upgrades, gems, skins, daily, pity, grants, rift, glide, pets, pet, petPity, critters, fish, mats, candy, home, homeT, wood, woodT, trek, trekT, met, pantry, farm, farmT, lunch, username };
+  return { data: str(f.heaven), t: int(f.heavenT), username: str(f.username), updateTime: doc.updateTime ?? '' };
 }
 
-/** Overwrite the logged-in player's save. */
-export async function writeSave(data: SaveData): Promise<void> {
+/**
+ * Write the logged-in player's save, only over the document as last read:
+ * `after` is its updateTime, or null when there was none. Resolves with the
+ * new updateTime; a SaveConflict when the cloud has moved on since.
+ */
+export async function writeCloud(data: string, t: number, after: string | null, keepalive = false): Promise<string> {
   const s = session;
-  if (!s) return;
-  const items: Record<string, FsValue> = {};
-  for (const [id, n] of Object.entries(data.items)) items[id] = { integerValue: String(Math.floor(n)) };
-  const fields: Record<string, FsValue> = {
+  if (!s) throw new CloudError('Not logged in.');
+  const fields = {
     username: { stringValue: s.username },
-    items: { mapValue: { fields: items } },
-    equipped: { arrayValue: { values: data.equipped.map((id) => (id ? { stringValue: id } : { nullValue: null })) } },
-    dust: { integerValue: String(Math.floor(data.dust)) },
-    // Each item's levels as its chosen stats in order, "power,hp,hp".
-    upgrades: { mapValue: { fields: Object.fromEntries(Object.entries(data.upgrades).map(([id, picks]) => [id, { stringValue: picks.join(',') }])) } },
-    gems: { integerValue: String(Math.floor(data.gems)) },
-    skins: { stringValue: data.skins.join(',') },
-    daily: { stringValue: data.daily },
-    pity: { integerValue: String(Math.floor(data.pity)) },
-    grants: { stringValue: data.grants.join(',') },
-    rift: { stringValue: Object.entries(data.rift).map(([cls, n]) => `${cls}:${Math.floor(n)}`).join(',') },
-    glide: { stringValue: Object.entries(data.glide).map(([course, ms]) => `${course}:${Math.floor(ms)}`).join(',') },
-    pets: { stringValue: data.pets.join(',') },
-    pet: { stringValue: data.pet },
-    petPity: { integerValue: String(Math.floor(data.petPity)) },
-    candy: { stringValue: Object.entries(data.candy).map(([id, n]) => `${id}:${Math.floor(n)}`).join(',') },
-    critters: { stringValue: Object.entries(data.critters).map(([id, n]) => `${id}:${Math.floor(n)}`).join(',') },
-    fish: { stringValue: Object.entries(data.fish).map(([id, n]) => `${id}:${Math.floor(n)}`).join(',') },
-    mats: { stringValue: Object.entries(data.mats).map(([set, n]) => `${set}:${Math.floor(n)}`).join(',') },
-    home: { stringValue: data.home },
-    homeT: { integerValue: String(Math.floor(data.homeT)) },
-    wood: { stringValue: data.wood },
-    woodT: { integerValue: String(Math.floor(data.woodT)) },
-    trek: { stringValue: data.trek },
-    trekT: { integerValue: String(Math.floor(data.trekT)) },
-    met: { stringValue: data.met.join(',') },
-    pantry: { stringValue: Object.entries(data.pantry).map(([k, n]) => `${k}:${Math.floor(n)}`).join(',') },
-    farm: { stringValue: data.farm },
-    farmT: { integerValue: String(Math.floor(data.farmT)) },
-    lunch: { stringValue: data.lunch },
+    heaven: { stringValue: data },
+    heavenT: { integerValue: String(Math.floor(t)) },
     updated: { timestampValue: new Date().toISOString() },
   };
-  const res = await fetch(docUrl(s.uid), {
-    method: 'PATCH',
-    headers: { Authorization: `Bearer ${await token()}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fields }),
-  });
-  if (!res.ok) throw new CloudError('Could not save.');
+  const when = after ? `currentDocument.updateTime=${encodeURIComponent(after)}` : 'currentDocument.exists=false';
+  const body = JSON.stringify({ fields });
+  let res: Response;
+  try {
+    // keepalive lets a write started as the page is hidden finish, but only for small bodies.
+    res = await fetch(`${docUrl(s.uid)}?${when}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${await token()}`, 'Content-Type': 'application/json' },
+      body,
+      keepalive: keepalive && body.length < 60_000,
+    });
+  } catch (e) {
+    throw e instanceof CloudError ? e : new CloudError('No connection.');
+  }
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { error?: { status?: string } };
+    const why = err.error?.status ?? '';
+    if (why === 'FAILED_PRECONDITION' || why === 'ALREADY_EXISTS' || why === 'NOT_FOUND') throw new SaveConflict('Saved elsewhere since.');
+    throw new CloudError('Could not save.');
+  }
+  const doc = (await res.json().catch(() => ({}))) as { updateTime?: string };
+  return doc.updateTime ?? '';
 }

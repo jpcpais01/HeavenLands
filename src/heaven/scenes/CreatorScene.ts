@@ -78,6 +78,8 @@ import {
 import { Preview, type PreviewEmote } from '../ui/creatorPreview';
 import { THUMB, Thumbs, type ThumbKind } from '../ui/creatorThumbs';
 import { NameField } from '../ui/nameField';
+import { openAccountPanel } from '../ui/accountPanel';
+import { account } from '../../game/cloud';
 
 // ---------------------------------------------------------------- Tuning
 
@@ -583,13 +585,28 @@ export class CreatorScene extends Phaser.Scene {
 
     // The title over the sky, and the welcome the first time.
     const lines = this.first ? ['Welcome, wanderer', 'Who will you be?'] : ['Dressing room'];
-    lines.forEach((t, i) => {
-      const txt = softText(this, 0, P.titleY + i * 11, t);
+    const titles = lines.map((t, i) => softText(this, 0, P.titleY + i * 11, t));
+    // The first time, a way to a wanderer already kept in an account (on a new phone, say): worded where the title leaves room, a cloud alone where it doesn't.
+    let signIn: Rect | null = null;
+    if (this.first && !account()) {
+      const left = Math.min(...titles.map((t) => Math.round(cx - t.width / 2)));
+      const worded = 16 + inkWidth('Sign in') + 5;
+      signIn = { x: P.stage.x, y: P.stage.y, w: P.stage.x + worded + 4 <= left ? worded : 17, h: 16 };
+    }
+    const corner = P.back ?? signIn;
+    titles.forEach((txt) => {
       let x = Math.round(cx - txt.width / 2);
-      if (P.back && x < P.back.x + P.back.w + 4) x = P.back.x + P.back.w + 4;
+      if (corner && x < corner.x + corner.w + 4) x = corner.x + corner.w + 4;
       txt.setX(x);
       this.stageUi.add(txt);
     });
+    if (signIn) {
+      const b = signIn;
+      drawCard(g, b.x, b.y, b.w, b.h, CLOUD_CARD);
+      this.icon(this.stageUi, 'cloud', b.x + 3, b.y + 4);
+      if (b.w > 17) this.stageUi.add(inkText(this, b.x + 16, b.y + 5, 'Sign in', C.plum));
+      this.fixed.push({ ...b, tap: () => this.openAccount() });
+    }
 
     if (P.back) {
       const b = P.back;
@@ -927,6 +944,14 @@ export class CreatorScene extends Phaser.Scene {
   }
 
   /** An icon from the sheet, by its top-left corner or (centred) by its middle, added to a container. */
+  /** The account card; signing in to a kept wanderer brings them home (the page starts afresh on them), otherwise the stage loses its Sign in. */
+  private openAccount(): void {
+    this.nameField.blur();
+    openAccountPanel(() => {
+      if (this.scene.isActive()) this.drawStage();
+    });
+  }
+
   private icon(parent: Phaser.GameObjects.Container, name: IconName, x: number, y: number, centred = false): Phaser.GameObjects.Image {
     const img = this.add.image(x, y, 'hl_cr_icons', name).setOrigin(0);
     if (centred) img.setPosition(Math.round(x - img.width / 2), Math.round(y - img.height / 2));

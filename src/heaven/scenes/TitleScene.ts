@@ -1,7 +1,8 @@
 // Heaven Lands' title screen (scene key 'home', so the pause menu's Home
 // button and the world's way out land here): a dawn sky, clouds drifting,
 // and the player's own wanderer on a little floating isle, now and then
-// waving. From here: home, the Atlas, the wardrobe, or a friend's room.
+// waving. From here: home, the Atlas, the wardrobe, or a friend's room; and,
+// in the top corner, the account (sign in, and the cloud save's state).
 
 import Phaser from 'phaser';
 import { menuZoom } from '../../game/display';
@@ -15,6 +16,12 @@ import { HEAVEN_BUTTON, HEAVEN_BUTTON_SOFT } from '../ui/style';
 import { PET_H, PET_OX, PET_OY, PET_W } from '../../art/pets';
 import { COMPANIONS, companion, litPets } from '../companions';
 import { CompanionPicker } from '../ui/companionPicker';
+import { CLOUD_CARD, C, drawCard, iconTexture, inkText, inkWidth } from '../art/creatorArt';
+import { buildCreatorFonts } from '../art/creatorFont';
+import { account } from '../../game/cloud';
+import { sync, type SyncStatus } from '../sync';
+import { openAccountPanel } from '../ui/accountPanel';
+import { soundCorner } from '../../scenes/SoundScene';
 
 /** Clouds drifting across the sky, and their speeds (art px a second). */
 const CLOUDS = 7;
@@ -29,6 +36,11 @@ const BUTTON_H = 20;
 /** Where the companion sits on the isle, from the wanderer's feet; flyers hover this much higher. */
 const PET_AT = { x: 19, y: 1 };
 const PET_HOVER = 10;
+/** The account chip in the top right corner: its height and margin (art px). */
+const CHIP_H = 15;
+const CHIP_PAD = 6;
+/** The chip's little light by the cloud save's state. */
+const SYNC_LIGHT: Record<SyncStatus, number> = { off: 0, loading: 0xf4c55a, saving: 0xf4c55a, saved: 0x8fd0a0, error: 0xef8fa8, newer: 0xef8fa8, choose: 0xf4c55a };
 
 interface Cloud {
   img: Phaser.GameObjects.Image;
@@ -57,6 +69,10 @@ export class TitleScene extends Phaser.Scene {
   private busy = false;
   private pet!: Phaser.GameObjects.Sprite;
   private picker: CompanionPicker | null = null;
+  private chip!: Phaser.GameObjects.Graphics;
+  private chipIcon!: Phaser.GameObjects.Image;
+  private chipText: Phaser.GameObjects.BitmapText | null = null;
+  private chipZone!: Phaser.GameObjects.Zone;
 
   constructor() {
     super('home');
@@ -107,17 +123,61 @@ export class TitleScene extends Phaser.Scene {
     ];
     this.buttons.forEach((b) => b.setDepth(6));
 
+    buildCreatorFonts(this);
+    this.chip = this.add.graphics().setDepth(6);
+    this.chipIcon = this.add.image(0, 0, iconTexture(this), 'cloud').setOrigin(0, 0.5).setDepth(7);
+    this.chipText = null;
+    this.chipZone = this.add.zone(0, 0, 8, 8).setOrigin(0).setDepth(7).setInteractive({ useHandCursor: true });
+    this.chipZone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, go(() => this.openAccount()));
+    const unwatch = sync.watch(() => this.drawChip());
+
     this.layout();
     this.scale.on(Phaser.Scale.Events.RESIZE, this.layout, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.scale.off(Phaser.Scale.Events.RESIZE, this.layout, this);
       this.picker?.destroy();
       this.picker = null;
+      unwatch();
     });
     const kb = this.input.keyboard;
     kb?.on('keydown-ENTER', go(() => this.leave(() => travel(this, 'home'))));
     kb?.on('keydown-M', go(() => this.leave(() => this.scene.start('atlas'), true)));
     this.time.delayedCall(80, () => window.bootLoader?.done());
+    // Signed in on a device whose own wanderer differs from the account's: which to keep is asked first.
+    if (sync.status === 'choose') this.time.delayedCall(450, () => this.openAccount());
+  }
+
+  private openAccount(): void {
+    if (this.busy) return;
+    this.busy = true;
+    openAccountPanel(() => {
+      this.busy = false;
+      this.drawChip();
+    });
+  }
+
+  /** The account chip: a cloud, the account's name (or Sign in) and a light for the save. */
+  private drawChip(): void {
+    if (!this.chip?.active) return;
+    const a = account();
+    const label = a ? a.username : 'Sign in';
+    const light = SYNC_LIGHT[sync.status];
+    const w = 4 + 11 + 3 + inkWidth(label) + (light ? 7 : 0) + 5;
+    // Beside the mute button, which keeps the corner itself.
+    const x = this.vw - Math.ceil(soundCorner(this.scale.width, this.scale.height) / this.z) - w - 2;
+    const y = CHIP_PAD;
+    const g = this.chip.clear();
+    drawCard(g, x, y, w, CHIP_H, CLOUD_CARD, 0.94);
+    this.chipIcon.setPosition(x + 4, y + Math.floor(CHIP_H / 2));
+    this.chipText?.destroy();
+    this.chipText = inkText(this, x + 18, y + 4, label, a ? C.plum : C.lilacDeep).setDepth(7);
+    if (light) {
+      const lx = x + w - 9;
+      const ly = y + 6;
+      g.fillStyle(0xffffff, 0.6).fillRect(lx - 1, ly - 1, 5, 5);
+      g.fillStyle(light, 1).fillRect(lx, ly, 3, 3);
+    }
+    this.chipZone.setPosition(x, y).setSize(w, CHIP_H);
   }
 
   private leave(fn: () => void, fade = false): void {
@@ -199,6 +259,7 @@ export class TitleScene extends Phaser.Scene {
       });
     }
     this.place(0);
+    this.drawChip();
     this.picker?.layout(vw, vh);
   }
 
