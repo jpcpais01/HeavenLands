@@ -970,6 +970,16 @@ function potIcon(): PixelCanvas {
 
 // ---------------------------------------------------------------- Textures
 
+/**
+ * Icons drawn elsewhere, made and registered with the farm's (Heaven Lands'
+ * finds, honey and the dishes cooked from them: heaven/pastimes/art.ts).
+ * A dish here is drawn by its own painter rather than dishIcon.
+ */
+export const moreIcons: { name: string; draw: () => PixelCanvas }[] = [];
+
+/** The farm's drawing helpers and materials, for icons drawn the same way elsewhere. */
+export const farmKit = { ICON, n3, FACE, TOP, UP, mat, shiny, glowing, leaf, stem, bowl, plate, steam, CERAMIC, CERAMIC_BLUE, WOODBOWL, IRON, GOLD, CREAM, BUTTER, CRUST, LOAF_CUT, PARSLEY, RICE, WICKER, KRAFT, PAPER, FROND, BERRY_LEAF, STEAM };
+
 /** The crops' sheet and every farm and kitchen icon. Cheap, and made once: the drops and the hotbar need them everywhere. */
 export function warmFarm(scene: Phaser.Scene): void {
   if (scene.textures.exists('crops')) return;
@@ -991,9 +1001,11 @@ export function warmFarm(scene: Phaser.Scene): void {
     icon(`crop_${d.id}`, produceIcon(d.id));
   }
   for (const f of FISH) icon(`fishi_${f.id}`, fishIcon(f));
-  for (const r of RECIPES) icon(`dish_${r.id}`, dishIcon(r.id));
+  const drawn = new Set(moreIcons.map((m) => m.name));
+  for (const r of RECIPES) if (!drawn.has(`dish_${r.id}`)) icon(`dish_${r.id}`, dishIcon(r.id));
   icon('icon_harvest', basketIcon());
   icon('icon_cook', potIcon());
+  for (const m of moreIcons) icon(m.name, m.draw());
 }
 
 /** For the art script: every icon by name. */
@@ -1002,8 +1014,9 @@ export function farmIcons(): { name: string; c: PixelCanvas }[] {
     ...CROPS.map((d) => ({ name: `seed_${d.id}`, c: seedIcon(d.id) })),
     ...CROPS.map((d) => ({ name: `crop_${d.id}`, c: produceIcon(d.id) })),
     ...FISH.map((f) => ({ name: `fishi_${f.id}`, c: fishIcon(f) })),
-    ...RECIPES.map((r) => ({ name: `dish_${r.id}`, c: dishIcon(r.id) })),
+    ...RECIPES.filter((r) => !moreIcons.some((m) => m.name === `dish_${r.id}`)).map((r) => ({ name: `dish_${r.id}`, c: dishIcon(r.id) })),
     { name: 'icon_harvest', c: basketIcon() },
     { name: 'icon_cook', c: potIcon() },
+    ...moreIcons.map((m) => ({ name: m.name, c: m.draw() })),
   ];
 }

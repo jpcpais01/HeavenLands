@@ -14,7 +14,7 @@ import { StatsHud } from '../ui/statsHud';
 import type { MapScene } from './MapScene';
 import type { WorldScene } from './WorldScene';
 import { build } from '../game/build';
-import { cozy, type CozyHud } from '../game/cozy';
+import { cozy, pastimeHud, type CozyHud } from '../game/cozy';
 import { energy } from '../game/energy';
 import { ensureUltIcons, ultFor } from '../game/ultimate';
 import type { Pal } from '../game/ultimate/ink';
@@ -363,7 +363,7 @@ export class UIScene extends Phaser.Scene {
       } else if (p.wasTouch && this.attackPad.pointer === null && Phaser.Math.Distance.Between(p.x, p.y, bp.x, bp.y) < this.R * 1.1) {
         this.attackPad = UIScene.pad(p.id, this.time.now);
         controls.attackAim = null;
-      } else if (this.slotAt(p.x, p.y) >= 0) {
+      } else if (!pastimeHud.busy && this.slotAt(p.x, p.y) >= 0) {
         controls.items.push(this.slotAt(p.x, p.y));
       } else if (!p.wasTouch) {
         // Clicks on the pause and sound buttons never get here: their scenes sit on top and take them.
@@ -607,7 +607,7 @@ export class UIScene extends Phaser.Scene {
     if (cozy.on) {
       // No fighting: the emote buttons stand where the ability buttons were.
       for (const o of [this.button, this.icon, this.beamButton, this.beamIcon, this.ultButton, this.ultIcon, this.ultKey]) o.setVisible(false);
-      this.cozyHud?.update(delta, build.on || fishHud.active || this.covered);
+      this.cozyHud?.update(delta, build.on || fishHud.active || pastimeHud.busy || this.covered);
     } else {
       this.drawBeamButton(R * k, u);
       this.drawUltButton(R * k, u);
@@ -642,7 +642,8 @@ export class UIScene extends Phaser.Scene {
 
   /** While building, the battle buttons and the hotbar make way for the build tray. */
   private hideForBuilding(): void {
-    const on = build.on;
+    // A pastime's overlay (the jam's notes, the telescope) takes their place too.
+    const on = build.on || pastimeHud.busy;
     if (!on && !this.building) return;
     // These are shown by their draws each frame, so they only need hiding.
     const drawn = [this.ultKey, this.netIcon, ...this.slotIcons];
@@ -906,9 +907,10 @@ export class UIScene extends Phaser.Scene {
   private drawNetButton(delta: number): void {
     // By a fishing rod in the Home it's the rod's button instead.
     const rod = fishHud.near;
-    const icon = rod ? 'icon_rod' : homeAct.near === 'harvest' ? 'icon_harvest' : homeAct.near === 'cook' ? 'icon_cook' : 'icon_net';
+    // Then the farm's, then Heaven Lands' pastimes' (a seat, an instrument, a find...), then the net's.
+    const icon = rod ? 'icon_rod' : homeAct.near === 'harvest' ? 'icon_harvest' : homeAct.near === 'cook' ? 'icon_cook' : pastimeHud.near || 'icon_net';
     if (this.netIcon.texture.key !== icon && this.textures.exists(icon)) this.netIcon.setTexture(icon);
-    const want = (critterHud.near || rod || homeAct.near) && !controls.mouse ? 1 : 0;
+    const want = (critterHud.near || rod || homeAct.near || pastimeHud.near) && !controls.mouse && !pastimeHud.busy ? 1 : 0;
     this.netShown = Phaser.Math.Clamp(this.netShown + (want ? 1 : -1) * (delta / 160), 0, 1);
     this.netPressed = Math.max(0, this.netPressed - delta / 180);
     const on = this.netShown > 0;

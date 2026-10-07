@@ -20,6 +20,7 @@ import { collection } from '../game/collection';
 import { RECIPES, canCook, cook, cookHud, cropKey, dishKey, fishKey, have, ingredientName, madeKey, syncLunch, type Ingredient, type RecipeDef } from '../game/cooking';
 import { CROPS } from '../game/farm';
 import { FISH } from '../game/fish';
+import { FINDS, findKey } from '../game/finds';
 import { Button, wrap } from './inventoryView';
 import { PANEL_INSET, PANEL_PICKED, panelTexture, pixelText } from './widgets';
 
@@ -39,9 +40,9 @@ const WARM = 0xffc070;
 const GOOD = 0x9cff8a;
 const SHORT = 0xff8a7a;
 
-/** The picture for an ingredient: its produce, or a fish (for a kind of fish, one of that kind). */
+/** The picture for an ingredient: its produce, a find, or a fish (for a kind of fish, one of that kind). */
 const ingredientIcon = (i: Ingredient): string =>
-  'crop' in i ? `crop_${i.crop}` : i.fish === 'any' ? 'fishi_perch' : i.fish === 'rare' ? 'fishi_koi' : i.fish === 'glow' ? 'fishi_moonscale' : `fishi_${i.fish}`;
+  'crop' in i ? `crop_${i.crop}` : 'find' in i ? `find_${i.find}` : i.fish === 'any' ? 'fishi_perch' : i.fish === 'rare' ? 'fishi_koi' : i.fish === 'glow' ? 'fishi_moonscale' : `fishi_${i.fish}`;
 
 interface Tile {
   r: RecipeDef;
@@ -139,9 +140,10 @@ export class CookView extends Phaser.GameObjects.Container {
     // The cookbook's tiles: dishes at twice their size if the rows fit, else their own.
     const top = HEAD_H + 4;
     const room = h - top - PANTRY_H - 4;
-    const cols = 4;
-    const rows = Math.ceil(RECIPES.length / cols);
-    this.iconScale = rows * (36 + GAP) - GAP <= room ? 2 : 1;
+    // Four columns when they fit, more as the cookbook grows past the room for them.
+    const fits = (c: number, ts: number) => Math.ceil(RECIPES.length / c) * (ts + GAP) - GAP <= room;
+    const cols = fits(4, 36) ? 4 : [4, 5, 6, 7].find((c) => fits(c, 20)) ?? 7;
+    this.iconScale = fits(cols, 36) ? 2 : 1;
     this.tileSize = this.iconScale === 2 ? 36 : 20;
     const ts = this.tileSize;
     for (const t of this.tiles) t.box.destroy();
@@ -247,12 +249,13 @@ export class CookView extends Phaser.GameObjects.Container {
     this.pantryTitle.setPosition(0, y + 4);
     const items: [string, number][] = [
       ...CROPS.map((c): [string, number] => [`crop_${c.id}`, collection.stock(cropKey(c.id))]),
+      ...FINDS.map((f): [string, number] => [`find_${f.id}`, collection.stock(findKey(f.id))]),
       ...FISH.map((f): [string, number] => [`fishi_${f.id}`, collection.stock(fishKey(f.id))]),
     ].filter(([, n]) => n > 0);
     let x = 46;
     this.pantry = [];
     if (!items.length) {
-      const text = pixelText(this.scene, x, y + 4, 'Empty: harvest the garden beds, or fish the pond', SOFT);
+      const text = pixelText(this.scene, x, y + 4, 'Empty: harvest the garden, fish, or forage', SOFT);
       const icon = this.scene.add.image(0, 0, '__DEFAULT').setVisible(false);
       this.add([icon, text]);
       this.pantry.push({ icon, text });
