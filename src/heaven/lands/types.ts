@@ -13,6 +13,7 @@ import type Phaser from 'phaser';
 import type { PixelCanvas, RGB } from '../../art/pixel';
 import type { WorldScene } from '../../scenes/WorldScene';
 import type { Wild } from '../../audio/ambience';
+import type { Footing } from '../../audio/sfx';
 
 /** A land's chunk: what stands is laid out a chunk at a time (px). */
 export const CHUNK = 256;
@@ -74,6 +75,8 @@ export interface LandGround {
   cell(x: number, y: number, c: GroundCell): void;
   /** Stamp small things over the finished fields (shells, starfish, planks). */
   decorate?(f: TileFields): void;
+  /** How each kind sounds underfoot, by index like `kinds` (grass where left out). */
+  feet?: Footing[];
 }
 
 /** A painted tile: day and night, each with its normal map, and what glows (null when nothing does). */

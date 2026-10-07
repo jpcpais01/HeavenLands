@@ -159,6 +159,8 @@ export class LumenGen implements LandGen {
     const self = this;
     this.ground = {
       kinds: LUMEN_KINDS,
+      // Underfoot, by kind: the meadow and its flowers are grass, the paths earth, the streams wade.
+      feet: ['grass', 'grass', 'grass', 'earth', 'earth', 'wade', 'stone', 'grass', 'stone', 'grass', 'grass', 'grass', 'grass', 'grass', 'grass', 'grass'],
       cell: (x, y, c) => self.cell(x, y, c),
       decorate: (f) => self.decorate(f),
     };

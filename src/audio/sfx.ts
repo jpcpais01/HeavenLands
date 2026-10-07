@@ -8,10 +8,50 @@ export const LUTE_NOTES = LUTE_TUNE.length;
 /** The Aurora Colosseum's frost sounds (see Sfx.frost). */
 export type FrostSound = 'crack' | 'freeze' | 'howl' | 'chime' | 'crunch' | 'gust';
 
+/** What lies underfoot, for the footsteps (see Sfx.step). */
+export type Footing = 'grass' | 'leaves' | 'earth' | 'gravel' | 'sand' | 'snow' | 'crust' | 'wood' | 'stone' | 'ice' | 'puddle' | 'wade';
+
+/** How a ground answers a step. Peaks are gains, lengths seconds, bands Hz. */
+interface FootSound {
+  /** The weight landing: low-pass cutoff (high enough that a phone's little speaker still has something to play), peak, decay. */
+  thud: [number, number, number];
+  /** A low tone under the thud (Hz, peak; 0 for none). */
+  knock: [number, number];
+  /** A hard heel's click: high-pass cutoff, peak (0 for none), decay. */
+  tap: [number, number, number];
+  /** A hollow ring (boards, ice): band, Q, peak. */
+  ring?: [number, number, number];
+  /** The ground giving: band, Q, peak (0 for none), length. */
+  swish: [number, number, number, number];
+  /** The crunch: band, Q, grains, over how long, each grain's peak. */
+  grit: [number, number, number, number, number];
+  /** Heel to toe, and how hard the toe lands next to the heel. */
+  roll: number;
+  toe: number;
+  /** Reverb send: hard ground rings out a little. */
+  wet: number;
+  /** Drips a splash throws up. */
+  drops: number;
+}
+
+const FOOTINGS: Record<Footing, FootSound> = {
+  grass: { thud: [700, 0.2, 0.07], knock: [80, 0.06], tap: [0, 0, 0], swish: [4200, 0.8, 0.045, 0.13], grit: [3200, 1.2, 9, 0.12, 0.03], roll: 0.06, toe: 0.55, wet: 0.05, drops: 0 },
+  leaves: { thud: [700, 0.17, 0.06], knock: [85, 0.05], tap: [0, 0, 0], swish: [5000, 0.7, 0.03, 0.15], grit: [2600, 1, 26, 0.18, 0.08], roll: 0.07, toe: 0.7, wet: 0.05, drops: 0 },
+  earth: { thud: [900, 0.28, 0.075], knock: [90, 0.11], tap: [0, 0, 0], swish: [1800, 1, 0.02, 0.08], grit: [2200, 1.4, 6, 0.08, 0.025], roll: 0.055, toe: 0.5, wet: 0.06, drops: 0 },
+  gravel: { thud: [900, 0.22, 0.07], knock: [95, 0.07], tap: [0, 0, 0], swish: [3500, 0.8, 0.03, 0.16], grit: [2400, 1.6, 30, 0.18, 0.075], roll: 0.07, toe: 0.8, wet: 0.06, drops: 0 },
+  sand: { thud: [600, 0.2, 0.09], knock: [70, 0.05], tap: [0, 0, 0], swish: [1500, 0.7, 0.065, 0.17], grit: [1800, 1.2, 8, 0.15, 0.02], roll: 0.08, toe: 0.6, wet: 0.03, drops: 0 },
+  snow: { thud: [550, 0.18, 0.09], knock: [70, 0.04], tap: [0, 0, 0], swish: [2600, 0.9, 0.045, 0.2], grit: [1400, 1.8, 30, 0.22, 0.055], roll: 0.09, toe: 0.8, wet: 0.03, drops: 0 },
+  crust: { thud: [700, 0.18, 0.06], knock: [80, 0.04], tap: [0, 0, 0], swish: [5200, 0.8, 0.03, 0.1], grit: [3800, 1.4, 22, 0.12, 0.065], roll: 0.06, toe: 0.7, wet: 0.05, drops: 0 },
+  wood: { thud: [1100, 0.24, 0.05], knock: [140, 0.09], tap: [1800, 0.1, 0.03], ring: [240, 9, 0.32], swish: [0, 1, 0, 0], grit: [0, 1, 0, 0, 0], roll: 0.05, toe: 0.45, wet: 0.1, drops: 0 },
+  stone: { thud: [1300, 0.18, 0.04], knock: [110, 0.06], tap: [2600, 0.14, 0.02], swish: [0, 1, 0, 0], grit: [5000, 1.5, 3, 0.05, 0.02], roll: 0.05, toe: 0.5, wet: 0.14, drops: 0 },
+  ice: { thud: [1400, 0.13, 0.035], knock: [120, 0.04], tap: [3500, 0.12, 0.018], ring: [1900, 14, 0.05], swish: [6000, 1.2, 0.035, 0.09], grit: [0, 1, 0, 0, 0], roll: 0.045, toe: 0.4, wet: 0.14, drops: 0 },
+  puddle: { thud: [600, 0.15, 0.06], knock: [0, 0], tap: [0, 0, 0], swish: [2400, 0.8, 0.11, 0.12], grit: [0, 1, 0, 0, 0], roll: 0.06, toe: 0.6, wet: 0.08, drops: 3 },
+  wade: { thud: [450, 0.1, 0.1], knock: [0, 0], tap: [0, 0, 0], swish: [900, 0.6, 0.15, 0.3], grit: [0, 1, 0, 0, 0], roll: 0.12, toe: 0.7, wet: 0.1, drops: 4 },
+};
+
 /** One-shot game sounds. `pan` is -1 (left) .. 1 (right) on screen. */
 export class Sfx {
   private m: Mixer;
-  private foot = 0;
 
   constructor(m: Mixer) {
     this.m = m;
@@ -134,33 +174,120 @@ export class Sfx {
     this.sparkle(out, t + 0.03, struck ? 5 : 3, 0.035);
   }
 
-  /** A soft footfall on packed earth and grass; alternates feet. */
-  step(t: number): void {
+  /**
+   * A footfall on `ground`, `foot` 0 the left and 1 the right. A real step is
+   * two touches, the heel landing and the ball of the foot rolling down after
+   * it, plus whatever the ground does under the weight: grass swishes, leaves
+   * and gravel crackle in a scatter of tiny grains, snow squeaks as it packs,
+   * boards knock hollow, stone clicks, water splashes and drips. Every part is
+   * drawn at random within its ground's ranges, and each take is played a
+   * touch faster or slower and louder or softer (see bake.ts), so no two
+   * steps in a row are the same.
+   */
+  step(t: number, pan: number, ground: Footing, foot: number): void {
     const ctx = this.m.ctx;
-    this.foot ^= 1;
-    const out = this.out(this.foot ? -0.08 : 0.08, rand(0.75, 1), 0.08);
+    const g = FOOTINGS[ground] ?? FOOTINGS.grass;
+    const out = this.out(pan, rand(0.85, 1), g.wet);
+    // The two feet land a little differently: one a shade heavier and slower to roll.
+    const lean = foot ? 0.93 : 1.05;
+    const roll = g.roll * rand(0.8, 1.2) * (foot ? 1.08 : 1);
+    const toe = g.toe * rand(0.7, 1.15);
 
-    const s = gain(ctx, 0, out);
-    hit(s.gain, t, 0.3, 0.004, 0.07);
-    const hp = filter(ctx, 'highpass', 180, 0.7, s);
-    const lp = filter(ctx, 'lowpass', rand(1200, 1700) * (this.foot ? 1 : 0.9), 0.8, hp);
-    const src = this.m.noiseSource(true);
-    src.connect(lp);
-    this.m.startNoise(src, t, 0.1);
+    const touch = (at: number, weight: number) => {
+      // The weight landing: low-passed noise, and a low tone that drops as it settles.
+      const [tf, tp, tl] = g.thud;
+      const th = gain(ctx, 0, out);
+      hit(th.gain, at, tp * weight * rand(0.8, 1.1), 0.003, tl * rand(0.8, 1.2));
+      const lp = filter(ctx, 'lowpass', tf * lean * rand(0.85, 1.15), 0.9, th);
+      const n = this.m.noiseSource(true);
+      n.connect(lp);
+      this.m.startNoise(n, at, tl + 0.04);
 
-    // A whisper of grass crunch on top.
-    const c = gain(ctx, 0, out);
-    hit(c.gain, t + 0.006, 0.05, 0.002, 0.04);
-    const crunch = filter(ctx, 'highpass', 3500, 0.7, c);
-    const n = this.m.noiseSource();
-    n.connect(crunch);
-    this.m.startNoise(n, t, 0.06);
+      const [kf, kp] = g.knock;
+      if (kp > 0) {
+        const kg = gain(ctx, 0, out);
+        hit(kg.gain, at, kp * weight * rand(0.8, 1.1), 0.002, 0.05);
+        const o = osc(ctx, 'sine', kf * lean * rand(0.92, 1.08), kg);
+        sweep(o.frequency, at, kf * lean * 1.25, kf * lean * 0.8, 0.05);
+        o.start(at);
+        o.stop(at + 0.09);
+      }
 
-    const th = gain(ctx, 0, out);
-    hit(th.gain, t, 0.14, 0.003, 0.05);
-    const o = osc(ctx, 'sine', rand(85, 100), th);
-    o.start(t);
-    o.stop(t + 0.08);
+      // A hard heel's click.
+      const [cf, cp, cl] = g.tap;
+      if (cp > 0) {
+        const cg = gain(ctx, 0, out);
+        hit(cg.gain, at, cp * weight * rand(0.75, 1.15), 0.0008, cl * rand(0.8, 1.2));
+        const hp = filter(ctx, 'highpass', cf * rand(0.85, 1.2), 0.7, cg);
+        const c = this.m.noiseSource();
+        c.connect(hp);
+        this.m.startNoise(c, at, cl + 0.02);
+      }
+
+      // Boards (or ice) ringing: a struck tap through a narrow band.
+      if (g.ring) {
+        const [rf, rq, rp] = g.ring;
+        const rg = gain(ctx, 0, out);
+        hit(rg.gain, at, rp * weight * rand(0.7, 1.1), 0.001, 0.012);
+        const bp = filter(ctx, 'bandpass', rf * lean * rand(0.88, 1.12), rq, rg);
+        const r = this.m.noiseSource();
+        r.connect(bp);
+        this.m.startNoise(r, at, 0.03);
+      }
+    };
+    touch(t, 1);
+    touch(t + roll, toe);
+
+    // The ground giving under the foot: a swell of soft noise (grass, sand, a splash).
+    const [sf, sq, sp, sl] = g.swish;
+    if (sp > 0) {
+      const len = sl * rand(0.8, 1.25);
+      const sw = gain(ctx, 0, out);
+      sw.gain.setValueAtTime(0, t);
+      sw.gain.linearRampToValueAtTime(sp * rand(0.75, 1.1), t + len * 0.3);
+      sw.gain.setTargetAtTime(0, t + len * 0.3, len / 4);
+      const bp = filter(ctx, 'bandpass', sf * rand(0.85, 1.15), sq, sw);
+      // Water falls in pitch as the splash spreads; dry ground stays put.
+      if (g.drops) sweep(bp.frequency, t, sf * 1.5, sf * 0.6, len);
+      const n = this.m.noiseSource();
+      n.connect(bp);
+      this.m.startNoise(n, t, len * 1.6);
+    }
+
+    // The crunch: tiny grains, thickest as the heel lands and again as the toe does.
+    const [gf, gq, count, span, gp] = g.grit;
+    const grains = Math.round(count * rand(0.7, 1.3));
+    if (grains > 0) {
+      const gg = gain(ctx, 0, out);
+      const bp = filter(ctx, 'bandpass', gf * rand(0.85, 1.15), gq, gg);
+      const n = this.m.noiseSource();
+      n.connect(bp);
+      this.m.startNoise(n, t, span + roll + 0.05);
+      const times: number[] = [];
+      for (let i = 0; i < grains; i++) times.push((Math.random() < 0.6 ? t : t + roll) + span * Math.pow(Math.random(), 1.8));
+      times.sort((x, y) => x - y);
+      for (let i = 0; i < times.length; i++) {
+        const at = times[i];
+        const gap = i + 1 < times.length ? times[i + 1] - at : 0.03;
+        const len = Math.max(0.002, Math.min(gap, rand(0.004, 0.016)));
+        gg.gain.setValueAtTime(0, at);
+        gg.gain.linearRampToValueAtTime(gp * rand(0.25, 1), at + Math.min(0.0015, len * 0.5));
+        gg.gain.setTargetAtTime(0, at + Math.min(0.0015, len * 0.5), len / 3);
+      }
+    }
+
+    // Drips thrown up by a splash: little rising blips.
+    for (let i = 0; i < g.drops; i++) {
+      if (Math.random() < 0.3) continue;
+      const at = t + rand(0.03, 0.22);
+      const f = rand(700, 1500);
+      const dg = gain(ctx, 0, out);
+      hit(dg.gain, at, rand(0.02, 0.05), 0.002, 0.03);
+      const o = osc(ctx, 'sine', f, dg);
+      sweep(o.frequency, at, f, f * rand(1.8, 2.6), 0.025);
+      o.start(at);
+      o.stop(at + 0.05);
+    }
   }
 
   /** Start the beam's gathering hum; steer it with `set` and end it with `stop`. */

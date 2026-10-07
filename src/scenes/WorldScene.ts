@@ -52,6 +52,8 @@ import { isDish, seedKey, syncLunch } from '../game/cooking';
 import { build } from '../game/build';
 import { openHomeFriends } from '../ui/homeFriends';
 import { isPainted } from '../world/arenas';
+import { ForestFooting, floorFooting, paintedFooting, specFooting } from '../world/footing';
+import { CELL, PLOT_X, PLOT_Y } from '../world/homeLayout';
 import { OMEN_ARENAS, Omens } from '../world/Omens';
 import { Forest } from '../world/Forest';
 import { ForestBuild } from '../world/ForestBuild';
@@ -103,7 +105,7 @@ const PHASE_LIGHT: { sunDir: V3; sun: V3; sky: V3; bounce: V3; ground: number; s
   { sunDir: NIGHT.sunDir, sun: NIGHT.sun, sky: NIGHT.sky, bounce: NIGHT.bounce, ground: 0, shadowAngle: 32, shadowLength: 0.46 },
 ];
 const mix3 = (a: V3, b: V3, t: number): V3 => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-import { sound } from '../audio';
+import { sound, type Footing } from '../audio';
 import { inventory, rollDrop, STARTING_ITEMS, HOTBAR_SIZE, type ItemContext } from '../game/items';
 import { heroBuffs, type BuffDef } from '../game/buffs';
 import { heroTimers } from '../game/timers';
@@ -343,6 +345,7 @@ export class WorldScene extends Phaser.Scene {
   private echoes: EchoGraves | null = null;
   /** The Everwood, streamed round the view, when the world is in it. */
   private forest: Forest | null = null;
+  private forestFeet: ForestFooting | null = null;
   private woodBuild: ForestBuild | null = null;
   private shafts: Phaser.GameObjects.TileSprite | null = null;
   private shadows: Phaser.GameObjects.Image[] = [];
@@ -394,6 +397,7 @@ export class WorldScene extends Phaser.Scene {
     this.home = null;
     this.fishing = null;
     this.forest = null;
+    this.forestFeet = null;
     this.woodBuild = null;
     this.character = data?.character;
     this.auras.clear();
@@ -462,6 +466,7 @@ export class WorldScene extends Phaser.Scene {
         this.woodBuild = null;
         useForest(null);
         this.forest = null;
+        this.forestFeet = null;
       });
     }
     if (arena.id === 'island') {
@@ -989,6 +994,18 @@ export class WorldScene extends Phaser.Scene {
     if (this.omens) for (const o of this.omens.hurtboxes) if (o.alive && test(o)) return o;
     if (this.net) for (const f of this.net.foes()) if (test(f)) return f;
     return null;
+  }
+
+  /** What the ground underfoot at (x, y) is, for a footstep's sound. */
+  footing(x: number, y: number): Footing {
+    if (this.land?.footing) return this.land.footing(x, y);
+    if (this.forest) return (this.forestFeet ??= new ForestFooting(this.forest.gen)).at(x, y, this.forest.edits);
+    if (this.home) {
+      const l = this.home.layout;
+      return floorFooting(l.floorAt(Math.floor((x - PLOT_X) / CELL), Math.floor((y - PLOT_Y) / CELL))) ?? 'grass';
+    }
+    const g = this.arena.ground;
+    return isPainted(g) ? paintedFooting(this.arena.id) : specFooting(g, x, y);
   }
 
   /** A companion mends the hero by `share` of their health, if they are hurt and up; returns the health restored. */
