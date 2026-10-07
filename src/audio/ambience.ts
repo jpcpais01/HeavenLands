@@ -5,6 +5,11 @@ const WIND_LOW = 340;
 const WIND_GUST = 260;
 const WIND_TOP = 900;
 const WIND_LEVEL = 0.7;
+/** A shower: its hiss's band and top, its patter's top (Hz), and its loudest. */
+const RAIN_HISS = 2600;
+const RAIN_TOP = 6800;
+const RAIN_PATTER = 700;
+const RAIN_LEVEL = 0.09;
 
 type Call = 'chirps' | 'whistle' | 'trill' | 'warble';
 
@@ -83,6 +88,9 @@ export class Ambience {
   private wild: Wild | null = null;
   private water: { level: GainNode; pan: StereoPannerNode } | null = null;
   private nextBubble = 0;
+  /** A shower's hiss on leaves and ground, and its lower patter: built the first time it rains. */
+  private rain: GainNode | null = null;
+  private rainLevel = 0;
   private nextFrog = 0;
   private nextPeck = 0;
 
@@ -192,6 +200,27 @@ export class Ambience {
     this.water.pan.pan.setTargetAtTime(w ? w.streamPan * 0.8 : 0, t, 0.4);
     this.gurgle.pan.setTargetAtTime(w ? w.streamPan * 0.8 : 0, t, 0.4);
     this.bubbles.gain.setTargetAtTime(w ? w.stream * this.outdoors : 0, t, 0.4);
+  }
+
+  /** 0..1, how hard it's raining round the listener (Heaven Lands' showers). */
+  setRain(level: number, t: number): void {
+    if (Math.abs(level - this.rainLevel) < 0.01) return;
+    this.rainLevel = level;
+    if (!this.rain && level <= 0) return;
+    if (!this.rain) {
+      // Two soft noise bands: a high hiss of drops on leaves and a low, close patter, never a roar.
+      const ctx = this.m.ctx;
+      this.rain = gain(ctx, 0, this.m.ambience);
+      const hiss = filter(ctx, 'lowpass', RAIN_TOP, 0.5, filter(ctx, 'bandpass', RAIN_HISS, 0.35, gain(ctx, 1, this.rain)));
+      const patter = filter(ctx, 'lowpass', RAIN_PATTER, 0.7, gain(ctx, 0.8, this.rain));
+      const a = this.m.noiseLoop(false);
+      a.connect(hiss);
+      a.start();
+      const b = this.m.noiseLoop(true);
+      b.connect(patter);
+      b.start();
+    }
+    this.rain.gain.setTargetAtTime(level * RAIN_LEVEL * this.outdoors, t, 0.8);
   }
 
   /** The beds' live movement: the wind's gusts. */

@@ -82,6 +82,7 @@ class GameSound {
   private outdoors = true;
   private fire = 0;
   private wild: Wild | null = null;
+  private rain = 0;
   private _muted = readMuted();
   private volume = { music: 1, sfx: 1 };
 
@@ -189,6 +190,12 @@ class GameSound {
   setWild(w: Wild | null): void {
     this.wild = w;
     if (this.ctx) safely('wild', () => this.ambience?.setWild(w, this.ctx!.currentTime));
+  }
+
+  /** 0..1, how hard it's raining round the listener. */
+  setRain(level: number): void {
+    this.rain = level;
+    if (this.ctx) safely('rain', () => this.ambience?.setRain(level, this.ctx!.currentTime));
   }
 
   /** A gust coming through the forest, 0..1 strong, from the side `pan` says. */
@@ -1279,6 +1286,7 @@ class GameSound {
     this.ambience.setOutdoors(this.outdoors, 0);
     this.ambience.setFire(this.fire, 0);
     this.ambience.setWild(this.wild, 0);
+    this.ambience.setRain(this.rain, 0);
     this.music.start(ctx.currentTime);
     window.setInterval(() => this.tick(), TICK_MS);
     this.tick();
