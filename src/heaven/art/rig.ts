@@ -16,7 +16,7 @@ const id = (list: { id: string }[], i: number): string => list[i]?.id ?? list[0]
 
 // ---------------------------------------------------------------- poses
 
-export type AnimName = 'idle' | 'walk' | 'wave' | 'cheer' | 'dance' | 'sit' | 'heart';
+export type AnimName = 'idle' | 'walk' | 'wave' | 'cheer' | 'dance' | 'sit' | 'heart' | 'hug' | 'bow' | 'clap' | 'lantern';
 
 export interface AnimDef {
   name: AnimName;
@@ -35,6 +35,12 @@ export const ANIMS: AnimDef[] = [
   { name: 'dance', frames: 8, fps: 8, loop: true, views: ['down'] },
   { name: 'sit', frames: 4, fps: 3, loop: true, views: ['down'] },
   { name: 'heart', frames: 6, fps: 6, loop: false, views: ['down'] },
+  // A hug: from the side, arms round whoever stands there; from the front, arms opened then wrapped round.
+  { name: 'hug', frames: 10, fps: 6, loop: false, views: ['down', 'side'] },
+  { name: 'bow', frames: 7, fps: 6, loop: false, views: ['down'] },
+  { name: 'clap', frames: 8, fps: 10, loop: false, views: ['down'] },
+  // A sky lantern raised from the chest over the head and let go.
+  { name: 'lantern', frames: 8, fps: 6, loop: false, views: ['down'] },
 ];
 
 const shY = (k: Kit, bob: number, hop = 0, sit = false) => 18 - k.tall + bob - hop + (sit ? 4 : 0);
@@ -178,6 +184,94 @@ export function pose(k: Kit, anim: AnimName, view: View, i: number): Pose {
       { x: 12 + k.sw - 0.4, y: s + 5.6 },
     ];
     p.blink = i === 3;
+    return p;
+  }
+  if (anim === 'hug') {
+    const bob = [0, 0, 1, 1, 1, 1, 1, 1, 0, 0][i];
+    const p = standing(k, view, bob);
+    const s = shY(k, bob);
+    p.carry = false;
+    p.face = i > 1 && i < 9 ? 'content' : undefined;
+    const held = i >= 2 && i <= 8;
+    if (view === 'side') {
+      // Facing left: both arms reach forward round someone just in front, the near one a touch lower.
+      const reach = held ? 4.6 : i === 1 || i === 9 ? 3 : 1.4;
+      p.hands = [
+        { x: 12.4 - reach, y: s + (held ? 4.4 : 5.4) },
+        { x: 13 - reach + 0.6, y: s + (held ? 3.2 : 4.8) },
+      ];
+      p.sway = held ? [0, 0, -0.15, -0.3, -0.3, -0.15, 0, 0.1, 0, 0][i] : 0;
+      return p;
+    }
+    if (held) {
+      // Arms wrapped round, swaying side to side in the squeeze.
+      const sw = [0, 0, -0.4, -0.2, 0.2, 0.4, 0.2, -0.2, 0, 0][i];
+      p.hands = [
+        { x: 12 + k.sw - 0.6 + sw, y: s + 4.2 },
+        { x: 12 - k.sw + 0.6 + sw, y: s + 3.4 },
+      ];
+      p.sway = sw;
+    } else {
+      // Arms opened wide, ready.
+      const wide = i === 0 || i === 9 ? 1.6 : 2.8;
+      p.hands = [
+        { x: 12 - k.sw - wide, y: s + 2.6 },
+        { x: 12 + k.sw + wide, y: s + 2.6 },
+      ];
+      p.face = 'grin';
+    }
+    return p;
+  }
+  if (anim === 'bow') {
+    // A little bow: the head and shoulders dip, hands folded in front.
+    const bob = [0, 1, 2, 2, 2, 1, 0][i];
+    const p = standing(k, 'down', bob);
+    const s = shY(k, bob);
+    p.carry = false;
+    p.hands = [
+      { x: 11.1, y: s + 6.6 - bob * 0.3 },
+      { x: 12.9, y: s + 6.6 - bob * 0.3 },
+    ];
+    if (i >= 1 && i <= 5) p.face = 'content';
+    return p;
+  }
+  if (anim === 'clap') {
+    const shut = i % 2 === 1;
+    const bob = [0, 1, 0, 1, 0, 1, 0, 0][i];
+    const p = standing(k, 'down', bob);
+    const s = shY(k, bob);
+    p.carry = false;
+    p.hands = shut
+      ? [
+          { x: 11.3, y: s + 3.2 },
+          { x: 12.7, y: s + 3.2 },
+        ]
+      : [
+          { x: 12 - k.sw - 1.2, y: s + 3.8 },
+          { x: 12 + k.sw + 1.2, y: s + 3.8 },
+        ];
+    p.face = 'grin';
+    p.sway = shut ? 0 : [0, 0, 0.2, 0, -0.2, 0, 0.2, 0][i];
+    return p;
+  }
+  if (anim === 'lantern') {
+    // Hands cupped at the chest, raised over the head, then opened as it goes.
+    const lift = [4, 1.4, -1.6, -4, -4.4, -4.2, -1, 4][i];
+    const p = standing(k, 'down', i >= 2 && i <= 5 ? 0 : 1);
+    const s = shY(k, p.bob);
+    p.carry = false;
+    // Up past the face the hands part round the head, then open wider as they let go.
+    const apart = lift < 2 ? k.sw + 1 + (i >= 4 ? (i >= 6 ? 1.8 : 1) : 0) : 1;
+    p.hands = [
+      { x: 12 - apart, y: s + lift },
+      { x: 12 + apart, y: s + lift },
+    ];
+    if (i === 7)
+      p.hands = [
+        { x: 12 - k.sw - 0.85, y: s + 6 },
+        { x: 12 + k.sw + 0.85, y: s + 6 },
+      ];
+    p.face = i >= 4 ? 'open' : 'content';
     return p;
   }
   // heart: hands meeting at the chest, eyes closed happily.

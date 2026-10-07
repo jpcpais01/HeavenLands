@@ -1,7 +1,9 @@
 // The emote buttons on Heaven Lands' play HUD, where Myths has its ability
-// buttons: wave, cheer, dance, sit and a heart. On a touch screen they fan
-// round the bottom-right corner under the thumb; with a mouse they're a small
-// row in that corner, with their keys (4 to 8) on them.
+// buttons: wave, cheer, dance, sit and a heart, then hug, bow, clap and a sky
+// lantern. On a touch screen they fan round the bottom-right corner under the
+// thumb, the first five in an outer arc and the other four in a smaller inner
+// one; with a mouse they're a small row in that corner, with their keys (4 to
+// 9, 0, - and =) on them.
 
 import Phaser from 'phaser';
 import { DPR as D } from '../../game/display';
@@ -9,23 +11,33 @@ import { controls } from '../../game/controls';
 import type { CozyHud } from '../../game/cozy';
 import { EMOTES, emoteHud, type Emote } from '../Wanderer';
 
-/** The fan's reach from the corner, in button radii of the old ability buttons. */
+/** The fans' reach from the corner, in button radii of the old ability buttons: the outer arc (the first OUTER emotes) and the inner. */
 const FAN = 2.05;
+const FAN_IN = 1.3;
+const OUTER = 5;
+/** The inner arc's buttons are this much of the outer's size. */
+const INNER_SIZE = 0.75;
+/** Each emote's key, in order. */
+const KEYS = ['4', '5', '6', '7', '8', '9', '0', '-', '='];
 /** ms a pressed button stays sunk. */
 const PRESS_MS = 160;
 const FILL = 0x2a1f33;
 const RING = 0xffe2b0;
 const LIT = 0xffc861;
 
-/** Five 12 x 12 icons: a waving hand, a burst, a note, a cushion, a heart. */
+/** 12 x 12 icons: a waving hand, a burst, a note, a cushion, a heart, arms round a heart, a bowing figure, palms meeting, a lantern. */
 const ICONS: Record<Emote, string[]> = {
   wave: ['.....w.w....', '....w.ww.w..', '...ww.ww.ww.', '...ww.ww.ww.', '.w.wwwwwwww.', '.wwwwwwwwww.', '..wwwwwwwww.', '..wwwwwwww..', '...wwwwwww..', '....wwwww...', '....wwwww...', '............'],
   cheer: ['.....y......', '.y...y...y..', '..y..y..y...', '...y.w.y....', '....www.....', 'yyywwwwwyyy.', '....www.....', '...y.w.y....', '..y..y..y...', '.y...y...y..', '.....y......', '............'],
   dance: ['......wwwww.', '......wwwww.', '......w...w.', '......w...w.', '......w...w.', '......w...w.', '...www..www.', '..wwwww.www.', '..wwwww.....', '...www......', '............', '............'],
   sit: ['............', '............', '...pppppp...', '..pppppppp..', '.pppwppwppp.', '.pppppppppp.', '.pppwppwppp.', '..pppppppp..', '...pppppp...', '..y......y..', '............', '............'],
   heart: ['............', '..rr...rr...', '.rrrr.rrrr..', 'rrwrrrrrrrr.', 'rwrrrrrrrrr.', 'rrrrrrrrrrr.', '.rrrrrrrrr..', '..rrrrrrr...', '...rrrrr....', '....rrr.....', '.....r......', '............'],
+  hug: ['............', '...rr..rr...', '..rrrrrrrr..', '..rwrrrrrr..', 'w.rrrrrrrr.w', 'ww.rrrrrr.ww', '.ww.rrrr.ww.', '..ww.rr.ww..', '...wwwwww...', '....wwww....', '............', '............'],
+  bow: ['............', '............', '............', '..www.......', '..wwwwwww...', '..wwwwwwwww.', '..ww....www.', '..ww.....w..', '..ww........', '..ww........', '.wwww.......', '............'],
+  clap: ['.y........y.', '..y..ww..y..', '....wwww....', 'y..wwwwww..y', '...wwwwww...', '...wwwwww...', '...wwwwww...', '....wwww....', '....wwww....', '.....ww.....', '............', '............'],
+  lantern: ['....oooo....', '...oyyyyo...', '..oyyyyyyo..', '..oyyGyyyo..', '..oyyGGyyo..', '...oyyyyo...', '...oyyyyo...', '....oooo....', '.....GG.....', '.....y......', '............', '............'],
 };
-const PAL: Record<string, string> = { w: '#fff6e4', y: '#ffd66b', p: '#f2a8c4', r: '#ff7aa2' };
+const PAL: Record<string, string> = { w: '#fff6e4', y: '#ffd66b', p: '#f2a8c4', r: '#ff7aa2', o: '#f0884a', G: '#fff4c8' };
 
 function iconArt(scene: Phaser.Scene): void {
   if (scene.textures.exists('hl_emoteicons')) return;
@@ -58,11 +70,11 @@ export class EmoteButtons implements CozyHud {
     iconArt(scene);
     this.g = scene.add.graphics();
     this.icons = EMOTES.map((e) => scene.add.image(0, 0, 'hl_emoteicons', e));
-    this.keys = EMOTES.map((_e, i) => scene.add.bitmapText(0, 0, 'pixel', `${i + 4}`).setOrigin(0.5, 0).setTint(0xffe9c8));
+    this.keys = EMOTES.map((_e, i) => scene.add.bitmapText(0, 0, 'pixel', KEYS[i]).setOrigin(0.5, 0).setTint(0xffe9c8));
     const kb = scene.input.keyboard;
     if (kb) {
       const onKey = (ev: KeyboardEvent) => {
-        const i = Number(ev.key) - 4;
+        const i = KEYS.indexOf(ev.key);
         if (i >= 0 && i < EMOTES.length && !this.hidden) this.press(EMOTES[i]);
       };
       kb.on('keydown', onKey);
@@ -82,14 +94,25 @@ export class EmoteButtons implements CozyHud {
     if (controls.mouse) {
       const r = Math.round(R * 0.3);
       const gap = Math.round(r * 0.6);
-      return EMOTES.map((_e, i) => ({ x: width - 14 * D - r - (EMOTES.length - 1 - i) * (r * 2 + gap), y: height - 16 * D - r, r }));
+      // Two rows in the corner, clear of the hotbar: the first five along the foot, the rest over their right end.
+      const step = r * 2 + gap;
+      const rowGap = r * 2 + gap + 8 * D;
+      return EMOTES.map((_e, i) => {
+        const top = i >= OUTER;
+        const n = top ? EMOTES.length - OUTER : OUTER;
+        const j = top ? i - OUTER : i;
+        return { x: width - 14 * D - r - (n - 1 - j) * step, y: height - 16 * D - r - (top ? rowGap : 0), r };
+      });
     }
     const cx = width - R * 0.55;
     const cy = height - R * 0.55;
     const r = Math.round(R * 0.4);
+    const inner = EMOTES.length - OUTER;
     return EMOTES.map((_e, i) => {
-      const a = Math.PI + (i / (EMOTES.length - 1)) * (Math.PI / 2);
-      return { x: Math.round(cx + Math.cos(a) * R * FAN), y: Math.round(cy + Math.sin(a) * R * FAN), r };
+      const outer = i < OUTER;
+      const a = Math.PI + (outer ? i / (OUTER - 1) : (i - OUTER) / (inner - 1)) * (Math.PI / 2);
+      const reach = R * (outer ? FAN : FAN_IN);
+      return { x: Math.round(cx + Math.cos(a) * reach), y: Math.round(cy + Math.sin(a) * reach), r: outer ? r : Math.round(r * INNER_SIZE) };
     });
   }
 
@@ -117,7 +140,9 @@ export class EmoteButtons implements CozyHud {
     const spots = this.spots();
     const sunk = EMOTES.map((e) => now - (this.pressed.get(e) ?? -1e9) < PRESS_MS);
     const state = `${hidden} ${controls.mouse} ${emoteHud.playing} ${sunk.join()} ${spots.map((s) => `${s.x},${s.y},${s.r}`).join(' ')}`;
-    for (const o of [...this.icons, ...this.keys]) o.setVisible(!hidden);
+    for (const o of this.icons) o.setVisible(!hidden);
+    // The keys only mean something with a keyboard.
+    for (const k of this.keys) k.setVisible(!hidden && controls.mouse);
     this.g.setVisible(!hidden);
     if (hidden || state === this.drawn) return;
     this.drawn = state;
@@ -133,7 +158,7 @@ export class EmoteButtons implements CozyHud {
       const scale = Math.max(1, Math.floor((r * 1.25) / 12));
       this.icons[i].setPosition(s.x, s.y).setScale(sunk[i] ? Math.max(1, scale - 1) || scale : scale);
       const k = this.keys[i];
-      k.setVisible(controls.mouse).setScale(Math.max(1, Math.floor(r / 14))).setPosition(s.x, s.y + r + 2 * D);
+      k.setScale(Math.max(1, Math.floor(r / 14))).setPosition(s.x, s.y + r + 2 * D);
     });
   }
 }

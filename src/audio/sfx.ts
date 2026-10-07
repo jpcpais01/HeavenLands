@@ -1079,6 +1079,37 @@ export class Sfx {
     this.sparkle(out, t + 0.05, 4, 0.05);
   }
 
+  /** Heaven Lands' clap: a sharp, hollow smack of two palms, a little room around it. */
+  clap(t: number, pan: number): void {
+    const out = this.out(pan, 0.5, 0.25);
+    this.burstNoise(out, t, 'bandpass', 2400, 1500, 1.1, 0.32, 0.05);
+    this.burstNoise(out, t, 'bandpass', 900, 700, 1.6, 0.18, 0.035);
+  }
+
+  /** Heaven Lands' hug: a warm, low two-note hum, like a contented sigh. */
+  hug(t: number, pan: number): void {
+    const out = this.out(pan, 0.35, 0.6);
+    this.chirp(out, t, 'sine', 392, 440, 0.09, 0.45);
+    this.chirp(out, t + 0.16, 'sine', 523, 587, 0.08, 0.55);
+    this.bell(out, t + 0.3, 1568, 0.018, 1.2);
+  }
+
+  /** Heaven Lands' camera: the shutter's two quick clicks and the soft whir of the film winding on. */
+  shutter(t: number, pan: number): void {
+    const out = this.out(pan, 0.45, 0.15);
+    this.burstNoise(out, t, 'highpass', 3200, 2600, 0.8, 0.3, 0.025);
+    this.burstNoise(out, t + 0.07, 'highpass', 2600, 2200, 0.8, 0.22, 0.03);
+    this.burstNoise(out, t + 0.14, 'bandpass', 1400, 900, 2.5, 0.05, 0.22);
+  }
+
+  /** A sky lantern let go: a soft breath of warm air rising, and bells drifting up after it. */
+  lanternRise(t: number, pan: number): void {
+    const out = this.out(pan, 0.4, 0.9);
+    this.burstNoise(out, t, 'bandpass', 500, 1400, 0.9, 0.08, 0.7, true);
+    [1047, 1319, 1568, 2093].forEach((f, i) => this.bell(out, t + 0.18 + i * 0.16, f, 0.024, 1.8));
+    this.sparkle(out, t + 0.5, 4, 0.12);
+  }
+
   /**
    * The White Stag: `appear` a soft rising chime as it steps out of the
    * trees; `reveal` a wider, slower bloom of bells as its secret place opens;

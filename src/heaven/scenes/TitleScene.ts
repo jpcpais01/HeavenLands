@@ -227,7 +227,7 @@ export class TitleScene extends Phaser.Scene {
     this.sea2.tilePositionX -= 2.5 * dt;
     this.place(Math.round(Math.sin((time / BOB_MS) * Math.PI * 2) * BOB_PX));
     if (time > this.nextEmote && this.hero.anims.currentAnim?.key === `${this.heroKey}_idle_down`) {
-      const e = Phaser.Utils.Array.GetRandom(['wave', 'heart', 'cheer', 'wave']);
+      const e = Phaser.Utils.Array.GetRandom(['wave', 'heart', 'cheer', 'wave', 'clap', 'bow']);
       this.hero.play(`${this.heroKey}_${e}_down`);
       this.nextEmote = time + Phaser.Math.Between(...EMOTE_EVERY);
     }

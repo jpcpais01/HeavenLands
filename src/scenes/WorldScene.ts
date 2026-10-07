@@ -713,6 +713,11 @@ export class WorldScene extends Phaser.Scene {
     // The minimap in the corner (and in the Everwood, the explorer's map; in Heaven Lands' endless lands, a map painted round the hero).
     this.scene.launch('map');
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scene.stop('map'));
+    // Heaven Lands' camera (heaven/scenes/PhotoScene.ts).
+    if (cozy.on) {
+      this.scene.launch('photo');
+      this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scene.stop('photo'));
+    }
     this.scale.on(Phaser.Scale.Events.RESIZE, this.fitCamera, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scale.off(Phaser.Scale.Events.RESIZE, this.fitCamera, this));
 
