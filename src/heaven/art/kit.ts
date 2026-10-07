@@ -30,8 +30,10 @@ export interface Pose {
   blink: boolean;
   /** -1..1: long hair, skirts, tails and wings swing with it. */
   sway: number;
-  /** Sitting on the ground. */
+  /** Sitting: on the ground (cross-legged), or with `seat` on a seat. */
   sit: boolean;
+  /** Sat on a seat: only a little lower, the thighs out and the shins hanging (see `legs` in rig.ts). */
+  seat?: boolean;
   /** The thing carried shows, and in which hand. */
   carry: boolean;
   hold: 0 | 1;
@@ -169,14 +171,23 @@ export function makeKit(a: Appearance): Kit {
   };
 }
 
+/**
+ * How far sitting lowers the shoulders and head, and the hips: on a seat
+ * hardly at all (the thighs go out level and the shins hang below), on the
+ * ground enough for crossed legs to show under the body.
+ */
+export const SEAT_DROP = 2;
+export const SEAT_HIP = 1;
+export const GROUND_DROP = 3;
+
 /** Where the pose puts the body. */
 export function geometry(k: Kit, p: Pose): Geo {
   const t = k.tall;
   const lift = p.bob - p.hop;
   const cx = 12 + p.dx;
-  const sit = p.sit ? 4 : 0;
+  const sit = p.seat ? SEAT_DROP : p.sit ? GROUND_DROP : 0;
   const sh = 18 - t + lift + sit;
-  const hip = 25 - t + Math.round(lift * 0.5) + (p.sit ? 4 + t : 0) - p.hop * 0.5;
+  const hip = 25 - t + Math.round(lift * 0.5) + (p.seat ? SEAT_HIP : p.sit ? GROUND_DROP + t : 0) - p.hop * 0.5;
   const side = p.view === 'side';
   const hx = side ? cx - 0.5 : cx;
   const hy = 12.5 - t + lift + sit;
