@@ -18,6 +18,14 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    v: 4,
+    date: '2026-10-07',
+    title: 'Take a seat',
+    notes: [
+      'Sitting looks right now: on a bench, chair or sofa your legs bend over the edge with your feet hanging, and sitting on the ground crosses your legs, whatever you wear.',
+    ],
+  },
+  {
     v: 3,
     date: '2026-10-07',
     title: 'A cleaner profile',

@@ -52,6 +52,9 @@ const SEATS: Record<string, { z: number; dy?: number; apart?: number }> = {
   hammock: { z: 9, dy: 1, apart: 10 },
 };
 
+/** How far a seated wanderer's hips are above their feet (the rig's 'seat' pose), so the hips rest on the seat. */
+const SIT_HIP = 5;
+
 /** Every spot among `land`'s things. */
 export function findSpots(land: BuildLand): Spot[] {
   const out: Spot[] = [];
@@ -77,14 +80,14 @@ export function findSpots(land: BuildLand): Spot[] {
         for (let k = 0; k < n; k++) {
           const x = cx + (k - (n - 1) / 2) * apart;
           const y = turn === 0 ? y1 - 1 : y0 + 3;
-          out.push({ ...base, kind: 'seat', key: `${t.x},${t.y}:${k}`, x, y, dir: turn === 0 ? 'down' : 'up', lift: y - 2 - (sy - seat.z), depth: turn === 0 ? foot.y + 0.5 - y : foot.y - 0.5 - y });
+          out.push({ ...base, kind: 'seat', key: `${t.x},${t.y}:${k}`, x, y, dir: turn === 0 ? 'down' : 'up', lift: y - SIT_HIP - (sy - seat.z), depth: turn === 0 ? foot.y + 0.5 - y : foot.y - 0.5 - y });
         }
       } else {
         // Side on: sitters one behind the other along it, drawn over it.
         for (let k = 0; k < e.h; k++) {
           const sy = y0 + (k + 0.5) * CELL + (seat.dy ?? 0) * 0.5;
           const y = sy + 3;
-          out.push({ ...base, kind: 'seat', key: `${t.x},${t.y}:${k}`, x: cx + (turn === 1 ? -1 : 1), y, dir: turn === 1 ? 'right' : 'left', lift: y - 2 - (sy - seat.z), depth: foot.y + 0.5 + k - y });
+          out.push({ ...base, kind: 'seat', key: `${t.x},${t.y}:${k}`, x: cx + (turn === 1 ? -1 : 1), y, dir: turn === 1 ? 'right' : 'left', lift: y - SIT_HIP - (sy - seat.z), depth: foot.y + 0.5 + k - y });
         }
       }
       continue;
