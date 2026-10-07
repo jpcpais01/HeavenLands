@@ -61,6 +61,7 @@ const PAINTED: Record<string, Footing> = {
   island: 'grass',
   deep: 'stone',
   cosmos: 'stone',
+  starwatch: 'grass',
   spirit: 'stone',
   temple: 'stone',
   rift: 'stone',

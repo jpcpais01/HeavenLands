@@ -6,6 +6,7 @@ import { LOAD_BG, LOAD_H, LOAD_W, paintCosmos, paintDeep, paintFrost, paintHomeL
 import { warmHomeSoon } from '../art/homeArt';
 import { GroundStreamer } from '../world/GroundStreamer';
 import { HOME_GROUND } from '../world/homeGround';
+import { paintStarwatchLoad } from '../heaven/starwatch/art';
 
 // A painted arena's loading screen. Its textures (a cave floor the size of
 // the Glimmerdeep, the monsters' sheets, the bosses') used to be built ahead
@@ -157,6 +158,24 @@ const LOOKS: Record<string, Look> = {
     lights: [
       { spot: 'tips', tint: 0x8ac8ff, r: 9, kind: 'breathe', alpha: 0.45 },
       { spot: 'ring', tint: 0x3a8aff, r: 40, kind: 'breathe', alpha: 0.18 },
+    ],
+    stars: true,
+  },
+  starwatch: {
+    paint: paintStarwatchLoad,
+    sub: 'Waiting for the stars',
+    title: 0xd8e0ff,
+    text: 0xa8b0d8,
+    bar: [0x0e1028, 0x6a7ae0, 0xe0e8ff],
+    motes: [
+      // Motes of light rising off the meadow.
+      { zone: [70, 74, 100, 20], speedX: [-2, 2], speedY: [-6, -2], life: [2200, 3600], every: 260, tints: [0xd8e8ff, 0xc8b8ff, 0xffffff] },
+      // Fireflies by the lanterns.
+      { zone: 'spots', spot: 'lanterns', spread: 6, speedX: [-3, 3], speedY: [-3, 2], life: [1600, 2800], every: 320, tints: [0xd8ff8a, 0xf0ffb8] },
+    ],
+    lights: [
+      { spot: 'lanterns', tint: 0xffb050, r: 8, kind: 'flicker', alpha: 0.5 },
+      { spot: 'moon', tint: 0xc8d0ff, r: 22, kind: 'breathe', alpha: 0.18 },
     ],
     stars: true,
   },

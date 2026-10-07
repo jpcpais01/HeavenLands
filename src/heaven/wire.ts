@@ -19,6 +19,8 @@ import { Pastimes } from './pastimes';
 import { Showers } from './weather';
 import { ownCompanions } from './companions';
 import { openFriendsPanel } from './ui/friendsPanel';
+import { STARWATCH_ARENA, STARWATCH_ID } from './starwatch';
+import { Starwatch } from './starwatch/Starwatch';
 
 /** Seed packets in a chest: how many, and the odds a packet is a magic seed rather than a wild one. */
 const CHEST_SEEDS: [number, number] = [2, 3];
@@ -44,8 +46,8 @@ export function wireCozy(): void {
   cozy.spawn = (world, x, y) => new Wanderer(world, x, y, profile.look, true);
   cozy.me = () => ({ name: profile.name, ...lookFields(profile.look) });
   cozy.hud = (scene) => new EmoteButtons(scene);
-  cozy.arena = (id) => landArena(id);
-  cozy.land = (world, arena, ground, view) => buildLand(world, arena, ground, view);
+  cozy.arena = (id) => (id === STARWATCH_ID ? STARWATCH_ARENA : landArena(id));
+  cozy.land = (world, arena, ground, view) => (arena === STARWATCH_ID ? new Starwatch(world, ground, view) : buildLand(world, arena, ground, view));
   cozy.map = (id) => landMap(id);
   cozy.light = heavenLight;
   cozy.pastimes = (world, at) => new Pastimes(world, at);

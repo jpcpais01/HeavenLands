@@ -38,7 +38,6 @@ const BOUNCE = hex('#eea6a0');
 const ROOT = hex('#38221e');
 const ROOT_LIT = hex('#6a4632');
 
-const MOSS = ramp('#16302e', '#1e403a', '#285244', '#36664c', '#4a7a54', '#64905e', '#86a66a');
 const DEEP_ROCK = ramp('#1a1630', '#262042', '#342c56', '#463c6a', '#5a5080', '#726896', '#9086ae', '#ada6c4');
 const NIGHT_GRASS = ramp('#14242e', '#1a3038', '#223e42', '#2c4e4c', '#3a6056', '#4c7460', '#64886c');
 const NIGHT_ROCK = ramp('#141428', '#1c1c36', '#262646', '#323458', '#40446a', '#52587e', '#686e92', '#8288a8');
@@ -529,26 +528,6 @@ function crystal(a: Art, x: number, y: number, h: number, w: number, pal: RGB[],
   a.set(x, y + s * (h + 1), INK);
 }
 
-/** A clipped hedge block: its top lit, its front face darker. */
-function hedge(a: Art, x0: number, y0: number, x1: number, y1: number, seed: number, flowers = false): void {
-  const pal = CROWN.oak;
-  softShadow(a, (x0 + x1) / 2 + 2, y1 + 1, (x1 - x0) / 2 + 1, 1.6, 0.7);
-  piece(a, x0, y0, x1 - x0 + 1, y1 - y0 + 1, (p) => {
-    const w = x1 - x0;
-    const h = y1 - y0;
-    for (let py = 0; py <= h; py++) {
-      for (let px = 0; px <= w; px++) {
-        const front = py >= h - 1;
-        let v = front ? 0.25 - px / w * 0.1 : 0.66 - px / w * 0.2 - py / Math.max(1, h) * 0.12;
-        if (py === 0) v += 0.12;
-        if (hash2(px + x0, py + y0, seed) < 0.15) v += 0.12;
-        p.set(px + 1, py + 1, tone(pal, v, px, py, 0.7));
-        if (flowers && !front && hash2(px + x0, py + y0, seed + 3) < 0.12) p.set(px + 1, py + 1, hash2(px, py, 1) < 0.5 ? hex('#ff9ab8') : hex('#fff0f0'));
-      }
-    }
-  }, mix(pal[0], INK, 0.5));
-}
-
 /** A waymarker: a standing stone with a lit rune, for places the Atlas has no picture of yet. */
 function waymarker(a: Art, x: number, y: number): { x: number; y: number } {
   const STONE = ramp('#4a4258', '#6c6478', '#908898', '#b8b0b8', '#ddd6d0');
@@ -778,156 +757,6 @@ function cloudrestIsle(): IsleArt {
     falls: [outlet(a, b, 58)],
     glows: [{ x: cx, y: cy - 2, r: 12, tint: 0xffe0a0 }],
     glints: [{ x: cx, y: cy - 3 }],
-  };
-}
-
-/** The Sunken Garden: hedges round a court sunk into the isle, a fountain in its heart, stairs going down. */
-function gardenIsle(): IsleArt {
-  const a = new Art(124, 108);
-  const cx = 62;
-  const cy = 44;
-  const rx = 50;
-  const ry = 25;
-  const b = body(a, { cx, cy, rx, ry, depth: 38, seed: 41, roots: 8 });
-  vines(a, b, 42, 9);
-  const SAND = ramp('#4a3a46', '#6e5658', '#94786c', '#b89a80', '#d8bc98', '#f0dab4');
-  const MARBLE = ramp('#6a6280', '#948aa4', '#bcb2c6', '#e2d8de', '#fff6ec');
-  // The court: x0..x1, its rim at y0 and y1, the north wall's face showing as it drops.
-  const x0 = 36;
-  const x1 = 88;
-  const y0 = 33;
-  const y1 = 56;
-  const WALL = 4;
-  for (let y = y0; y <= y1; y++) {
-    for (let x = x0; x <= x1; x++) {
-      const edge = x === x0 || x === x1 || y === y0 || y === y1;
-      if (edge) {
-        a.set(x, y, tone(SAND, y === y0 || x === x0 ? 0.9 : 0.6, x, y));
-        continue;
-      }
-      if (y <= y0 + WALL) {
-        // The north wall's face, mossy at its foot.
-        const moss = y === y0 + WALL && hash2(x, y, 1) < 0.5;
-        a.set(x, y, moss ? GRASS[2] : tone(SAND, 0.5 - (y - y0) * 0.06 + ((x + (y % 2) * 2) % 4 === 0 ? -0.12 : 0), x, y));
-        continue;
-      }
-      // Paving, in the shade of the walls near the north and west.
-      const shade = (y - y0 - WALL < 3 ? 0.18 : 0) + (x - x0 < 2 ? 0.12 : 0);
-      const tile = (x % 4 === 0 || y % 3 === 0) ? -0.1 : 0;
-      a.set(x, y, tone(SAND, 0.55 + tile - shade - (x - x0) / (x1 - x0) * 0.1, x, y));
-    }
-  }
-  // Grass grown between the stones.
-  for (let k = 0; k < 30; k++) {
-    const x = x0 + 2 + Math.floor(hash2(k, 1, 4) * (x1 - x0 - 4));
-    const y = y0 + WALL + 2 + Math.floor(hash2(k, 2, 4) * (y1 - y0 - WALL - 3));
-    a.set(x, y, GRASS[3]);
-  }
-  const items: { y: number; draw: () => void }[] = [];
-  // The parterre: four hedge beds round the fountain.
-  for (const [hx0, hy0, hx1, hy1] of [[40, 41, 56, 44], [68, 41, 84, 44], [40, 50, 56, 53], [68, 50, 84, 53]]) items.push({ y: hy1, draw: () => hedge(a, hx0, hy0, hx1, hy1, hx0 + hy0, true) });
-  // The fountain.
-  const fx = 62;
-  const fy = 47;
-  items.push({
-    y: fy + 3,
-    draw: () => {
-      softShadow(a, fx + 3, fy + 2, 7, 2.5, 0.75);
-      piece(a, fx - 7, fy - 9, 15, 13, (p) => {
-        p.oval(8, 9, 7, 3.4, (x, y, nx, ny) => (nx * nx + ny * ny > 0.5 ? tone(MARBLE, 0.7 - nx * 0.3 - ny * 0.2, x, y) : tone(ramp('#3e5c8c', '#6a90b8', '#a8c8dc', '#e8f4f4'), 0.5 - ny * 0.3 + ((x + y) % 4 === 0 ? 0.3 : 0), x, y)));
-        p.rect(7, 3, 8, 8, (px) => (px === 7 ? MARBLE[3] : MARBLE[1]));
-        p.oval(8, 3, 3, 1.3, (x, y, nx) => tone(MARBLE, 0.7 - nx * 0.3, x, y));
-        p.set(8, 1, hex('#e8f8ff'));
-        p.set(7, 0, hex('#bfe4f0'));
-        p.set(9, 0, hex('#bfe4f0'));
-      });
-    },
-  });
-  // The stairs down into the court through its south rim.
-  for (let y = y1 - 3; y <= y1 + 4; y++) {
-    for (let x = 57; x <= 67; x++) {
-      if (x === 57 || x === 67) a.set(x, y, tone(SAND, x === 57 ? 0.85 : 0.35, x, y));
-      else a.set(x, y, tone(SAND, (y - y1) % 2 === 0 ? 0.8 - (x - 57) * 0.02 : 0.32, x, y));
-    }
-  }
-  // Hedges and topiary on the grass round the court.
-  items.push({ y: 29, draw: () => hedge(a, 38, 25, 86, 29, 7, true) });
-  for (const [x, y] of [[28, 40], [96, 40], [28, 54], [96, 54]] as [number, number][]) items.push({ y, draw: () => tree(a, x, y, 'meadow', 3, x * 7 + y) });
-  for (const [x, y, h, br] of [[24, 46, 9, false], [101, 47, 6, true], [46, 64, 5, true]] as [number, number, number, boolean][]) items.push({ y, draw: () => pillar(a, x, y, h, br, MARBLE) });
-  items.push({ y: 30, draw: () => tree(a, 18, 30, 'sakura', 5, 77) });
-  items.push({ y: 32, draw: () => tree(a, 104, 32, 'oak', 5, 78) });
-  items.sort((p, q) => p.y - q.y).forEach((i) => i.draw());
-  // A spout through the south rim, where the fountain's water leaves.
-  let ox = 84;
-  while (b.rim[ox] < 0) ox--;
-  return {
-    art: a,
-    ax: cx,
-    ay: cy,
-    rx,
-    ry,
-    falls: [outlet(a, b, ox)],
-    glows: [],
-    glints: [{ x: fx + 1, y: fy - 8 }, { x: fx - 3, y: fy + 1 }, { x: fx + 4, y: fy }],
-  };
-}
-
-/** Glimmerdeep: a hill of dark rock with a cave mouth full of crystal light, crystals hanging beneath. */
-function glimmerIsle(): IsleArt {
-  const a = new Art(104, 124);
-  const cx = 52;
-  const cy = 48;
-  const rx = 39;
-  const ry = 19;
-  const b = body(a, { cx, cy, rx, ry, depth: 54, seed: 53, grass: MOSS, rock: DEEP_ROCK, bounce: hex('#c890c8'), roots: 4, spikes: 4 });
-  const AMETHYST = ramp('#3a1e6a', '#6a3aa8', '#9a6ae0', '#c8a0ff', '#f4e8ff');
-  const TEAL = ramp('#0e3a4a', '#1a6a7a', '#2aa8b4', '#7ae8e8', '#e8ffff');
-  // The hill.
-  const hill = new Art(a.w, a.h);
-  hill.oval(52, 44, 25, 17, (x, y, nx, ny) => {
-    if (y > 50) return null;
-    if (ny < -1 + valueNoise(x, 0, 4, 5) * 0.5 + Math.abs(nx) * 0.1) return null;
-    let v = lit(nx, ny, 0.56) + (valueNoise(x * 2, y, 3, 9) - 0.5) * 0.3;
-    if ((y + (x >> 2)) % 5 === 0) v -= 0.1;
-    if (ny < -0.5 && hash2(x, y, 2) < 0.4) return tone(MOSS, v, x, y);
-    return tone(DEEP_ROCK, v, x, y);
-  });
-  // The cave's mouth, glowing from within.
-  hill.poly([[42, 51], [43, 44], [47, 39], [52, 38], [57, 39], [61, 44], [62, 51]], (x, y) => {
-    const d = Math.hypot((x - 52) / 10, (y - 51) / 13);
-    return tone(ramp('#0a0618', '#1a1034', '#2e1e5a', '#3a5a9a', '#5ac8d8', '#b8ffff'), 0.95 - d * 1.05, x, y, 0.8);
-  });
-  hill.outline(hex('#0e0a1c'));
-  softShadow(a, 66, 50, 12, 4, 0.7);
-  a.stamp(hill, 0, 0);
-  // Crystals on the hill and by the mouth.
-  for (const [x, y, h, w, p] of [[36, 46, 6, 1, 0], [33, 48, 3, 1, 1], [66, 44, 8, 2, 0], [70, 47, 4, 1, 1], [50, 30, 6, 1, 1], [55, 31, 4, 1, 0], [41, 54, 3, 1, 1], [63, 55, 4, 1, 0]] as [number, number, number, number, number][]) crystal(a, x, y, h, w, p ? TEAL : AMETHYST);
-  // Glowcaps on the moss.
-  for (const [x, y] of [[24, 50], [78, 52], [30, 58], [72, 60]] as [number, number][]) {
-    a.set(x, y, hex('#c8d0e0'));
-    a.rect(x - 1, y - 2, x + 1, y - 1, (px, py) => (py === y - 2 ? hex('#b0ffff') : px === x + 1 ? hex('#2aa8c8') : hex('#5af0ff')));
-  }
-  // Crystals hanging from the rock beneath, the biggest near the middle.
-  const rand = rng(57);
-  const under: { x: number; y: number }[] = [];
-  for (let k = 0; k < 12; k++) {
-    const x = Math.round(cx + (rand() * 2 - 1) * rx * 0.75);
-    if (b.bottom[x] < 0) continue;
-    const t = Math.abs(x - cx) / rx;
-    const h = Math.round(3 + rand() * 9 * (1 - t));
-    const y = b.bottom[x] - Math.floor(rand() * 4);
-    crystal(a, x, y, h, h > 6 ? 2 : 1, k % 3 === 0 ? TEAL : AMETHYST, true);
-    under.push({ x, y: y + Math.round(h / 2) });
-  }
-  return {
-    art: a,
-    ax: cx,
-    ay: cy,
-    rx,
-    ry,
-    falls: [],
-    glows: [{ x: 52, y: 46, r: 16, tint: 0x6ae0ff }, ...under.slice(0, 5).map((u, k) => ({ ...u, r: 9, tint: k % 3 === 0 ? 0x6ae8e8 : 0xb880ff }))],
-    glints: [{ x: 66, y: 37 }, { x: 36, y: 41 }, ...under.slice(0, 4)],
   };
 }
 
@@ -1994,8 +1823,6 @@ export const ISLE_ART: Record<string, () => IsleArt> = {
   home: homeIsle,
   everwood: everwoodIsle,
   cloudrest: cloudrestIsle,
-  garden: gardenIsle,
-  glimmerdeep: glimmerIsle,
   starwatch: starwatchIsle,
   shore: shoreIsle,
   saltflats: saltIsle,

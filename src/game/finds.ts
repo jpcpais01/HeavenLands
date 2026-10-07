@@ -35,7 +35,7 @@ export const FINDS: FindDef[] = [
   { id: 'cloudberry', one: 'Cloudberry', many: 'Cloudberries', places: { island: 1 }, tint: 0xffa860 },
   { id: 'lotus', one: 'Lotus root', many: 'Lotus roots', places: { garden: 2 }, tint: 0xf0b8c8 },
   { id: 'glowcap', one: 'Glowcap', many: 'Glowcaps', places: { deep: 1 }, tint: 0x6affc8, glow: true },
-  { id: 'starsugar', one: 'Star sugar', many: 'Star sugar', places: { cosmos: 1 }, tint: 0xfff2a8, glow: true },
+  { id: 'starsugar', one: 'Star sugar', many: 'Star sugar', places: { starwatch: 1 }, tint: 0xfff2a8, glow: true },
 ];
 
 export const findById = (id: string): FindDef | undefined => FINDS.find((f) => f.id === id);

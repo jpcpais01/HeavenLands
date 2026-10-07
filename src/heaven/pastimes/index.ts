@@ -124,7 +124,7 @@ export class Pastimes implements CozyPastimes {
       this.sleeping(hero, d, dt);
       return;
     }
-    const pose = d.kind === 'seat' ? 'sit' : d.kind === 'play' ? 'play' : d.kind === 'gaze' ? 'gaze' : 'strum';
+    const pose = d.kind === 'seat' ? 'seat' : d.kind === 'play' ? 'play' : d.kind === 'gaze' ? 'gaze' : 'strum';
     // Walked off (or anything else took the pose): the pastime ends with it.
     if (hero.posing !== pose) {
       this.stop();
@@ -182,7 +182,7 @@ export class Pastimes implements CozyPastimes {
     switch (s.kind) {
       case 'seat':
         this.place(hero, s);
-        hero.hold('sit', s.dir, s.lift, s.depth);
+        hero.hold('seat', s.dir, s.lift, s.depth);
         sound.sitDown(this.world.pan(s.x));
         this.doing = { kind: 'seat', spot: s, from };
         return true;

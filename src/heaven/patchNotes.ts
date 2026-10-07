@@ -18,6 +18,35 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    v: 6,
+    date: '2026-10-07',
+    title: 'Build anywhere, together',
+    notes: [
+      'You can build everywhere now: Hearthhome, the Everwood, Cloudrest, Starwatch and every endless land. Whatever you build in a place is kept, always.',
+      'Friends: one Friends button in every place. Invite friends right where you stand, join a friend with their code, and turn on Friends can build to let them build, plant and tidy like you.',
+      'Shared worlds: once you invite friends to a place it stays theirs to visit. It shows under Friends\' worlds, and they can open it any time, even while you\'re away. What they build is kept for you too.',
+      'Opening a shared world while friends are playing in it takes you straight to them.',
+    ],
+  },
+  {
+    v: 5,
+    date: '2026-10-07',
+    title: 'Starry nights',
+    notes: [
+      'Starwatch is reborn: a calm little isle in the night sky with a star terrace, lanterns, a telescope, blankets on the grass and a pond full of stars. Shooting stars fall all the time, and every few minutes a meteor shower lights the sky, the same for friends together.',
+      'Glimmerdeep and the Sunken Garden are gone from the Atlas.',
+      'The Everwood\'s minimap is now the same as everywhere else, and its big map opens much faster and remembers what it has drawn.',
+    ],
+  },
+  {
+    v: 4,
+    date: '2026-10-07',
+    title: 'Take a seat',
+    notes: [
+      'Sitting looks right now: on a bench, chair or sofa your legs bend over the edge with your feet hanging, and sitting on the ground crosses your legs, whatever you wear.',
+    ],
+  },
+  {
     v: 3,
     date: '2026-10-07',
     title: 'A cleaner profile',
