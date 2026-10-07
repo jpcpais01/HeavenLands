@@ -53,10 +53,10 @@ export const PLACES: Place[] = [
   },
   {
     id: 'starwatch',
-    arena: 'cosmos',
+    arena: 'starwatch',
     name: 'Starwatch',
-    blurb: 'A terrace among the stars',
-    lore: 'Past the last cloud there is a terrace of old stone floating in the night, with the stars close enough to count. A good place to sit and say nothing.',
+    blurb: 'Where the stars fall',
+    lore: "Past the last cloud a little isle floats in a night that never ends, a terrace of moonstone on its crown with the sky's map laid in its floor. Spread out on the grass and watch the stars fall; every few minutes a whole shower of them comes.",
     endless: false,
     together: true,
     dayNight: false,

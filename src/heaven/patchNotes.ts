@@ -18,6 +18,16 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    v: 4,
+    date: '2026-10-07',
+    title: 'Starry nights',
+    notes: [
+      'Starwatch is reborn: a calm little isle in the night sky with a star terrace, lanterns, a telescope, blankets on the grass and a pond full of stars. Shooting stars fall all the time, and every few minutes a meteor shower lights the sky, the same for friends together.',
+      'Glimmerdeep and the Sunken Garden are gone from the Atlas.',
+      'The Everwood\'s minimap is now the same as everywhere else, and its big map opens much faster and remembers what it has drawn.',
+    ],
+  },
+  {
     v: 3,
     date: '2026-10-07',
     title: 'A cleaner profile',
