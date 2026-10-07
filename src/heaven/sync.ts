@@ -17,7 +17,7 @@ import { onStored } from './storage';
 
 const PREFIX = 'heaven-lands.';
 /** This device's own keys (after the prefix, matched as a start), never sent up or replaced. */
-const DEVICE_ONLY = ['account', 'sync', 'settings', 'bootSteps', 'loadMs.', 'sfxClips', 'crash', 'heartbeat', 'echo', 'minimap', 'statsHud', 'season', 'welcomed'];
+const DEVICE_ONLY = ['account', 'sync', 'settings', 'bootSteps', 'loadMs.', 'sfxClips', 'crash', 'heartbeat', 'echo', 'minimap', 'statsHud', 'season', 'welcomed', 'notesSeen'];
 const STATE_KEY = PREFIX + 'sync';
 /** A change waits this long for more before going up (ms)... */
 const SAVE_DELAY = 3000;

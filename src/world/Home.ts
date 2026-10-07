@@ -219,6 +219,11 @@ export class Home {
     }
   }
 
+  /** The plot as the things built on it are seen by others (see buildLand.ts). */
+  get buildLand(): BuildLand {
+    return this.land;
+  }
+
   /** Where a visit starts: the foot of the plot, or the nearest open ground to it. */
   spawnPoint(): { x: number; y: number } {
     for (let r = 0; r < 200; r += 6) {

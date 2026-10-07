@@ -10,6 +10,10 @@
 //   loads offline and starts instantly on later launches. Its caches are
 //   named 'heaven-<version>', and it only ever clears old ones of that name.
 //
+// - notes.json: the patch notes (src/heaven/patchNotes.ts), left out of the
+//   precache so a running game always fetches the deployed one and can show
+//   what an update brings before it's taken (src/heaven/updates.ts).
+//
 // - The loading screen (inline in index.html) gets the game's title logo as
 //   a PNG and the pixel font's letters, so it can show both before the game
 //   itself has loaded.
@@ -24,6 +28,7 @@ import type { Plugin, ResolvedConfig } from 'vite';
 import { GLYPHS } from '../src/art/glyphs';
 import { ICONS, renderIcon } from '../src/heaven/art/icon';
 import { LOGO_FRAMES, heavenLogo } from '../src/heaven/art/logo';
+import { PATCH_NOTES } from '../src/heaven/patchNotes';
 import { encodePNG } from './png';
 
 /** Heaven Lands' dawn: the peach its loading screen and install splash open on. */
@@ -53,6 +58,9 @@ function manifest() {
 
 /** The title logo's frames, stacked top to bottom, for the loading screen. */
 const LOGO_FILE = 'loader/logo.png';
+/** The patch notes, never precached. */
+const NOTES_FILE = 'notes.json';
+const notesJSON = () => JSON.stringify(PATCH_NOTES);
 
 const HEAD_TAGS = [
   { tag: 'link', attrs: { rel: 'preload', as: 'image', href: LOGO_FILE } },
@@ -151,6 +159,11 @@ export function pwa(): Plugin {
           res.end(JSON.stringify(manifest(), null, 2));
           return;
         }
+        if (url.endsWith(`/${NOTES_FILE}`)) {
+          res.setHeader('Content-Type', 'application/json');
+          res.end(notesJSON());
+          return;
+        }
         if (url.endsWith(`/${LOGO_FILE}`)) {
           res.setHeader('Content-Type', 'image/png');
           res.end(logoPNG().png);
@@ -170,10 +183,11 @@ export function pwa(): Plugin {
       for (const spec of ICONS) this.emitFile({ type: 'asset', fileName: `icons/${spec.name}`, source: iconPNG(spec.name)! });
       this.emitFile({ type: 'asset', fileName: LOGO_FILE, source: logoPNG().png });
       this.emitFile({ type: 'asset', fileName: 'manifest.webmanifest', source: JSON.stringify(manifest(), null, 2) });
+      this.emitFile({ type: 'asset', fileName: NOTES_FILE, source: notesJSON() });
     },
     writeBundle(_opts, bundle) {
       // Runs after every file is written, so the precache list is complete.
-      const files = Object.keys(bundle).filter((f) => !f.endsWith('.map')).sort();
+      const files = Object.keys(bundle).filter((f) => !f.endsWith('.map') && f !== NOTES_FILE).sort();
       const outDir = resolve(config.root, config.build.outDir);
       writeFileSync(resolve(outDir, 'sw.js'), swSource(versionOf(files, bundle), files));
     },

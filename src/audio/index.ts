@@ -429,6 +429,47 @@ class GameSound {
     this.fx('cooked', 'cooked', [tier]);
   }
 
+  /** A note in a jam (see Sfx.jamNote); each note has its own slot, so chords and quick runs all sound. */
+  jamNote(inst: number, note: number, pan = 0): void {
+    this.fx(`jam${inst}${note}`, 'jamNote', [pan, inst, note], 0);
+  }
+
+  forage(tier: number, pan = 0): void {
+    this.fx('forage', 'forage', [pan, tier], 0);
+  }
+
+  honey(): void {
+    this.fx('honey', 'honey', []);
+  }
+
+  sitDown(pan = 0): void {
+    this.fx('sitDown', 'sitDown', [pan], 0);
+  }
+
+  sleep(): void {
+    this.fx('sleep', 'sleep', []);
+  }
+
+  wake(): void {
+    this.fx('wake', 'wake', []);
+  }
+
+  starLink(step: number): void {
+    this.fx(`starLink${step}`, 'starLink', [step]);
+  }
+
+  starMiss(): void {
+    this.fx('starMiss', 'starMiss', []);
+  }
+
+  constellation(): void {
+    this.fx('constellation', 'constellation', []);
+  }
+
+  telescope(): void {
+    this.fx('telescope', 'telescope', []);
+  }
+
   critterRelease(pan = 0): void {
     this.fx('critterRelease', 'critterRelease', [pan], 0);
   }
