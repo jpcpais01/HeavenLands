@@ -1567,11 +1567,8 @@ function head(c: PixelCanvas, k: Kit, g: Geo): void {
     c.ellipse(g.hx - 5.3, g.hy + 0.9, 1, 1.3, k.skin, { bias: -1 });
     c.ellipse(g.hx + 5.3, g.hy + 0.9, 1, 1.3, k.skin, { bias: -1 });
   }
+  // No nose in profile: at this size a lone pixel past the cheek reads as a wart, not a nose.
   c.ellipse(g.hx, g.hy, rx, 5.2, k.skin, { flatten: 1.1 });
-  if (side) {
-    // The nose, and the chin's curve toward the front.
-    c.px(Math.round(g.hx - rx - 0.4), Math.round(g.hy + 1.4), k.skin, sphere(-0.9, 0, 1));
-  }
   if (g.view !== 'up') face(c, k, g);
 }
 
@@ -1626,10 +1623,7 @@ function face(c: PixelCanvas, k: Kit, g: Geo): void {
     const ex = hx - 3;
     const one = pat.map((r) => (r.length === 3 ? r.slice(0, 2) : r));
     paint(c, k, one, ex - (one[0]?.length === 1 ? -1 : 0), ey);
-    const mx = hx - 4;
-    const my = ey + 3;
-    c.px(mx, my, k.mouth, FLAT);
-    if (mStyle === 'grin' || mStyle === 'blep' || mStyle === 'open') c.px(mx, my + 1, k.tongue, FLAT);
+    // No mouth in profile either: on the face's edge it read as stray lips. The eye and cheek carry the look.
     if (cheeks === 1 || cheeks === 3) c.px(hx - 1, ey + 2, k.blush, FLAT);
     if (cheeks >= 2) {
       c.shade(hx - 2, ey + 3, -1);

@@ -18,6 +18,12 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    v: 3,
+    date: '2026-10-07',
+    title: 'A cleaner profile',
+    notes: ['Wanderers seen from the side no longer have the odd pixel by the face that looked like a nose or lips.'],
+  },
+  {
     v: 2,
     date: '2026-10-07',
     title: 'Sand and showers',
