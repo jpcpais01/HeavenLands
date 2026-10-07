@@ -14,6 +14,7 @@ The engine underneath (world, Home, Everwood, art, online) was the Myths and Leg
 
 - `npm run dev`: dev server. `npm run build`: `tsc --noEmit` then `vite build`. `npm run typecheck`: types only. `npm run preview`: serve the build.
 - `npm run wanderer` (`npx tsx scripts/wanderer.ts [out.png] [scale] [count] [seed]`): renders wanderers, a row per look, a column per pose.
+- `npm run outfits` (`npx tsx scripts/outfits.ts [out.png] [scale] [field=id,...] [key=id...]`): renders the ready-made outfits (`PRESETS` in `look.ts`, the creator's Outfits tab), or one field's items side by side.
 - `npm run lands -- <id> out.png 2 [x y w h]` (`npx tsx scripts/lands.ts`): paints a patch of an endless land (`NIGHT=1` by night).
 
 ## Map of the code

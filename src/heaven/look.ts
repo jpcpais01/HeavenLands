@@ -154,6 +154,15 @@ export const HAIRS: Named[] = [
   { id: 'hime', name: 'Hime' },
   { id: 'swept', name: 'Swept' },
   { id: 'shaved', name: 'Shaved' },
+  { id: 'sidepart', name: 'Side part' },
+  { id: 'quiff', name: 'Quiff' },
+  { id: 'undercut', name: 'Undercut' },
+  { id: 'mohawk', name: 'Mohawk' },
+  { id: 'mullet', name: 'Mullet' },
+  { id: 'manbun', name: 'Man bun' },
+  { id: 'curtains', name: 'Curtains' },
+  { id: 'locs', name: 'Locs' },
+  { id: 'slick', name: 'Slicked back' },
 ];
 export const BEARDS: Named[] = [
   { id: 'none', name: 'None' },
@@ -161,6 +170,10 @@ export const BEARDS: Named[] = [
   { id: 'moustache', name: 'Moustache' },
   { id: 'goatee', name: 'Goatee' },
   { id: 'full', name: 'Full beard' },
+  { id: 'handlebar', name: 'Handlebar' },
+  { id: 'sideburns', name: 'Sideburns' },
+  { id: 'chinstrap', name: 'Chinstrap' },
+  { id: 'viking', name: 'Braided beard' },
 ];
 export const TOPS: Named[] = [
   { id: 'tee', name: 'Tee' },
@@ -178,6 +191,19 @@ export const TOPS: Named[] = [
   { id: 'tunic', name: 'Belted tunic' },
   { id: 'puffer', name: 'Puffer jacket' },
   { id: 'vest', name: 'Waistcoat' },
+  { id: 'flannel', name: 'Flannel shirt' },
+  { id: 'hawaiian', name: 'Hawaiian shirt' },
+  { id: 'jersey', name: 'Football jersey' },
+  { id: 'letterman', name: 'Varsity jacket' },
+  { id: 'leather', name: 'Leather jacket' },
+  { id: 'denim', name: 'Denim jacket' },
+  { id: 'polo', name: 'Polo shirt' },
+  { id: 'blazer', name: 'Blazer and tie' },
+  { id: 'tracksuit', name: 'Track jacket' },
+  { id: 'raglan', name: 'Baseball tee' },
+  { id: 'poncho', name: 'Poncho' },
+  { id: 'armor', name: 'Breastplate' },
+  { id: 'gi', name: 'Gi' },
 ];
 export const BOTTOMS: Named[] = [
   { id: 'trousers', name: 'Trousers' },
@@ -190,6 +216,11 @@ export const BOTTOMS: Named[] = [
   { id: 'pleated', name: 'Pleated skirt' },
   { id: 'rolled', name: 'Rolled jeans' },
   { id: 'bloomers', name: 'Puffy pants' },
+  { id: 'joggers', name: 'Joggers' },
+  { id: 'boardshorts', name: 'Board shorts' },
+  { id: 'kilt', name: 'Kilt' },
+  { id: 'ripped', name: 'Ripped jeans' },
+  { id: 'hakama', name: 'Hakama' },
 ];
 export const DRESSES: Named[] = [
   { id: 'none', name: 'None' },
@@ -202,6 +233,14 @@ export const DRESSES: Named[] = [
   { id: 'apron', name: 'Apron dress' },
   { id: 'knitdress', name: 'Sweater dress' },
   { id: 'starrobe', name: 'Starry robe' },
+  { id: 'coveralls', name: 'Coveralls' },
+  { id: 'spacesuit', name: 'Space suit' },
+  { id: 'ninja', name: 'Ninja garb' },
+  { id: 'knight', name: 'Knight armour' },
+  { id: 'captain', name: "Captain's coat" },
+  { id: 'wizard', name: 'Wizard robe' },
+  { id: 'qipao', name: 'Qipao' },
+  { id: 'ballgown', name: 'Ball gown' },
 ];
 export const SHOES: Named[] = [
   { id: 'boots', name: 'Boots' },
@@ -212,6 +251,9 @@ export const SHOES: Named[] = [
   { id: 'maryjanes', name: 'Mary Janes' },
   { id: 'clogs', name: 'Clogs' },
   { id: 'bare', name: 'Barefoot' },
+  { id: 'hightops', name: 'High-tops' },
+  { id: 'cowboy', name: 'Cowboy boots' },
+  { id: 'loafers', name: 'Loafers' },
 ];
 export const HATS: Named[] = [
   { id: 'none', name: 'None' },
@@ -236,6 +278,16 @@ export const HATS: Named[] = [
   { id: 'bandana', name: 'Bandana' },
   { id: 'foxmask', name: 'Fox mask' },
   { id: 'antlers', name: 'Antlers' },
+  { id: 'cowboy', name: 'Cowboy hat' },
+  { id: 'viking', name: 'Viking helm' },
+  { id: 'helm', name: 'Knight helm' },
+  { id: 'spacehelm', name: 'Space helmet' },
+  { id: 'tricorn', name: 'Tricorn' },
+  { id: 'wizard', name: 'Wizard hat' },
+  { id: 'backcap', name: 'Cap backwards' },
+  { id: 'headband', name: 'Headband' },
+  { id: 'fedora', name: 'Fedora' },
+  { id: 'toque', name: 'Chef hat' },
 ];
 export const GLASSES: Named[] = [
   { id: 'none', name: 'None' },
@@ -245,6 +297,10 @@ export const GLASSES: Named[] = [
   { id: 'hearts', name: 'Heart shades' },
   { id: 'monocle', name: 'Monocle' },
   { id: 'patch', name: 'Eyepatch' },
+  { id: 'aviators', name: 'Aviators' },
+  { id: 'goggles', name: 'Goggles' },
+  { id: 'visor', name: 'Visor' },
+  { id: 'facemask', name: 'Face mask' },
 ];
 export const EARRINGS: Named[] = [
   { id: 'none', name: 'None' },
@@ -260,6 +316,9 @@ export const NECKS: Named[] = [
   { id: 'pendant', name: 'Pendant' },
   { id: 'pearls', name: 'Pearls' },
   { id: 'lei', name: 'Flower lei' },
+  { id: 'tie', name: 'Tie' },
+  { id: 'chain', name: 'Gold chain' },
+  { id: 'dogtags', name: 'Dog tags' },
 ];
 export const BACKS: Named[] = [
   { id: 'none', name: 'None' },
@@ -272,6 +331,13 @@ export const BACKS: Named[] = [
   { id: 'guitar', name: 'Guitar' },
   { id: 'cattail', name: 'Cat tail' },
   { id: 'foxtail', name: 'Fox tail' },
+  { id: 'sword', name: 'Sword' },
+  { id: 'shield', name: 'Shield' },
+  { id: 'skateboard', name: 'Skateboard' },
+  { id: 'quiver', name: 'Quiver' },
+  { id: 'jetpack', name: 'Jetpack' },
+  { id: 'dragonwings', name: 'Dragon wings' },
+  { id: 'surfboard', name: 'Surfboard' },
 ];
 export const HELD: Named[] = [
   { id: 'none', name: 'None' },
@@ -292,6 +358,14 @@ export const HELD: Named[] = [
   { id: 'wand', name: 'Star wand' },
   { id: 'paperlantern', name: 'Paper lantern' },
   { id: 'mug', name: 'Cocoa mug' },
+  { id: 'football', name: 'Football' },
+  { id: 'basketball', name: 'Basketball' },
+  { id: 'woodsword', name: 'Wooden sword' },
+  { id: 'staff', name: 'Magic staff' },
+  { id: 'torch', name: 'Torch' },
+  { id: 'gamepad', name: 'Handheld game' },
+  { id: 'map', name: 'Treasure map' },
+  { id: 'puppy', name: 'Puppy' },
 ];
 
 /** One choice of the appearance: its key, and the list its number indexes. */
@@ -402,6 +476,58 @@ export const DEFAULT_LOOK: Appearance = {
   held: 1,
   heldColor: cloth('marigold'),
 };
+
+/** What a ready-made outfit sets: everything worn from the top down to the thing carried, but the earrings (those stay the wearer's own). */
+export type PresetKey = Exclude<keyof Appearance, 'height' | 'build' | 'skin' | 'eyes' | 'eyeColor' | 'brows' | 'mouth' | 'cheeks' | 'hair' | 'hairColor' | 'beard' | 'earrings'>;
+
+/** A ready-made outfit in the wardrobe, each piece and colour named by its id. */
+export interface Preset extends Named {
+  wear: Partial<Record<PresetKey, string>>;
+}
+
+/** Ready-made outfits, tapped on in the wardrobe: a strong share of adventurers, sportsmen and rogues beside the gowns and wings. */
+export const PRESETS: Preset[] = [
+  { id: 'knight', name: 'Knight', wear: { top: 'armor', bottom: 'trousers', dress: 'knight', dressColor: 'silver', trim: 'cherry', shoes: 'boots', shoesColor: 'charcoal', hat: 'helm', hatColor: 'cherry', back: 'shield', backColor: 'navy' } },
+  { id: 'astronaut', name: 'Astronaut', wear: { top: 'longsleeve', bottom: 'trousers', dress: 'spacesuit', dressColor: 'white', trim: 'tomato', shoes: 'boots', shoesColor: 'silver', hat: 'spacehelm', hatColor: 'white', back: 'jetpack', backColor: 'tomato' } },
+  { id: 'pirate', name: 'Pirate', wear: { top: 'blouse', bottom: 'trousers', bottomColor: 'cream', dress: 'captain', dressColor: 'navy', trim: 'marigold', shoes: 'boots', shoesColor: 'black', hat: 'tricorn', hatColor: 'black', glasses: 'patch', held: 'map', heldColor: 'brown' } },
+  { id: 'ninja', name: 'Ninja', wear: { top: 'longsleeve', bottom: 'trousers', dress: 'ninja', dressColor: 'charcoal', trim: 'cherry', shoes: 'slippers', shoesColor: 'black', hat: 'headband', hatColor: 'cherry', glasses: 'facemask', back: 'sword', backColor: 'black' } },
+  { id: 'wizard', name: 'Wizard', wear: { top: 'longsleeve', bottom: 'trousers', dress: 'wizard', dressColor: 'violet', trim: 'marigold', shoes: 'boots', shoesColor: 'brown', hat: 'wizard', hatColor: 'violet', held: 'staff', heldColor: 'sky' } },
+  { id: 'cowboy', name: 'Cowboy', wear: { top: 'flannel', topColor: 'rust', trim: 'cocoa', bottom: 'trousers', bottomColor: 'denim', shoes: 'cowboy', shoesColor: 'brown', hat: 'cowboy', hatColor: 'oat', neck: 'bandana', neckColor: 'tomato' } },
+  { id: 'skater', name: 'Skater', wear: { top: 'raglan', topColor: 'white', trim: 'black', bottom: 'ripped', bottomColor: 'denim', shoes: 'hightops', shoesColor: 'cherry', hat: 'backcap', hatColor: 'black', back: 'skateboard', backColor: 'tomato' } },
+  { id: 'footballer', name: 'Footballer', wear: { top: 'jersey', topColor: 'cherry', trim: 'white', bottom: 'shorts', bottomColor: 'white', shoes: 'sneakers', shoesColor: 'black', held: 'football', heldColor: 'black' } },
+  { id: 'rockstar', name: 'Rock star', wear: { top: 'leather', topColor: 'black', trim: 'silver', bottom: 'ripped', bottomColor: 'charcoal', shoes: 'boots', shoesColor: 'black', glasses: 'shades', neck: 'chain', neckColor: 'black', back: 'guitar', backColor: 'cherry' } },
+  { id: 'surfer', name: 'Surfer', wear: { top: 'hawaiian', topColor: 'sky', trim: 'butter', bottom: 'boardshorts', bottomColor: 'teal', shoes: 'sandals', shoesColor: 'brown', glasses: 'aviators', back: 'surfboard', backColor: 'marigold' } },
+  { id: 'viking', name: 'Viking', wear: { top: 'tunic', topColor: 'forest', trim: 'marigold', bottom: 'trousers', bottomColor: 'brown', shoes: 'boots', shoesColor: 'cocoa', hat: 'viking', hatColor: 'silver', back: 'shield', backColor: 'rust' } },
+  { id: 'gentleman', name: 'Gentleman', wear: { top: 'blazer', topColor: 'navy', trim: 'cherry', bottom: 'trousers', bottomColor: 'navy', shoes: 'loafers', shoesColor: 'brown', hat: 'fedora', hatColor: 'charcoal', held: 'book', heldColor: 'forest' } },
+  { id: 'explorer', name: 'Explorer', wear: { top: 'overshirt', topColor: 'sage', trim: 'cream', bottom: 'cargo', bottomColor: 'sand', shoes: 'boots', shoesColor: 'brown', hat: 'bucket', hatColor: 'oat', neck: 'bandana', neckColor: 'rust', back: 'backpack', backColor: 'brown', held: 'map', heldColor: 'brown' } },
+  { id: 'karate', name: 'Karate', wear: { top: 'gi', topColor: 'white', trim: 'black', bottom: 'trousers', bottomColor: 'white', shoes: 'bare', hat: 'headband', hatColor: 'tomato' } },
+  { id: 'samurai', name: 'Samurai', wear: { top: 'kimono', topColor: 'navy', trim: 'white', bottom: 'hakama', bottomColor: 'charcoal', shoes: 'sandals', shoesColor: 'cocoa', back: 'sword', backColor: 'black' } },
+  { id: 'mechanic', name: 'Mechanic', wear: { top: 'tee', bottom: 'trousers', dress: 'coveralls', dressColor: 'slate', trim: 'tomato', shoes: 'boots', shoesColor: 'black', hat: 'backcap', hatColor: 'tomato' } },
+  { id: 'athlete', name: 'Athlete', wear: { top: 'tracksuit', topColor: 'navy', trim: 'white', bottom: 'joggers', bottomColor: 'navy', shoes: 'sneakers', shoesColor: 'white', neck: 'chain', neckColor: 'black', held: 'basketball' } },
+  { id: 'highlander', name: 'Highlander', wear: { top: 'longsleeve', topColor: 'cream', trim: 'tomato', bottom: 'kilt', bottomColor: 'forest', shoes: 'boots', shoesColor: 'cocoa', back: 'sword', backColor: 'brown' } },
+  { id: 'chef', name: 'Chef', wear: { top: 'longsleeve', topColor: 'white', trim: 'charcoal', bottom: 'trousers', bottomColor: 'charcoal', shoes: 'clogs', shoesColor: 'black', hat: 'toque', hatColor: 'white', neck: 'bandana', neckColor: 'tomato', held: 'baguette' } },
+  { id: 'adventurer', name: 'Adventurer', wear: { top: 'leather', topColor: 'brown', trim: 'cream', bottom: 'cargo', bottomColor: 'olive', shoes: 'boots', shoesColor: 'cocoa', glasses: 'goggles', back: 'quiver', backColor: 'forest', held: 'torch' } },
+  { id: 'princess', name: 'Princess', wear: { top: 'blouse', bottom: 'trousers', dress: 'ballgown', dressColor: 'blush', trim: 'rose', shoes: 'maryjanes', shoesColor: 'rose', hat: 'crown', hatColor: 'sky', neck: 'pearls' } },
+  { id: 'festival', name: 'Festival', wear: { top: 'blouse', bottom: 'trousers', dress: 'qipao', dressColor: 'cherry', trim: 'marigold', shoes: 'maryjanes', shoesColor: 'black', held: 'paperlantern', heldColor: 'tomato' } },
+  { id: 'fairy', name: 'Fairy', wear: { top: 'tank', bottom: 'skirt', dress: 'sundress', dressColor: 'mint', trim: 'lilac', shoes: 'slippers', shoesColor: 'mint', hat: 'flowers', hatColor: 'lilac', back: 'fairy', backColor: 'mint', held: 'wand' } },
+  { id: 'angel', name: 'Angel', wear: { top: 'blouse', bottom: 'trousers', dress: 'gown', dressColor: 'white', trim: 'butter', shoes: 'sandals', shoesColor: 'cream', hat: 'halo', back: 'angel' } },
+];
+
+/** A ready-made outfit as the choices it sets: anything worn it doesn't name comes off; colours it doesn't name stay as they are. */
+export function presetWear(p: Preset): Partial<Appearance> {
+  const out: Partial<Appearance> = {};
+  const start = FIELDS.findIndex((f) => f.key === 'top');
+  for (const f of FIELDS.slice(start)) {
+    if (f.key === 'earrings') continue;
+    const want = p.wear[f.key as PresetKey];
+    const list = f.list as Named[];
+    if (want !== undefined) {
+      const i = list.findIndex((o) => o.id === want);
+      if (i >= 0) out[f.key] = i;
+    } else if (list[0]?.id === 'none') out[f.key] = 0;
+  }
+  return out;
+}
 
 const DIGITS = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
 

@@ -13,7 +13,7 @@ const id = (list: { id: string }[], i: number): string => list[i]?.id ?? list[0]
 
 // ---------------------------------------------------------------- hair
 
-type Tex = 'straight' | 'wavy' | 'curly' | 'spiky' | 'soft' | 'buzz';
+type Tex = 'straight' | 'wavy' | 'curly' | 'spiky' | 'soft' | 'buzz' | 'locs';
 
 interface HairDef {
   /** How much the hair stands off the head, px. */
@@ -31,6 +31,8 @@ interface HairDef {
   bumpy?: boolean;
   /** The ends curl under (a bob). */
   curlIn?: boolean;
+  /** The sides clipped short, darker and finer than the top. */
+  fade?: boolean;
 }
 
 /** The fringes above are drawn this much higher, clear of the brows (the face sits a row above the head's middle). */
@@ -59,6 +61,15 @@ const HAIR: Record<string, HairDef> = {
   hime: { vol: 0.8, fringe: straightFringe(-1.6), locks: 4.3, nape: 5, slab: 15, tex: 'straight' },
   swept: { vol: 0.9, fringe: () => -3.9, locks: -0.4, nape: 3.4, tex: 'soft' },
   shaved: { vol: 0.1, fringe: () => -3.3, locks: -1, nape: 2.4, tex: 'buzz' },
+  sidepart: { vol: 0.6, fringe: (dx) => Math.min(-2.4, -4.3 + (dx + 4) * 0.24), locks: -0.4, nape: 3.4, tex: 'soft' },
+  quiff: { vol: 0.5, fringe: () => -3.9, locks: -0.8, nape: 3.2, tex: 'straight', fade: true },
+  undercut: { vol: 0.35, fringe: (dx) => (dx < 1 ? -2.2 + Math.max(0, dx + 1) * 0.1 : -3.8), locks: -1.4, nape: 2.6, tex: 'soft', fade: true },
+  mohawk: { vol: 0.1, fringe: () => -3.4, locks: -1.2, nape: 2.4, tex: 'buzz' },
+  mullet: { vol: 0.8, fringe: (_dx, x) => -2.6 + (x % 3 === 0 ? 0.8 : -0.2), locks: 0.4, nape: 6.5, slab: 9.6, tex: 'spiky' },
+  manbun: { vol: 0.4, fringe: (dx) => -4 + Math.abs(dx) * 0.15, locks: 0, nape: 2.8, tex: 'straight' },
+  curtains: { vol: 0.8, fringe: parted(-4, 0.62), locks: 2.6, nape: 4.4, tex: 'straight' },
+  locs: { vol: 1, fringe: bumps(-2.6), locks: 7, nape: 5, slab: 12.5, tex: 'locs' },
+  slick: { vol: 0.45, fringe: () => -4.3, locks: -0.8, nape: 3.6, tex: 'straight' },
 };
 
 const hairOf = (k: Kit): HairDef & { id: string } => {
@@ -84,6 +95,9 @@ function strand(tex: Tex, x: number, y: number, u: number): number {
       return hsh(x - y, 2, 9) < 0.3 ? -1 : 0;
     case 'buzz':
       return (x + y) % 2 === 0 ? -1 : 0;
+    case 'locs':
+      // Rope-like locks: dark gaps between them, each twisted in little ridges.
+      return x % 2 === 0 ? -1 : (y + (x >> 1)) % 3 === 0 ? 1 : 0;
     default:
       return hsh(x, y >> 1, 4) < 0.18 ? -1 : 0;
   }
@@ -140,7 +154,8 @@ function cap(c: PixelCanvas, k: Kit, g: Geo, h: HairDef, below = Infinity): void
       }
       const u = Math.max(0, Math.min(1, (y - top) / Math.max(1, bottom - top)));
       const n = dy <= 0 || h.bumpy ? sphere(dx, Math.max(-1, Math.min(1, dy)), 1) : cyl(dx, 0.1);
-      c.px(x, y, H, n, { bias: strand(h.tex, x, y, u) + (h.tex === 'buzz' ? 0 : sheen(dx, Math.min(dy, 0.9))) });
+      const clipped = h.fade && Math.abs(fx) > 3.6 && y > cy - ry * 0.35;
+      c.px(x, y, H, n, { bias: clipped ? ((x + y) % 2 === 0 ? -2 : -1) : strand(h.tex, x, y, u) + (h.tex === 'buzz' ? 0 : sheen(dx, Math.min(dy, 0.9))) });
     }
   }
 }
@@ -232,6 +247,8 @@ function hairBack(c: PixelCanvas, k: Kit, g: Geo): void {
       tail(c, k, [{ x: g.hx + 1, y: cr + 0.5 }, { x: g.hx + 5.5, y: cr + 1 }, { x: g.hx + 6.8, y: g.hy + 2.5 }, { x: g.hx + 6.3 + sway * 1.6, y: g.hy + 7.5 }], 1.9, 1.1, 'straight', false);
     }
     if (h.id === 'ponytail') tail(c, k, [{ x: g.hx + 4.5, y: g.hy + 1.5 }, { x: g.hx + 6.2, y: g.hy + 4 }, { x: g.hx + 6 + sway, y: g.hy + 7.5 }], 1.6, 1, 'soft', false);
+    // A man bun sits at the back of the crown, just showing over it.
+    if (h.id === 'manbun' && !covered) bun(c, k, g.hx + 0.5, crownOf(k, g) - 0.2, 2.2);
   } else if (v === 'up') {
     slab(c, k, g, h, true);
   } else {
@@ -274,6 +291,79 @@ function hairFront(c: PixelCanvas, k: Kit, g: Geo): void {
       c.part();
       c.ellipse(g.hx + (v === 'side' ? -2.2 : -1.2), cr + 0.9, 2.8, 1.7, k.hair, { bias: 1 });
       break;
+    case 'sidepart':
+      if (covered) break;
+      // The swoop off the parting, and the parting's line.
+      c.part();
+      c.ellipse(g.hx + (v === 'side' ? -1.6 : 0.8), cr + 1.3, 4.2, 1.6, k.hair, { bias: 1 });
+      if (v === 'down') for (let y = Math.round(cr + 0.6); y <= Math.round(cr + 2.4); y++) c.px(Math.round(g.hx - 2.5), y, k.hair, FLAT, { bias: -2 });
+      break;
+    case 'quiff':
+      if (covered) break;
+      // A pompadour swept up and back off the forehead.
+      c.part();
+      if (v === 'side') {
+        c.capsule(g.hx + 1.5, cr + 1.8, g.hx - 3.4, cr - 0.6, 2.2, 2, k.hair, { bias: 1 });
+        c.ellipse(g.hx - 3.8, cr + 0.4, 1.6, 1.8, k.hair, { bias: 0 });
+      } else if (v === 'down') {
+        c.capsule(g.hx - 2.2, cr + 1.6, g.hx + 1.2, cr - 1, 2.5, 2.4, k.hair, { bias: 1 });
+        c.ellipse(g.hx - 0.3, cr - 1.2, 3, 1.5, k.hair, { bias: 1 });
+        for (const dx of [-1.5, 0.5]) c.px(Math.round(g.hx + dx), Math.round(cr - 0.6), k.hair, FLAT, { bias: -1 });
+      } else c.ellipse(g.hx, cr + 0.4, 4.6, 2, k.hair);
+      break;
+    case 'undercut':
+      if (covered) break;
+      // A long top swept to one side, falling over the brow.
+      c.part();
+      if (v === 'side') c.capsule(g.hx + 2.5, cr + 1.6, g.hx - 3.8, cr + 1.8, 2.2, 1.6, k.hair, { bias: 1 });
+      else {
+        c.ellipse(g.hx + (v === 'up' ? 0 : -0.6), cr + 1.4, 4.8, 2.1, k.hair, { bias: 1 });
+        if (v === 'down') c.capsule(g.hx - 2, cr + 2, g.hx - 4.2, g.hy - 2.6, 1.6, 0.9, k.hair, { bias: 0 });
+      }
+      break;
+    case 'mohawk':
+      if (covered) break;
+      // A crest of spikes from brow to nape.
+      c.part();
+      if (v === 'side') {
+        for (let i = 0; i < 5; i++) {
+          const bx = g.hx - 3.4 + i * 1.9;
+          c.capsule(bx, cr + 1.6, bx + 0.9, cr - 2.6 + Math.abs(i - 1.5) * 0.5, 1.2, 0.4, k.hair, { bias: i % 2 ? 0 : 1 });
+        }
+      } else {
+        c.capsule(g.hx - 0.5, cr + 2, g.hx - 0.5, cr - 2.4, 1.6, 1.2, k.hair, { bias: 1 });
+        for (const [dx, dy] of [
+          [-1.6, -3.4],
+          [0.6, -4],
+          [-0.4, -2],
+        ])
+          c.capsule(g.hx - 0.5, cr, g.hx - 0.5 + dx * 0.5, cr + dy, 1, 0.3, k.hair, { bias: dx < 0 ? 1 : 0 });
+      }
+      break;
+    case 'manbun':
+      if (covered) break;
+      if (v === 'side') bun(c, k, g.hx + 4.6, g.hy - 2.2, 2.2);
+      else if (v === 'up') bun(c, k, g.hx, cr + 1.6, 2.3);
+      if (v !== 'down') {
+        c.part();
+        c.ellipse(v === 'side' ? g.hx + 3.2 : g.hx, v === 'side' ? g.hy - 2 : cr + 3.6, 0.8, 0.8, k.trim);
+      }
+      break;
+    case 'locs': {
+      // A few locks over the shoulders in front, beads at their tips.
+      if (v !== 'down') break;
+      c.part();
+      for (const s of [-1, 1])
+        for (const [o, len] of [
+          [4.6, 7.5],
+          [5.8, 6.2],
+        ]) {
+          const x = g.hx + s * o;
+          c.capsule(x, g.hy + 1, x + s * 0.4 + sway * 0.8, g.hy + len, 0.85, 0.75, k.hair, { bias: o > 5 ? -1 : 0 });
+          c.px(Math.round(x + s * 0.4 + sway * 0.8 - 0.5), Math.round(g.hy + len + 0.6), k.gold, FLAT);
+        }
+      break;
+    }
     case 'bun':
       if (covered) break;
       if (v === 'side') bun(c, k, g.hx + 2.4, cr + 0.2, 2.5);
@@ -317,7 +407,7 @@ function hairFront(c: PixelCanvas, k: Kit, g: Geo): void {
 // ---------------------------------------------------------------- hats
 
 /** Hats that hide what stands up from the crown (buns, spikes, a high tail). */
-const COVERING = new Set(['beanie', 'sunhat', 'witch', 'cap', 'beret', 'tophat', 'frog', 'mushroom', 'hood', 'bucket', 'flatcap']);
+const COVERING = new Set(['beanie', 'sunhat', 'witch', 'cap', 'beret', 'tophat', 'frog', 'mushroom', 'hood', 'bucket', 'flatcap', 'cowboy', 'fedora', 'viking', 'helm', 'tricorn', 'wizard', 'backcap', 'toque']);
 const hatCovers = (k: Kit) => COVERING.has(id(HATS, k.a.hat));
 
 /** A dome over the head from `top` down to `rim`, `half` wide at the rim. */
@@ -696,6 +786,199 @@ function hat(c: PixelCanvas, k: Kit, g: Geo): void {
       }
       break;
     }
+    case 'cowboy':
+    case 'fedora': {
+      // A creased crown with a band, the brim curling up at the sides (a cowboy's) or snapped down in front (a fedora's).
+      const cow = kind === 'cowboy';
+      const cy = rim - 0.4;
+      const brimW = cow ? (side ? 8.6 : 9.4) : side ? 7 : 7.4;
+      const curl = cow ? -0.9 : 0.5;
+      if (!front) brim(c, hx, cy, brimW, side ? 1.2 : 1.6, M, curl);
+      dome(c, hx, cr - (cow ? 3.8 : 3.2), cy, cow ? 4.4 : 4.3, M, (_x, _y, dx, dy) => (Math.abs(dx) < 0.14 && dy < -0.4 ? -1 : 0));
+      // The pinch: the crown's top dips in the middle.
+      c.erase(Math.round(hx - 0.5), Math.round(cr - (cow ? 3.8 : 3.2)));
+      c.part();
+      rows(c, cy - 1.4, cy - 0.4, () => [hx - (cow ? 4.6 : 4.4), hx + (cow ? 4.6 : 4.4)], T, (_x, _y, t) => cyl(t, 0.1));
+      if (front) {
+        brim(c, hx, cy + 0.2, brimW, cow ? 1.6 : 1.4, M, curl);
+        if (cow)
+          for (const s of [-1, 1]) {
+            c.px(Math.round(hx + s * (brimW - 0.6) - 0.5), Math.round(cy - 1), M, FLAT, { bias: 1 });
+            c.px(Math.round(hx + s * (brimW - 1.6) - 0.5), Math.round(cy - 0.6), M, FLAT);
+          }
+      }
+      if (!cow) c.px(Math.round(hx + (side ? 2.5 : 2.6)), Math.round(cy - 1.2), k.linen, FLAT, { bias: -1 });
+      break;
+    }
+    case 'viking': {
+      // An iron cap with a nose guard and a band of rivets, horns curving up and out.
+      const metal = mat(k.hatC, { shine: true });
+      const horn = mat('#efe2c4');
+      const tip = mat('#b9a27c');
+      for (const s of side ? [1] : [-1, 1]) {
+        c.part();
+        const bx = side ? hx + 1 : hx + s * 4.6;
+        const pts = side ? [{ x: bx, y: rim - 1.4 }, { x: bx + 1.6, y: rim - 4.4 }, { x: bx + 0.6, y: rim - 7.2 }] : [{ x: bx, y: rim - 1.2 }, { x: bx + s * 3, y: rim - 2.6 }, { x: bx + s * 3.6, y: rim - 6.4 }];
+        c.capsule(pts[0].x, pts[0].y, pts[1].x, pts[1].y, 1.4, 1, horn, { bias: s < 0 ? 1 : 0 });
+        c.capsule(pts[1].x, pts[1].y, pts[2].x, pts[2].y, 1, 0.45, horn, { bias: s < 0 ? 1 : 0 });
+        c.px(Math.round(pts[2].x - 0.5), Math.round(pts[2].y), tip, FLAT);
+      }
+      dome(c, hx, cr - 1, rim + 0.5, 6, metal, (_x, _y, dx) => (Math.abs(dx) < 0.1 ? 1 : 0));
+      c.part();
+      rows(c, rim - 0.8, rim + 0.6, () => [hx - 6.1, hx + 6.1], k.leather, (_x, _y, t) => cyl(t, 0.1));
+      for (let x = Math.round(hx - 5); x <= Math.round(hx + 4); x += 2) if (c.materialAt(x, Math.round(rim)) === k.leather) c.px(x, Math.round(rim), k.gold, FLAT);
+      if (front)
+        for (let y = Math.round(rim + 1); y <= eyeRow(g) + 1; y++) c.px(Math.round(g.hx - 0.5), y, metal, FLAT, { bias: y === Math.round(rim + 1) ? 1 : 0 });
+      break;
+    }
+    case 'helm': {
+      // A knight's open helm: steel round the head, cheek guards, a brow ridge, a plume in the hat's colour.
+      const steel = mat('#c4ccd8', { shine: true });
+      const plume = M;
+      c.part();
+      const pr = cr - 1.8;
+      if (front || v === 'up') {
+        c.capsule(hx, pr, hx + 0.4, pr - 3.4, 1.6, 1.2, plume, { bias: 1 });
+        c.capsule(hx + 0.4, pr - 3.4, hx + 2.4, pr - 4.6, 1.2, 0.6, plume);
+      } else {
+        c.capsule(hx - 1, pr, hx + 2.6, pr - 2.6, 1.6, 1.4, plume, { bias: 1 });
+        c.capsule(hx + 2.6, pr - 2.6, hx + 6.2, pr - 0.4, 1.4, 0.7, plume);
+      }
+      dome(c, hx, cr - 1.6, rim + 0.8, 6.3, steel, (_x, _y, dx) => (Math.abs(dx) < 0.1 ? 1 : 0));
+      c.part();
+      if (side) {
+        rows(c, rim, g.hy + 3.6, (y) => [g.hx - 0.2 + (y - rim) * 0.15, g.hx + 5.7], steel, (_x, _y, t) => cyl(t, 0.1));
+      } else if (front) {
+        for (const s of [-1, 1]) rows(c, rim + 0.4, g.hy + 3.6, (y) => {
+          const u = (y - rim) / (g.hy + 3.6 - rim);
+          const o = 4.3 + u * 0.4;
+          return s < 0 ? [g.hx - 6.3, g.hx - o] : [g.hx + o, g.hx + 6.3];
+        }, steel, (_x, _y, t) => cyl(t * 0.6 + s * 0.4, 0.1));
+      } else rows(c, rim, g.hy + 3.6, () => [g.hx - 6.2, g.hx + 6.2], steel, (_x, _y, t, u) => cyl(t, 0.2 - u * 0.3), (_x, y) => (y % 2 ? 0 : -1));
+      c.part();
+      rows(c, rim - 0.4, rim + 0.6, () => [hx - 6.4, hx + 6.4], steel, (_x, _y, t) => cyl(t, -0.2), () => -1);
+      c.part();
+      c.px(Math.round(hx - 0.5), Math.round(cr - 1), k.gold, FLAT, { bias: 1 });
+      break;
+    }
+    case 'spacehelm': {
+      // A glass bubble round the whole head: just its rim of light and a gleam, the face clear inside; a collar ring below.
+      const gl = mat('#d8f2ff', { shine: true, noOutline: true });
+      const glint = flat('#ffffff', 0.6);
+      const cy = g.hy - 0.6;
+      const rx = side ? 7 : 7.4;
+      const ry = 7.6;
+      c.part();
+      for (let i = 0; i < 64; i++) {
+        const a = (i / 64) * Math.PI * 2;
+        const x = Math.round(hx + Math.cos(a) * rx - 0.5);
+        const y = Math.round(cy + Math.sin(a) * ry - 0.5);
+        if (y > g.hy + 5.6) continue;
+        c.px(x, y, gl, sphere(Math.cos(a), Math.sin(a)), { bias: Math.sin(a) < -0.3 && Math.cos(a) < 0.2 ? 1 : -1 });
+      }
+      for (let i = 0; i < 6; i++) {
+        const a = Math.PI * (1.15 + i * 0.06);
+        c.px(Math.round(hx + Math.cos(a) * (rx - 1.6) - 0.5), Math.round(cy + Math.sin(a) * (ry - 1.6) - 0.5), glint, FLAT);
+      }
+      c.part();
+      rows(c, g.hy + 5.2, g.hy + 6.6, () => [hx - 5.2, hx + 5.2], M, (_x, _y, t) => cyl(t, 0.2));
+      rows(c, g.hy + 5.6, g.hy + 6.2, () => [hx - 5.2, hx + 5.2], T, (_x, _y, t) => cyl(t, 0.2), () => 1);
+      break;
+    }
+    case 'tricorn': {
+      // Three corners: the brim turned up all round, a dip at the front point, braid along its edge.
+      dome(c, hx, cr - 2.4, rim, 4.8, M, (_x, _y, dx) => (Math.abs(dx) < 0.1 ? -1 : 0));
+      c.part();
+      const top = rim - 3.4;
+      const span = side ? 6.4 : 7.4;
+      for (let x = Math.floor(hx - span); x <= Math.ceil(hx + span); x++) {
+        const dx = (x + 0.5 - hx) / span;
+        if (Math.abs(dx) > 1) continue;
+        const y0 = front ? top + (1 - Math.abs(dx)) * 2.4 : side ? top + 0.6 + (dx + 1) * 0.6 : top + 0.5;
+        const y1 = front ? rim + 1.6 - Math.abs(dx) * 3.4 : side ? rim + 0.6 - Math.abs(dx) * 1.6 : rim + 0.4 - Math.abs(dx) * 1.4;
+        for (let y = Math.round(y0); y <= Math.round(y1); y++) c.px(x, y, M, { x: dx * 0.4, y: 0.3, z: 0.85 }, { bias: y === Math.round(y0) ? 0 : y >= Math.round(y1) - 0 ? -1 : 0 });
+        c.px(x, Math.round(y0), T, FLAT, { bias: dx < 0 ? 1 : 0 });
+      }
+      if (front) {
+        c.px(Math.round(hx - 1), Math.round(rim - 1.2), k.linen, FLAT);
+        c.px(Math.round(hx), Math.round(rim - 1.2), k.linen, FLAT);
+        c.px(Math.round(hx - 1), Math.round(rim - 0.2), k.linen, FLAT, { bias: -1 });
+        c.px(Math.round(hx), Math.round(rim - 0.2), k.linen, FLAT, { bias: -1 });
+      }
+      break;
+    }
+    case 'wizard': {
+      // A tall soft cone, its tip flopping over, scattered with stars and a moon.
+      const cy = rim - 0.3;
+      brim(c, hx, cy, side ? 7.4 : 8, side ? 1.1 : 1.5, M, 0.6);
+      c.part();
+      const tipY = cr - 10.5;
+      rows(c, tipY + 2, cy - 0.5, (y) => {
+        const u = (y - tipY - 2) / (cy - 0.5 - tipY - 2);
+        const bend = (1 - u) * (1 - u) * 2.2;
+        return [hx - 0.6 - u * 4.6 + bend, hx + 0.6 + u * 4.6 + bend];
+      }, M, (_x, _y, t) => cyl(t, 0.2));
+      // The flopped tip.
+      c.capsule(hx + 2, tipY + 2.4, hx + 4.6, tipY + 3.6, 0.9, 0.5, M, { bias: -1 });
+      c.part();
+      const star = mat('#ffe27a', { emissive: 0.6, noAO: true });
+      for (const [dx, dy] of [
+        [-1.6, 3],
+        [1.4, 5.4],
+        [-0.2, 7.4],
+      ]) {
+        const x = Math.round(hx + dx);
+        const y = Math.round(tipY + dy + 2);
+        if (c.materialAt(x, y) === M) c.px(x, y, star, FLAT);
+      }
+      const mx = Math.round(hx + 1.6);
+      const my = Math.round(cy - 2.6);
+      c.px(mx, my, star, FLAT);
+      c.px(mx + 1, my + 1, star, FLAT);
+      c.px(mx, my + 2, star, FLAT);
+      break;
+    }
+    case 'backcap': {
+      // A cap turned round: the brim off the back, the strap's gap over the forehead.
+      dome(c, hx, cr - 0.8, rim + 0.2, 6, M, (_x, _y, dx) => (Math.abs(dx) < 0.08 ? -1 : 0));
+      if (v === 'up') brim(c, hx, rim + 0.6, 4.8, 1.3, T);
+      else if (side) {
+        c.part();
+        rows(c, rim - 0.6, rim + 0.6, (y) => [hx + 2.5, hx + 8.2 - (y - rim) * 0.6], T, () => ({ x: 0, y: -0.7, z: 0.7 }), (_x, y) => (y > rim ? -1 : 0));
+      } else {
+        c.part();
+        c.ellipse(hx, rim - 0.4, 1.6, 0.9, k.hair, { bias: -1 });
+        for (let x = Math.round(hx - 1.5); x <= Math.round(hx + 0.5); x++) c.px(x, Math.round(rim - 1.4), T, FLAT, { bias: 1 });
+      }
+      c.part();
+      c.px(Math.round(hx - 0.5), Math.round(cr - 0.8), T, FLAT, { bias: 1 });
+      break;
+    }
+    case 'headband': {
+      // A band round the brow with a red sun in front, its long ends streaming behind.
+      c.part();
+      rows(c, rim - 0.6, rim + 0.6, () => [g.hx - 5.9, g.hx + 5.9], M, (_x, _y, t) => cyl(t, 0.2));
+      if (front) {
+        c.px(Math.round(g.hx - 1), Math.round(rim - 0.4), T, FLAT);
+        c.px(Math.round(g.hx), Math.round(rim - 0.4), T, FLAT, { bias: -1 });
+      } else {
+        const kx = side ? g.hx + 5.4 : g.hx + 1;
+        const sw = g.pose.sway * 1.6 + Math.sin(g.pose.flap * Math.PI * 2) * 0.6;
+        c.part();
+        c.capsule(kx, rim, kx + 3.4 + sw, rim + 2.6, 0.8, 0.6, M, { bias: -1 });
+        c.capsule(kx, rim, kx + 2.6 + sw, rim + 4.4, 0.8, 0.6, M);
+      }
+      break;
+    }
+    case 'toque': {
+      // A chef's tall pleated hat: a band, and a puff of cloth billowing over it.
+      c.part();
+      rows(c, rim - 1.8, rim + 0.4, () => [hx - 5.4, hx + 5.4], M, (_x, _y, t) => cyl(t, 0.1), (x) => (x % 2 ? -1 : 0));
+      c.part();
+      blob(c, hx, cr - 3.2, 6.4, 3.8, M, (x) => ((x + 40) % 3 === 0 ? -1 : 0));
+      for (const dx of side ? [-1.4, 1.6] : [-3, 0, 3]) blob(c, hx + dx, cr - 4.8, 2.2, 2, M, () => 1);
+      break;
+    }
     default:
       break;
   }
@@ -778,6 +1061,67 @@ function faceGear(c: PixelCanvas, k: Kit, g: Geo): void {
     const x0 = side ? hx - 4 : hx - 4;
     for (let y = ey - 1; y <= ey + 1; y++) for (let x = x0; x <= x0 + 2; x++) c.px(x, y, frame, sphere((x - x0 - 1) / 2, (y - ey) / 2));
     if (!side) for (let x = x0 + 3; x <= hx + 5; x++) c.px(x, ey - 2 - (x > hx + 2 ? 1 : 0), frame, FLAT);
+  } else if (gl === 'aviators') {
+    // Teardrop lenses, dark and gleaming, on a thin gold bridge.
+    const lens = flat('#3a3448');
+    const gleam = flat('#8a8aa8');
+    const drop = (x0: number, mirror: boolean) => {
+      for (let y = ey - 1; y <= ey + 1; y++) for (let d = 0; d < 3; d++) if (!(y === ey + 1 && d === (mirror ? 0 : 2))) c.px(x0 + d, y, lens, FLAT);
+      c.px(x0 + (mirror ? 2 : 0), ey - 1, gleam, FLAT);
+    };
+    if (side) {
+      drop(hx - 5, false);
+      for (let x = hx - 2; x <= hx + 1; x++) c.px(x, ey - 1, gold, FLAT);
+    } else {
+      drop(hx - 4, false);
+      drop(hx + 1, true);
+      for (let x = hx - 5; x <= hx + 4; x++) if (x < hx - 4 || x > hx + 3 || x === hx - 1 || x === hx) c.px(x, ey - 1, gold, FLAT);
+    }
+  } else if (gl === 'goggles') {
+    // Brass-rimmed goggles with amber glass, on a leather strap round the head.
+    const lens = mat('#f2b45a', { shine: true, emissive: 0.15 });
+    const brass = mat('#c8963c', { shine: true });
+    const eye = (x0: number) => {
+      ring(x0, brass);
+      fill(x0, lens);
+      c.px(x0 + 1, ey, flat('#fff0c8'), FLAT);
+    };
+    if (side) {
+      eye(hx - 5);
+      for (let x = hx - 1; x <= hx + 3; x++) c.px(x, ey, k.leather, FLAT);
+    } else {
+      eye(hx - 4);
+      eye(hx + 1);
+      c.px(hx, ey, brass, FLAT);
+      c.px(hx - 1, ey, brass, FLAT);
+      for (const x of [hx - 6, hx - 5, hx + 5, hx + 6]) {
+        c.px(x, ey, k.leather, FLAT);
+        c.px(x, ey + 1, k.leather, FLAT, { bias: -1 });
+      }
+    }
+  } else if (gl === 'visor') {
+    // A sleek band of glowing glass across the eyes.
+    const glow = mat('#5ee8e0', { emissive: 0.7, noAO: true, shine: true });
+    const x0 = side ? hx - 5 : hx - 5;
+    const x1 = side ? hx - 1 : hx + 4;
+    for (let x = x0; x <= x1; x++) {
+      c.px(x, ey, glow, FLAT, { bias: 1 });
+      c.px(x, ey + 1, glow, FLAT, { bias: -1 });
+    }
+    c.px(x0 + 1, ey, flat('#e8fffd', 0.9), FLAT);
+    if (!side) c.px(x1, ey - 1, frame, FLAT);
+    c.px(x0, ey - 1, frame, FLAT);
+  } else if (gl === 'facemask') {
+    // A cloth mask over the nose and mouth, tied behind.
+    const cloth = mat('#2e2c38');
+    for (let y = ey + 2; y <= ey + 6; y++)
+      for (let x = hx - 6; x <= hx + 6; x++) {
+        if (c.materialAt(x, y) !== k.skin && c.materialAt(x, y) !== k.mouth && c.materialAt(x, y) !== k.tongue && c.materialAt(x, y) !== k.blush && c.materialAt(x, y) !== k.hair) continue;
+        const dx = (x + 0.5 - g.hx) / 5.6;
+        const dy = (y + 0.5 - g.hy) / 5.3;
+        if (dx * dx + dy * dy > 1 || (side && x > hx + 1)) continue;
+        c.px(x, y, cloth, sphere(dx, (y - ey - 3) / 4), { bias: y === ey + 2 ? 1 : (x + y) % 3 === 0 ? -1 : 0 });
+      }
   }
   const ear = id(EARRINGS, k.a.earrings);
   if (ear === 'none') return;
@@ -798,6 +1142,9 @@ function faceGear(c: PixelCanvas, k: Kit, g: Geo): void {
 
 // ---------------------------------------------------------------- round the neck
 
+/** Things on the back held by straps that show over the chest. */
+const STRAPPED = new Set(['backpack', 'satchel', 'guitar', 'sword', 'quiver', 'shield', 'skateboard', 'surfboard', 'jetpack']);
+
 function neck(c: PixelCanvas, k: Kit, g: Geo): void {
   const kind = id(NECKS, k.a.neck);
   const back = id(BACKS, k.a.back);
@@ -807,14 +1154,14 @@ function neck(c: PixelCanvas, k: Kit, g: Geo): void {
   const cx = g.cx;
   const sh = g.sh;
   // Straps of what's carried on the back, over the shoulders.
-  if (front && (back === 'backpack' || back === 'satchel' || back === 'guitar')) {
+  if (front && STRAPPED.has(back)) {
     c.part();
-    const strap = back === 'backpack' ? k.leather : back === 'guitar' ? k.leather : k.back;
-    if (back === 'backpack') {
+    const strap = back === 'satchel' ? k.back : k.leather;
+    if (back === 'backpack' || back === 'jetpack') {
       for (const s of [-1, 1]) for (let y = Math.round(sh); y <= Math.round(sh + 5); y++) c.px(Math.round(cx + s * 2.6 - 0.5 + (y > sh + 3 ? s * 0.6 : 0)), y, strap, cyl(s * 0.3), { bias: y === Math.round(sh) ? 1 : 0 });
     } else {
       // A strap across the chest, shoulder to hip.
-      const dir = back === 'guitar' ? 1 : -1;
+      const dir = back === 'guitar' || back === 'quiver' || back === 'shield' ? 1 : -1;
       for (let i = 0; i <= 9; i++) {
         const x = cx + dir * (3.2 - i * 0.78);
         const y = sh + 0.3 + i * (g.hip - sh) / 9;
@@ -883,6 +1230,58 @@ function neck(c: PixelCanvas, k: Kit, g: Geo): void {
       }, N, (_x, _y, t, u) => cyl(t, 0.3 - u * 0.4), (x, y) => ((x * 2 + y) % 5 === 0 ? 1 : 0));
       break;
     }
+    case 'tie': {
+      // A knotted tie down the shirt front.
+      if (!front && !side) break;
+      const x = Math.round(cx) - 1;
+      const y = Math.round(sh);
+      if (side) {
+        for (let yy = y; yy <= y + 4; yy++) c.px(x - 2, yy, N, FLAT, { bias: yy === y ? 1 : 0 });
+        break;
+      }
+      c.px(x, y, N, FLAT, { bias: 1 });
+      c.px(x + 1, y, N, FLAT);
+      for (let yy = y + 1; yy <= y + 4; yy++) {
+        c.px(x, yy, N, FLAT, { bias: 0 });
+        c.px(x + 1, yy, N, FLAT, { bias: -1 });
+      }
+      c.px(x, y + 5, N, FLAT, { bias: -1 });
+      c.px(x + 1, y + 2, flat(shade(k.neckC, 0.3)), FLAT);
+      break;
+    }
+    case 'chain':
+    case 'dogtags': {
+      // A heavy gold chain with a medallion, or a bead chain with two tags.
+      if (v === 'up') {
+        for (let x = Math.round(cx - 2); x <= Math.round(cx + 1); x++) c.px(x, Math.round(sh - 0.5), kind === 'chain' ? k.gold : k.silver, FLAT);
+        break;
+      }
+      const deep = kind === 'chain' ? 3.4 : 3.8;
+      const half = side ? 1.8 : 3.3;
+      const n = side ? 5 : 11;
+      for (let i = 0; i < n; i++) {
+        const t = i / (n - 1);
+        const x = (side ? cx - 2 : cx - half) + t * half * 2 - 0.5;
+        const y = sh + Math.sin(t * Math.PI) * deep - 0.3;
+        if (kind === 'dogtags' && i % 2) continue;
+        c.px(Math.round(x), Math.round(y), kind === 'chain' ? k.gold : k.silver, sphere(0, -0.5), { bias: i % 2 ? -1 : 1 });
+      }
+      if (side) break;
+      const px = Math.round(cx - 0.5);
+      const py = Math.round(sh + deep + 0.5);
+      c.part();
+      if (kind === 'chain') {
+        c.ellipse(px + 0.5, py + 0.8, 1.3, 1.3, k.gold);
+        c.px(px, py + 1, mat(k.neckC, { shine: true, emissive: 0.3 }), FLAT);
+      } else {
+        for (const [ox, oy, b] of [
+          [-1, 0, 0],
+          [0, 1, -1],
+        ])
+          for (let yy = 0; yy < 3; yy++) for (let xx = 0; xx < 2; xx++) c.px(px + ox + xx, py + oy + yy, k.silver, FLAT, { bias: b + (yy === 0 && xx === 0 ? 1 : 0) });
+      }
+      break;
+    }
     case 'pendant':
     case 'pearls':
     case 'lei': {
@@ -946,6 +1345,137 @@ function wing(c: PixelCanvas, root: P, tip: P, low: P, m: Material, kind: 'feath
     const y = Math.round((root.y + up.y) / 2);
     c.spark(x, y, [255, 255, 255], 0.5);
     c.spark(x + s, y + 3, [220, 240, 255], 0.4);
+  }
+}
+
+/** Fill a triangle, lit as a sail facing out to side `s`. */
+function tri(c: PixelCanvas, a: P, b: P, d: P, m: Material, s: number, bias = 0): void {
+  const x0 = Math.floor(Math.min(a.x, b.x, d.x));
+  const x1 = Math.ceil(Math.max(a.x, b.x, d.x));
+  const y0 = Math.floor(Math.min(a.y, b.y, d.y));
+  const y1 = Math.ceil(Math.max(a.y, b.y, d.y));
+  const area = (b.x - a.x) * (d.y - a.y) - (d.x - a.x) * (b.y - a.y);
+  if (Math.abs(area) < 0.01) return;
+  for (let y = y0; y <= y1; y++)
+    for (let x = x0; x <= x1; x++) {
+      const px = x + 0.5;
+      const py = y + 0.5;
+      const w0 = ((b.x - px) * (d.y - py) - (d.x - px) * (b.y - py)) / area;
+      const w1 = ((d.x - px) * (a.y - py) - (a.x - px) * (d.y - py)) / area;
+      const w2 = 1 - w0 - w1;
+      if (w0 < -0.02 || w1 < -0.02 || w2 < -0.02) continue;
+      c.px(x, y, m, { x: s * 0.35, y: 0.2, z: 0.9 }, { bias });
+    }
+}
+
+/** A dragon's wing: bony fingers from the shoulder, leathery skin stretched between them, scalloped between their tips. */
+function dragonWing(c: PixelCanvas, root: P, tip: P, mid: P, low: P, m: Material, bone: Material, s: number): void {
+  c.part();
+  tri(c, root, tip, mid, m, s, 0);
+  tri(c, root, mid, low, m, s, -1);
+  // Scallops: bite the skin in between each pair of finger tips.
+  for (const [p, q] of [
+    [tip, mid],
+    [mid, low],
+  ]) {
+    const nx = (p.x + q.x) / 2 + (root.x - (p.x + q.x) / 2) * 0.22;
+    const ny = (p.y + q.y) / 2 + (root.y - (p.y + q.y) / 2) * 0.22;
+    const r = Math.hypot(p.x - q.x, p.y - q.y) * 0.32;
+    for (let y = Math.floor(ny - r - 2); y <= Math.ceil(ny + r + 2); y++)
+      for (let x = Math.floor(nx - r - 2); x <= Math.ceil(nx + r + 2); x++) {
+        const d = Math.hypot(x + 0.5 - ((p.x + q.x) / 2 + (nx - (p.x + q.x) / 2) * -0.6), y + 0.5 - ((p.y + q.y) / 2 + (ny - (p.y + q.y) / 2) * -0.6));
+        if (d < r && c.materialAt(x, y) === m) c.erase(x, y);
+      }
+  }
+  c.part();
+  for (const p of [tip, mid, low]) c.line(root.x - 0.5, root.y - 0.5, p.x - 0.5, p.y - 0.5, bone, () => ({ x: s * 0.3, y: 0.5, z: 0.8 }));
+  // The thumb's claw at the top joint.
+  c.px(Math.round(tip.x - 0.5), Math.round(tip.y - 1.5), bone, FLAT, { bias: 1 });
+}
+
+/** Something slung across the back from `a` (the end over the shoulder) to `b`. */
+function slung(c: PixelCanvas, k: Kit, kind: string, a: P, b: P, side: boolean): void {
+  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const ux = (b.x - a.x) / len;
+  const uy = (b.y - a.y) / len;
+  const at = (t: number): P => ({ x: a.x + ux * t, y: a.y + uy * t });
+  const B = k.back;
+  c.part();
+  switch (kind) {
+    case 'sword': {
+      // Pommel, grip and cross-guard over the shoulder, the scabbard down the back.
+      const guard = at(3.4);
+      c.capsule(guard.x, guard.y, b.x, b.y, 1.15, 0.8, B, { bias: -1 });
+      c.part();
+      const tipP = at(len + 0.6);
+      c.px(Math.round(tipP.x - 0.5), Math.round(tipP.y - 0.5), k.gold, FLAT);
+      c.line(guard.x - uy * 2.2 - 0.5, guard.y + ux * 2.2 - 0.5, guard.x + uy * 2.2 - 0.5, guard.y - ux * 2.2 - 0.5, k.gold, () => FLAT);
+      c.capsule(a.x + ux * 0.8, a.y + uy * 0.8, guard.x - ux * 0.6, guard.y - uy * 0.6, 0.7, 0.7, k.leather);
+      c.part();
+      c.ellipse(a.x, a.y, 0.9, 0.9, k.gold);
+      break;
+    }
+    case 'quiver': {
+      // A leather tube, its mouth banded in the trim; fletched arrows standing out of it.
+      const mouth = at(2.6);
+      for (const [o, l] of [
+        [-1, 3.2],
+        [0.2, 3.8],
+        [1.2, 3],
+      ]) {
+        const base = { x: mouth.x - uy * o, y: mouth.y + ux * o };
+        const top = { x: base.x - ux * l, y: base.y - uy * l };
+        c.line(base.x - 0.5, base.y - 0.5, top.x - 0.5, top.y - 0.5, k.wood, () => FLAT);
+        c.part();
+        c.capsule(top.x + ux * 0.6, top.y + uy * 0.6, top.x - ux * 0.4, top.y - uy * 0.4, 0.8, 0.5, B, { bias: o > 0 ? -1 : 1 });
+      }
+      c.part();
+      c.capsule(mouth.x, mouth.y, b.x, b.y, 1.9, 1.6, k.leather);
+      c.part();
+      c.capsule(mouth.x, mouth.y, mouth.x + ux * 0.6, mouth.y + uy * 0.6, 2, 2, k.trim, { bias: 1 });
+      const ring = at(len * 0.75);
+      c.capsule(ring.x, ring.y, ring.x + ux * 0.5, ring.y + uy * 0.5, 1.8, 1.8, k.trim, { bias: -1 });
+      break;
+    }
+    case 'skateboard': {
+      // The deck (its underside, painted, faces out), the trucks and four wheels.
+      const r = side ? 0.9 : 2.1;
+      c.capsule(a.x, a.y, b.x, b.y, r, r, B, side ? {} : { bias: 0 });
+      if (!side) {
+        for (let t = 2; t < len - 2; t += 1) {
+          const p = at(t);
+          if (c.materialAt(Math.round(p.x - 0.5), Math.round(p.y - 0.5)) === B) c.px(Math.round(p.x - 0.5), Math.round(p.y - 0.5), k.trim, FLAT);
+        }
+      }
+      c.part();
+      const wheel = mat('#f2ead6');
+      for (const t of [2.2, len - 2.2]) {
+        const p = at(t);
+        for (const o of side ? [1.2] : [-1.8, 1.8]) c.ellipse(p.x - uy * o + (side ? 0.8 : 0), p.y + ux * o, 0.8, 0.8, wheel);
+      }
+      break;
+    }
+    case 'surfboard': {
+      // A long board edge on to the back: a stripe down its middle and a fin at its tail.
+      const r = side ? 1.1 : 2.8;
+      for (let t = 0; t <= len; t += 0.5) {
+        const p = at(t);
+        const u = t / len;
+        const w = r * Math.min(1, Math.sqrt(Math.min(u, 1 - u) * 6 + 0.12));
+        c.ellipse(p.x, p.y, w, w, B, { normal: () => cyl(0, 0.1) });
+      }
+      // Relight it as a smooth board: rounder across, lighter down the middle.
+      if (!side) for (let t = 1; t < len - 1; t += 0.5) {
+        const p = at(t);
+        c.px(Math.round(p.x - 0.5), Math.round(p.y - 0.5), k.trim, FLAT);
+      }
+      c.part();
+      const fin = at(len - 1.4);
+      c.ellipse(fin.x + (side ? 1.2 : 0), fin.y, side ? 1.1 : 0.8, 1.2, k.trim, { bias: -1 });
+      break;
+    }
+    default:
+      break;
   }
 }
 
@@ -1046,6 +1576,97 @@ function behind(c: PixelCanvas, k: Kit, g: Geo): void {
       c.ellipse(a.x + (b.x - a.x) * 0.88, a.y + (b.y - a.y) * 0.88, 3, 2.8, wood);
       c.part();
       c.ellipse(a.x - 0.2, a.y - 0.6, 1, 1.1, k.leather);
+      break;
+    }
+    case 'sword':
+    case 'quiver':
+    case 'skateboard':
+    case 'surfboard': {
+      // Slung across the back: from behind the whole of it, front on only the end over the shoulder.
+      const q = kind === 'quiver' ? -1 : 1;
+      const long = kind === 'surfboard';
+      let a: P;
+      let b: P;
+      if (up) {
+        a = { x: cx + q * (long ? 1 : 3.6), y: sh - (long ? 8 : 4) };
+        b = { x: cx - q * (long ? 1 : 3.4), y: g.hip + (long ? 5 : 2.4) };
+      } else if (side) {
+        a = { x: cx + k.dep + 1.4, y: sh - (long ? 8 : 4.4) };
+        b = { x: cx + k.dep + (long ? 2.4 : 2.8), y: g.hip + (long ? 5 : 2.4) };
+      } else {
+        a = { x: cx - q * (long ? 6.4 : 6.2), y: sh - (long ? 9 : 4.8) };
+        b = { x: cx + q * 1.5, y: g.hip + 2 };
+      }
+      slung(c, k, kind, a, b, side);
+      break;
+    }
+    case 'shield': {
+      // A round shield: the back's colour quartered by the trim, an iron rim and a gold boss.
+      const sy = sh + 4;
+      c.part();
+      if (side) {
+        const sx = cx + k.dep + 1.6;
+        c.ellipse(sx, sy, 1.6, 4.8, k.silver, { bias: -1 });
+        c.ellipse(sx + 0.3, sy, 1, 4.1, B);
+        break;
+      }
+      const r = 4.8;
+      c.ellipse(cx, sy, r, r, k.silver);
+      c.part();
+      c.ellipse(cx, sy, r - 1, r - 1, B, { flatten: 2 });
+      if (up) {
+        for (let d = -3; d <= 3; d++) {
+          c.px(Math.round(cx - 0.5), Math.round(sy + d - 0.5), k.trim, FLAT);
+          c.px(Math.round(cx + d - 0.5), Math.round(sy - 0.5), k.trim, FLAT);
+        }
+        c.part();
+        c.ellipse(cx, sy, 1.4, 1.4, k.gold);
+        for (const [dx, dy] of [
+          [-2.6, -2.6],
+          [2, -2.6],
+          [-2.6, 2],
+          [2, 2],
+        ])
+          c.px(Math.round(cx + dx), Math.round(sy + dy), k.silver, FLAT);
+      }
+      break;
+    }
+    case 'jetpack': {
+      // Twin tanks on a frame, flames flickering from the nozzles.
+      const metal = mat(k.backC, { shine: true });
+      const fire = flat('#ffb648', 1);
+      const hot = flat('#fff2b8', 1);
+      const flick = [0, 1, 2, 1, 0, 2, 1, 2][Math.floor(g.pose.flap * 8) % 8];
+      const xs = side ? [cx + k.dep + 2] : [cx - 2.1, cx + 2.1];
+      const top = up ? sh + 0.4 : sh - 1.6;
+      for (const x of xs) {
+        c.part();
+        c.capsule(x, top, x, sh + 7, 1.9, 1.9, metal);
+        c.part();
+        c.ellipse(x, sh + 8.4, 1.1, 0.8, flat('#3c3a44'));
+        for (let i = 0; i <= 1 + flick; i++) c.px(Math.round(x - 0.5), Math.round(sh + 9.2 + i), i === 0 ? hot : fire, FLAT, { glow: 1 });
+        c.spark(Math.round(x - 0.5), Math.round(sh + 10 + flick), [255, 190, 90], 0.8);
+        if (up || side) for (let y = Math.round(top + 1); y <= Math.round(sh + 6); y += 3) c.px(Math.round(x - 0.5), y, k.silver, FLAT, { bias: 1 });
+      }
+      if (up) {
+        c.part();
+        rows(c, sh + 1.5, sh + 5.5, () => [cx - 1, cx + 1], k.trim, (_x, _y, t) => cyl(t, 0.2));
+      }
+      break;
+    }
+    case 'dragonwings': {
+      const m = B;
+      const bone = mat(shade(k.backC, -0.32));
+      const lift = flap * 1.6;
+      for (const s of side ? [1] : [-1, 1]) {
+        const rx = side ? cx + 2.2 : cx + s * 1.4;
+        const root = { x: rx, y: sh + 2 };
+        const reach = side ? 7 : 10;
+        const tip = { x: rx + s * reach * 0.8, y: sh - 5 - lift };
+        const mid = { x: rx + s * reach, y: sh + 1.5 - lift * 0.6 };
+        const low = { x: rx + s * (reach - 3.6), y: sh + 7.5 - lift * 0.3 };
+        dragonWing(c, root, tip, mid, low, m, bone, s);
+      }
       break;
     }
     case 'cattail':
@@ -1290,6 +1911,142 @@ function held(c: PixelCanvas, k: Kit, g: Geo): void {
         c.px(tx + dx, ty + dy, star, sphere(dx * 0.5, dy * 0.5));
       c.spark(tx, ty, [255, 240, 180], 0.8);
       c.spark(tx + 2, ty - 2, [255, 255, 255], 0.5);
+      break;
+    }
+    case 'football':
+    case 'basketball': {
+      // Carried at the hip: a football's white panels and dark patches, or an orange ball's seams.
+      const bx = x + s * 1.3;
+      const by = y + 1.2;
+      const foot = kind === 'football';
+      const ball = foot ? mat('#f6f2ea') : mat('#e0782e');
+      c.ellipse(bx, by, 2.4, 2.4, ball);
+      const dark = foot ? M : flat('#4a2618');
+      if (foot) {
+        for (const [dx, dy] of [
+          [-0.5, -0.5],
+          [0.5, -0.5],
+          [-0.5, 0.5],
+          [0.5, 0.5],
+        ])
+          c.px(Math.round(bx + dx - 0.5), Math.round(by + dy - 0.5), dark, FLAT);
+        for (const [dx, dy] of [
+          [-2, -1],
+          [1.5, -2],
+          [1.6, 1.4],
+          [-1.6, 1.8],
+        ])
+          if (c.materialAt(Math.round(bx + dx - 0.5), Math.round(by + dy - 0.5)) === ball) c.px(Math.round(bx + dx - 0.5), Math.round(by + dy - 0.5), dark, FLAT, { bias: -1 });
+      } else {
+        for (let d = -2; d <= 2; d++) {
+          c.px(Math.round(bx - 0.5), Math.round(by + d - 0.5), dark, FLAT);
+          c.px(Math.round(bx + d - 0.5), Math.round(by - 0.5), dark, FLAT);
+        }
+        c.px(Math.round(bx - 2), Math.round(by - 2), dark, FLAT);
+        c.px(Math.round(bx + 1), Math.round(by + 1), dark, FLAT);
+      }
+      break;
+    }
+    case 'woodsword': {
+      // A practice sword held up: a wooden blade, a wrapped grip, a round guard.
+      const tip = { x: x + s * 2.2, y: y - 7.4 };
+      c.capsule(x + s * 0.5, y - 1.6, tip.x, tip.y, 1, 0.7, mat('#c99a62'));
+      c.line(x + s * 0.5 - 0.5, y - 2, tip.x - 0.5, tip.y + 0.4, mat('#e2bc84'), () => FLAT);
+      c.part();
+      c.line(x - 2 - 0.5, y - 1.2, x + 2 - 0.5, y - 1.8, k.wood, () => cyl(0));
+      c.capsule(x - s * 0.2, y + 1.6, x + s * 0.3, y - 0.8, 0.8, 0.8, M);
+      break;
+    }
+    case 'staff': {
+      // A tall staff to the ground, its head curled round a glowing orb in the item's colour.
+      const top = { x: x + s * 0.8, y: g.hy - 6.5 };
+      const foot = { x: x - s * 0.6, y: 31 };
+      c.line(foot.x - 0.5, foot.y, top.x - 0.5, top.y + 2, k.wood, () => cyl(-0.3));
+      c.part();
+      const orb = mat(shade(k.heldC, 0.2), { emissive: 0.75, noAO: true, shine: true });
+      c.capsule(top.x, top.y + 2, top.x + s * 1.4, top.y - 0.6, 0.6, 0.6, k.wood);
+      c.capsule(top.x + s * 1.4, top.y - 0.6, top.x + s * 0.2, top.y - 2.6, 0.6, 0.5, k.wood);
+      c.part();
+      c.ellipse(top.x, top.y - 0.2, 1.5, 1.5, orb);
+      c.spark(Math.round(top.x - 0.5), Math.round(top.y - 0.5), [200, 230, 255], 0.9);
+      c.spark(Math.round(top.x - 0.5 + s * 2), Math.round(top.y - 3), [255, 255, 255], 0.4);
+      break;
+    }
+    case 'torch': {
+      // A wooden torch wrapped in cloth, its flame dancing.
+      const top = { x: x + s * 1.2, y: y - 5 };
+      c.capsule(x - s * 0.2, y + 1.2, top.x, top.y, 0.7, 0.8, k.wood);
+      c.part();
+      c.ellipse(top.x, top.y - 0.2, 1.2, 1, M);
+      const f = Math.floor(p.flap * 6) % 3;
+      const fire = flat('#ff9a3c', 1);
+      const core = flat('#fff0a0', 1);
+      c.part();
+      c.ellipse(top.x + (f - 1) * 0.3, top.y - 2, 1.5, 2, fire, { glow: 1 });
+      c.px(Math.round(top.x - 0.5 + (f - 1) * 0.6), Math.round(top.y - 4.4), fire, FLAT, { glow: 1 });
+      c.ellipse(top.x, top.y - 1.6, 0.7, 1.1, core, { glow: 1 });
+      c.spark(Math.round(top.x - 0.5), Math.round(top.y - 2), warm, 1);
+      c.spark(Math.round(top.x - 0.5 + s), Math.round(top.y - 6 - f), [255, 200, 120], 0.5);
+      break;
+    }
+    case 'gamepad': {
+      // A handheld game, its screen lit, held in front.
+      const bx = x + s * 1.4;
+      const by = y - 0.6;
+      rows(c, by - 2.2, by + 1.8, () => [bx - 2.4, bx + 2.4], M, () => ({ x: s * 0.2, y: 0.1, z: 1 }));
+      const screen = flat('#8ef0c8', 0.7);
+      for (let yy = Math.round(by - 1.6); yy <= Math.round(by - 0.4); yy++) for (let xx = Math.round(bx - 1.5); xx <= Math.round(bx + 0.5); xx++) c.px(xx, yy, screen, FLAT);
+      c.px(Math.round(bx - 1.5), Math.round(by - 1.6), flat('#e8fff4', 0.8), FLAT);
+      c.px(Math.round(bx - 1.5), Math.round(by + 0.8), flat('#2a2a34'), FLAT);
+      c.px(Math.round(bx + 0.5), Math.round(by + 0.8), flat('#ff5a5a'), FLAT);
+      break;
+    }
+    case 'map': {
+      // A treasure map held open: parchment between two rolled ends, a dotted way to a red cross.
+      const bx = x + s * 1.6;
+      const by = y - 1.2;
+      const paper = mat('#efdcaa');
+      rows(c, by - 2, by + 2, () => [bx - 2.6, bx + 2.6], paper, () => ({ x: 0, y: 0.15, z: 1 }));
+      c.part();
+      for (const ex of [bx - 2.8, bx + 2.8]) c.capsule(ex, by - 2.2, ex, by + 2.2, 0.7, 0.7, M);
+      const ink = flat('#9a6a48');
+      c.px(Math.round(bx - 2), Math.round(by + 1), ink, FLAT);
+      c.px(Math.round(bx - 1), Math.round(by), ink, FLAT);
+      c.px(Math.round(bx), Math.round(by + 1), ink, FLAT);
+      const red = flat('#d8343a');
+      const rx = Math.round(bx + 1);
+      const ry = Math.round(by - 1);
+      for (const [dx, dy] of [
+        [-1, -1],
+        [1, -1],
+        [0, 0],
+        [-1, 1],
+        [1, 1],
+      ])
+        c.px(rx + dx, ry + dy, red, FLAT);
+      break;
+    }
+    case 'puppy': {
+      // A puppy in the arm: floppy ears, a pale muzzle, a pink tongue.
+      const bx = x + s * 0.6;
+      const by = y - 0.6;
+      const fur = mat(k.heldC);
+      c.ellipse(bx, by + 1.2, 2.3, 1.9, fur);
+      c.part();
+      c.ellipse(bx, by - 1.7, 2.2, 2, fur);
+      c.part();
+      const ear = mat(shade(k.heldC, -0.25));
+      for (const e of side ? [1] : [-1, 1]) c.capsule(bx + e * 1.9, by - 2.8, bx + e * 2.4, by - 0.6, 0.9, 0.7, ear);
+      c.part();
+      const snout = mat(shade(k.heldC, 0.35));
+      c.ellipse(bx + (side ? -1.6 : 0), by - 0.9, 1.1, 0.8, snout);
+      c.px(Math.round(bx - 0.5 + (side ? -2 : 0)), Math.round(by - 1.5), k.lash, FLAT);
+      c.px(Math.round(bx - 0.5 + (side ? -1.6 : 0)), Math.round(by - 0.2), k.tongue, FLAT);
+      if (!side) {
+        c.px(Math.round(bx - 1.5), Math.round(by - 2.4), k.lash, FLAT);
+        c.px(Math.round(bx + 0.5), Math.round(by - 2.4), k.lash, FLAT);
+      } else c.px(Math.round(bx - 1.5), Math.round(by - 2.4), k.lash, FLAT);
+      c.capsule(bx - s * 2.2, by + 1.4, bx - s * 3.2, by - 0.4, 0.5, 0.4, fur);
       break;
     }
     default:

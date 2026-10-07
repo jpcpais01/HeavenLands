@@ -9,15 +9,17 @@ import type Phaser from 'phaser';
 import { wandererFrame, WFH, WFW } from '../art/sheet';
 import { bakeLit } from '../art/creatorArt';
 import type { View } from '../art/kit';
-import type { Appearance } from '../look';
+import { PRESETS, type Appearance } from '../look';
+import { OUTFIT_SLOTS } from '../profile';
 
 /** A thumbnail's picture, px (it sits in a slightly bigger tile). */
 export const THUMB = 20;
-/** Thumbnails the sheet holds: enough for the busiest tab (Accessories). */
+/** Thumbnails the sheet holds: enough for the busiest tab (Accessories, Clothes). */
 const THUMB_COLS = 10;
-const THUMB_ROWS = 8;
+const THUMB_ROWS = 10;
 export const THUMB_SLOTS = THUMB_COLS * THUMB_ROWS;
-export const OUTFIT_SLOTS_DRAWN = 8;
+/** Portraits: the wardrobe's kept outfits, then every ready-made one. */
+export const OUTFIT_SLOTS_DRAWN = OUTFIT_SLOTS + PRESETS.length;
 /** Painting time allowed a frame, ms: the rest waits for the next. */
 const BUDGET_MS = 4;
 
