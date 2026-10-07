@@ -220,6 +220,10 @@ export class WorldScene extends Phaser.Scene {
   get petWorn(): string | undefined {
     return this.companion?.def.id;
   }
+  /** Heaven Lands: this player's wanderer made an emote; their companion joins in. */
+  petReact(emote: string): void {
+    this.companion?.react(emote);
+  }
   /** The critters out near the hero, to be caught with the net (arenas that have them). */
   private critters: CritterField | null = null;
   /** The hero swung, cast or used their Special this frame (the White Stag shies from a fight). */

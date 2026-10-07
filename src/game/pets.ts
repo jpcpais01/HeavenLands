@@ -79,6 +79,12 @@ export const PETS: PetDef[] = [
   // Hallow's Eve's, sold for candy at Old Wick's stall.
   { id: 'pumpling', name: 'Pumpling', rarity: 'epic', perk: '+20% energy', mods: { energy: 1.2 }, gait: 'hop', tint: 0xff9a3a, season: 'hallows' },
   { id: 'hexcat', name: 'Hexcat', rarity: 'epic', perk: '+6% damage', mods: { damage: 1.06 }, gait: 'walk', tint: 0xb07aff, season: 'hallows' },
+  // Heaven Lands' homely ones (art/heavenPets.ts): only ever chosen, never wished for.
+  { id: 'kitten', name: 'Mochi', rarity: 'rare', perk: 'Purrs', mods: {}, gait: 'walk', tint: 0xffc080, season: 'heaven' },
+  { id: 'pup', name: 'Biscuit', rarity: 'rare', perk: 'Wags', mods: {}, gait: 'walk', tint: 0xffd090, season: 'heaven' },
+  { id: 'duckling', name: 'Puddle', rarity: 'rare', perk: 'Peeps', mods: {}, gait: 'hop', tint: 0xfff0a0, season: 'heaven' },
+  { id: 'lamb', name: 'Woolly', rarity: 'rare', perk: 'Baas', mods: {}, gait: 'hop', tint: 0xf0ecff, season: 'heaven' },
+  { id: 'redpanda', name: 'Maple', rarity: 'rare', perk: 'Naps', mods: {}, gait: 'walk', tint: 0xffa860, season: 'heaven' },
 ];
 
 export const petById = (id: string): PetDef | undefined => PETS.find((p) => p.id === id);
