@@ -51,12 +51,15 @@ import { cropById, rollSeedDrop } from '../game/farm';
 import { isDish, seedKey, syncLunch } from '../game/cooking';
 import { build } from '../game/build';
 import { openHomeFriends } from '../ui/homeFriends';
+import { releaseControls } from './PauseScene';
+import { enterArena, needsLoading } from './ArenaLoadScene';
 import { isPainted } from '../world/arenas';
 import { ForestFooting, floorFooting, paintedFooting, specFooting } from '../world/footing';
 import { CELL, PLOT_X, PLOT_Y } from '../world/homeLayout';
 import { OMEN_ARENAS, Omens } from '../world/Omens';
 import { Forest } from '../world/Forest';
-import { ForestBuild } from '../world/ForestBuild';
+import { PlaceBuild, forestGround } from '../world/PlaceBuild';
+import { Deck } from '../world/bridge';
 import { ForestSpawner } from '../world/ForestSpawner';
 import { EVERWOOD_SEED, ForestGen, useForest } from '../world/forestGen';
 import { omenMods, resetOmens } from '../game/omens';
@@ -123,6 +126,8 @@ import { ensureUltIcons, EnergyMotes, UltCaster } from '../game/ultimate';
 import type { MonsterStats } from '../game/monsters/Monster';
 import { NetPlay } from '../net/NetPlay';
 import { session } from '../net/session';
+import { account } from '../game/cloud';
+import type { WorldLink } from '../world/worldLink';
 import { trek } from '../game/trek';
 import { diag, note } from '../diagnostics';
 import { rouse } from '../game/rest';
@@ -309,7 +314,7 @@ export class WorldScene extends Phaser.Scene {
   }
   /** Can feet stand at (x, y)? The arena's walls, trees and water say no, and so do standing flowers. */
   walkable = (x: number, y: number): boolean =>
-    this.arena.walkable(x, y) && (!this.garden || this.garden.walkable(x, y)) && (!this.hallows || this.hallows.walkable(x, y)) && (!this.naturalist || this.naturalist.walkable(x, y));
+    (this.places ? this.places.feet(x, y) : this.arena.walkable(x, y)) && (!this.garden || this.garden.walkable(x, y)) && (!this.hallows || this.hallows.walkable(x, y)) && (!this.naturalist || this.naturalist.walkable(x, y));
   /** The streamed ground, or null in an arena painted in one piece. */
   private ground: GroundStreamer | null = null;
   private scenery!: Scenery;
@@ -350,7 +355,8 @@ export class WorldScene extends Phaser.Scene {
   /** The Everwood, streamed round the view, when the world is in it. */
   private forest: Forest | null = null;
   private forestFeet: ForestFooting | null = null;
-  private woodBuild: ForestBuild | null = null;
+  /** What's been built here on the open grid (the Everwood, an endless land, any place but the Home; see world/PlaceBuild.ts). */
+  private places: PlaceBuild | null = null;
   /** Heaven Lands' pastimes in this place (see game/cozy.ts). */
   private pastimes: CozyPastimes | null = null;
   /** Heaven Lands' weather here (see game/cozy.ts). */
@@ -406,7 +412,7 @@ export class WorldScene extends Phaser.Scene {
     this.fishing = null;
     this.forest = null;
     this.forestFeet = null;
-    this.woodBuild = null;
+    this.places = null;
     this.character = data?.character;
     this.auras.clear();
     this.setPowers = new SetPowers(this);
@@ -449,7 +455,10 @@ export class WorldScene extends Phaser.Scene {
 
     // The ground streams in strips as the hero walks (see GroundStreamer).
     this.ground = isPainted(arena.ground) ? null : new GroundStreamer(this, arena.ground, (img) => ground(img) as Phaser.GameObjects.Image);
-    sound.setOutdoors(arena.id !== 'cosmos' && arena.id !== 'spirit' && arena.id !== 'temple' && arena.id !== 'deep' && arena.id !== 'rift');
+    const outdoors = arena.id !== 'cosmos' && arena.id !== 'spirit' && arena.id !== 'temple' && arena.id !== 'deep' && arena.id !== 'rift';
+    sound.setOutdoors(outdoors);
+    // The friends button shows in every Heaven Lands place.
+    build.home = cozy.on;
     if (arena.id === 'rift') this.rift = new RiftArena(this, (img) => ground(img) as Phaser.GameObjects.Image);
     if (arena.id === 'frost') this.frost = new FrostArena(this, ground, this.view);
     if (arena.id === 'cosmos') this.cosmos = new CosmosArena(this, (img) => ground(img) as Phaser.GameObjects.Image, this.view);
@@ -462,16 +471,8 @@ export class WorldScene extends Phaser.Scene {
       useForest(gen);
       const forest = (this.forest = new Forest(this, gen, (img) => ground(img) as Phaser.GameObjects.Image));
       // The player's own changes on top: what they built, and the trees and undergrowth they cleared.
-      const woodBuild = (this.woodBuild = new ForestBuild(this, forest));
-      // Fishing rods built here fish the forest's own streams and ponds.
-      const fishing = (this.fishing = new Fishing(this, woodBuild));
-      this.scene.launch('fish');
+      this.buildHere(new PlaceBuild(this, arena.id, forestGround(forest), (img) => ground(img) as Phaser.GameObjects.Image, true, forest));
       this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-        fishing.destroy();
-        if (this.fishing === fishing) this.fishing = null;
-        this.scene.stop('fish');
-        woodBuild.destroy();
-        this.woodBuild = null;
         useForest(null);
         this.forest = null;
         this.forestFeet = null;
@@ -490,6 +491,12 @@ export class WorldScene extends Phaser.Scene {
         land.destroy();
         if (this.land === land) this.land = null;
       });
+    // Heaven Lands builds anywhere: every place but the Home (which has its own plot) on the open grid.
+    if (cozy.on && !this.forest && arena.id !== 'home') {
+      const walk = arena.walkable;
+      const cell = land?.buildCell ? (x: number, y: number) => land.buildCell!(x, y) : (x: number, y: number) => (walk(x, y) ? 0 : -1);
+      this.buildHere(new PlaceBuild(this, arena.id, { cell, level: () => 0, walkable: walk }, (img) => ground(img) as Phaser.GameObjects.Image, outdoors));
+    }
 
     // Faint shafts of sunlight over the clearing's ground. Drifting cloud
     // shadows are drawn over everything, with the vignette (see below).
@@ -661,8 +668,10 @@ export class WorldScene extends Phaser.Scene {
     this.scenery = new Scenery(this, arena.scenery(), arena.drift);
     this.net = session.active ? new NetPlay(this) : null;
     // Heaven Lands' pastimes: seats and beds, music, the stars, bees and finds.
-    const built = this.home?.buildLand ?? this.woodBuild?.land ?? null;
-    this.pastimes = cozy.pastimes?.(this, { arena: arena.id, land: built, owner: this.home?.owner ?? this.woodBuild?.mine ?? true }) ?? null;
+    // (Set by buildHere, which the compiler can't see from here.)
+    const places = this.places as PlaceBuild | null;
+    const built = this.home?.buildLand ?? places?.land ?? null;
+    this.pastimes = cozy.pastimes?.(this, { arena: arena.id, land: built, owner: this.home?.link.mine ?? places?.link.mine ?? true }) ?? null;
     this.weather = cozy.weather?.(this, arena.id) ?? null;
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.pastimes?.destroy();
@@ -778,13 +787,80 @@ export class WorldScene extends Phaser.Scene {
     this.keys = kb.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,J,K,SHIFT,N,C') as Record<string, Phaser.Input.Keyboard.Key>;
   }
 
+  /** The builds on the open grid here, with fishing from the rods built among them; given back with the world. */
+  private buildHere(places: PlaceBuild): void {
+    this.places = places;
+    const fishing = (this.fishing = new Fishing(this, places));
+    this.scene.launch('fish');
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      fishing.destroy();
+      if (this.fishing === fishing) this.fishing = null;
+      this.scene.stop('fish');
+      places.destroy();
+      if (this.places === places) this.places = null;
+    });
+  }
+
+  /** What this player tells a room about themselves: their name and their hero's looks. */
+  roomMe(): { name: string; hero: string; look: string } {
+    const ch = characterById(this.character);
+    return cozy.on && cozy.me ? cozy.me() : { name: account()?.username ?? ch.name, hero: ch.id, look: ch.look };
+  }
+
+  /** A room was just opened here (inviting friends, or a shared world opening itself to them): play on in it, where the hero stands. */
+  goOnline(): void {
+    if (this.net || !session.active) return;
+    const { x, y } = this.hero;
+    const [sx, sy] = [this.spawnX, this.spawnY];
+    this.net = new NetPlay(this);
+    // NetPlay stands a newcomer on the spawn; the one who opened the room stays put.
+    this.hero.x = x;
+    this.hero.y = y;
+    this.spawnX = sx;
+    this.spawnY = sy;
+    diag.online = `online ${session.room?.mode}, host, 1 players`;
+  }
+
+  /** Leave the room this world plays in (to play on alone, or before opening another); the world's last changes go to the cloud first. */
+  leaveRoom(): void {
+    this.worldLink?.letGo();
+    this.net?.destroy();
+    this.net = null;
+    session.close();
+  }
+
+  /** Off to another place (or this one again, in the room now open), behind its loading screen when it has one. */
+  moveTo(arena: string): void {
+    const cam = this.cameras.main;
+    cam.fadeEffect.reset();
+    cam.fadeOut(350, 7, 8, 13);
+    cam.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      releaseControls();
+      session.paused = false;
+      for (const k of ['ui', 'shade', 'pause']) this.scene.stop(k);
+      if (needsLoading(this, arenaById(arena))) this.scene.start('arenaload', { character: this.character, arena });
+      else enterArena(this, this.character, arena);
+    });
+  }
+
+  /** The arena this world is. */
+  get arenaId(): string {
+    return this.arena.id;
+  }
+
+  /** Whose world this is and who may build in it, for the friends panel (null where nothing is built). */
+  get worldLink(): WorldLink | null {
+    return this.home?.link ?? this.places?.link ?? null;
+  }
+
   /**
-   * The Home's friends panel: invite friends here with a code, visit a
-   * friend's Home, or go back to your own. Any of them starts the world
-   * again in the room it's now in.
+   * The friends panel: Heaven Lands' own (invite friends here, join a
+   * friend, the worlds shared with this player); else the Home's, whose
+   * choices start the world again in the room it's now in.
    */
   private openFriends(): void {
     if (session.paused) return;
+    if (cozy.friends) return cozy.friends(this);
     openHomeFriends({
       owner: this.home?.owner ?? true,
       code: session.active ? (session.room?.code ?? null) : null,
@@ -1027,6 +1103,13 @@ export class WorldScene extends Phaser.Scene {
 
   /** What the ground underfoot at (x, y) is, for a footstep's sound. */
   footing(x: number, y: number): Footing {
+    // What was built underfoot first: a bridge's deck, a floor laid.
+    if (this.places && !this.forest) {
+      const e = this.places.edits;
+      if (e.bridges.at(x, y) === Deck.Walk) return 'wood';
+      const laid = floorFooting(e.floorAt(Math.floor(x / CELL), Math.floor(y / CELL)));
+      if (laid) return laid;
+    }
     if (this.land?.footing) return this.land.footing(x, y);
     if (this.forest) return (this.forestFeet ??= new ForestFooting(this.forest.gen)).at(x, y, this.forest.edits);
     if (this.home) {
@@ -2127,7 +2210,7 @@ export class WorldScene extends Phaser.Scene {
 
   /** Is the hero under a roof (in the Rune Temple or the Forge)? No critters come out in there. */
   private indoors(): boolean {
-    if (this.forest) return this.forest.inside >= 0;
+    if (this.places) return this.places.view.inside >= 0;
     return !!this.sanctum && (inTemple(this.hero.x, this.hero.y) || inForge(this.hero.x, this.hero.y));
   }
 
@@ -2147,6 +2230,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.sanctum) near = Math.min(near, this.sanctum.fireDistance(this.hero.x, this.hero.y));
     if (this.home) near = Math.min(near, this.home.fireDistance(this.hero.x, this.hero.y));
     if (this.forest) near = Math.min(near, this.forest.fireDistance(this.hero.x, this.hero.y));
+    if (this.places) near = Math.min(near, this.places.view.fireDistance(this.hero.x, this.hero.y));
     // No fire in this arena: no crackle.
     if (near === Infinity) return 0;
     const k = Phaser.Math.Clamp(1 - (near - 16) / 150, 0, 1);
@@ -2407,7 +2491,7 @@ export class WorldScene extends Phaser.Scene {
     this.forge?.update(this.hero.x, this.hero.y, dt);
     this.naturalist?.update(time, dt, Phaser.Math.Easing.Sine.InOut(this.daylight), this.hero.x, this.hero.y);
     this.home?.update(dt, this.hero.x, this.hero.y, Phaser.Math.Easing.Sine.InOut(this.daylight), this.net?.targets());
-    this.woodBuild?.update(dt, this.hero.x, this.hero.y, Phaser.Math.Easing.Sine.InOut(this.daylight));
+    this.places?.update(time, dt, this.hero.x, this.hero.y, Phaser.Math.Easing.Sine.InOut(this.daylight), this.net?.targets());
     this.fishing?.update(dt, this.hero.x, this.hero.y, Phaser.Math.Easing.Sine.InOut(this.daylight));
     if (build.friends) {
       build.friends = false;
@@ -2431,7 +2515,7 @@ export class WorldScene extends Phaser.Scene {
     const d = this.updateDaylight(time, dt);
     this.ground?.update(this.view, settings.values.quality !== 'full' ? 2.5 : 4);
     this.scenery.update(time, dt, d, this.hero, this.view);
-    this.forest?.update(time, dt, d, { x: this.hero.x, y: this.hero.y, alive: this.downT <= 0 }, this.view, this.net?.targets());
+    this.forest?.update(time, dt, d, { x: this.hero.x, y: this.hero.y, alive: this.downT <= 0 }, this.view);
     this.land?.update(time, dt, d, this.hero, this.view);
     this.garden?.update(time, dt, target, d, this.view);
     // After the day/night light: the cosmos lights itself.
@@ -2441,7 +2525,7 @@ export class WorldScene extends Phaser.Scene {
     this.companion?.update(dt, this.hero.x, this.hero.y, this.downT > 0, this.daylight);
     if (controls.netTap) {
       controls.netTap = false;
-      if (this.downT <= 0 && !session.paused && !this.fishing?.tap() && !this.home?.act() && !this.woodBuild?.act() && !this.pastimes?.act()) this.critters?.swingNet(this.hero.x, this.hero.y, this.facing.x);
+      if (this.downT <= 0 && !session.paused && !this.fishing?.tap() && !this.home?.act() && !this.places?.act() && !this.pastimes?.act()) this.critters?.swingNet(this.hero.x, this.hero.y, this.facing.x);
     }
     // Heaven Lands' pastimes, after the farm has said what E does here.
     this.pastimes?.update(dt, this.daylight);

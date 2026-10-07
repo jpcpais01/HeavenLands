@@ -57,6 +57,8 @@ export class Farm {
   private steamT = 0;
   /** The kitchen this hero opened, until they walk off. */
   private cooking: { x: number; y: number } | null = null;
+  /** This player may sow and pick here: in their own place, or a friend's who lets them build. */
+  tend: boolean;
 
   constructor(
     private scene: WorldScene,
@@ -69,6 +71,7 @@ export class Farm {
     /** Which farm it is in the saved string: 'h' the Home's, 'w' the Everwood's. */
     private at = 'h',
   ) {
+    this.tend = owner;
     warmFarm(scene);
     if (owner) {
       collection.giveStarter(CROPS.filter((c) => c.kind === 'garden').map((c) => c.id), STARTER_SEEDS);
@@ -106,10 +109,14 @@ export class Farm {
 
   // ---------------------------------------------------------------- The plots
 
-  /** The farm a visitor is sent with the home. */
-  adopt(s: string): void {
+  /** The farm as the room's host sent it (or a friend just changed it, or the cloud kept it); `keep` saves it, when it's this player's own. */
+  adopt(s: string, keep = false): void {
     this.plots = decodeFarm(s).filter((p) => p.at === this.at);
     this.redraw();
+    if (keep && this.owner) {
+      const others = decodeFarm(collection.farm).filter((p) => p.at !== this.at);
+      collection.saveFarm(encodeFarm([...others, ...this.plots]));
+    }
   }
 
   /** The Home's plots as the room is sent them. */
@@ -144,7 +151,7 @@ export class Farm {
   }
 
   sow(cx: number, cy: number, crop: string): boolean {
-    if (!this.owner || !this.canSow(cx, cy, crop)) return false;
+    if (!this.tend || !this.canSow(cx, cy, crop)) return false;
     collection.useStock([[seedKey(crop), 1]]);
     this.plots.push({ at: this.at, x: cx, y: cy, crop, t: Date.now() });
     this.show(this.plots[this.plots.length - 1]);
@@ -159,7 +166,7 @@ export class Farm {
   /** Pull up whatever's growing here (the eraser on the Seeds tab). A seed not yet sprouted goes back in the pouch. */
   uproot(cx: number, cy: number): boolean {
     const p = this.plotAt(cx, cy);
-    if (!p || !this.owner) return false;
+    if (!p || !this.tend) return false;
     if (stageOf(p) === 0) collection.addStock(seedKey(p.crop), 1);
     this.plots = this.plots.filter((q) => q !== p);
     this.drop(keyOf(cx, cy));
@@ -177,10 +184,13 @@ export class Farm {
   sync(): void {
     const l = this.land;
     const keep = this.plots.filter((p) => l.floorAt(p.x, p.y) === this.soil && !l.thingsAt(p.x, p.y).some((t) => !partById(t.id)?.critter));
-    if (keep.length !== this.plots.length && this.owner) {
-      for (const p of this.plots) if (!keep.includes(p) && stageOf(p) === 0) collection.addStock(seedKey(p.crop), 1);
+    if (keep.length !== this.plots.length) {
+      // The one building gets the seeds back and tells the others; the others just see the beds go.
+      const mine = this.tend && build.on;
+      if (mine) for (const p of this.plots) if (!keep.includes(p) && stageOf(p) === 0) collection.addStock(seedKey(p.crop), 1);
+      for (const p of this.plots) if (!keep.includes(p)) this.drop(keyOf(p.x, p.y));
       this.plots = keep;
-      this.save();
+      if (mine) this.save();
     }
     this.stations = [];
     for (const t of l.things) {
@@ -282,7 +292,7 @@ export class Farm {
 
     // What E would do here: pick the ripe crops in reach, or cook.
     const busy = build.on;
-    const ripe = !busy && this.owner && this.ripeNear().length > 0;
+    const ripe = !busy && this.tend && this.ripeNear().length > 0;
     const station = busy ? null : this.stationNear();
     homeAct.near = ripe ? 'harvest' : station ? 'cook' : '';
     this.showLabel();
@@ -328,7 +338,7 @@ export class Farm {
   /** E or the touch button: pick what's ripe in reach, or open the kitchen. True when it did either. */
   act(): boolean {
     if (build.on) return false;
-    if (this.owner && this.harvest()) return true;
+    if (this.tend && this.harvest()) return true;
     const s = this.stationNear();
     if (!s) return false;
     cookHud.station = s.kind;

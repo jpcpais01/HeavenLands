@@ -21,6 +21,7 @@ import { Monster, type Target } from '../game/monsters';
 import type { SpawnerSnap } from '../game/monsters';
 import { energy } from '../game/energy';
 import { snap } from '../game/display';
+import { cozy } from '../game/cozy';
 import { MARKS } from '../world/islandLayout';
 import { RemotePlayer, type HeroState } from './Remote';
 import { session, type Msg, type PeerInfo } from './session';
@@ -253,8 +254,8 @@ export class NetPlay {
         if (!r) break;
         const wasDown = r.down;
         r.apply(m as unknown as HeroState, now);
-        // In the Everwood a guest is taken to wherever the host is, the first time the host is heard from.
-        if (!this.metHost && f === session.room?.host && !session.isHost && this.world.everwood) {
+        // In the Everwood and every cozy place a guest is taken to wherever the host is, the first time the host is heard from.
+        if (!this.metHost && f === session.room?.host && !session.isHost && (this.world.everwood || cozy.on)) {
           this.metHost = true;
           this.world.travel(m.x as number, (m.y as number) + 14);
         }

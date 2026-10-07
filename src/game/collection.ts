@@ -396,6 +396,11 @@ class Collection {
     return this.data.home;
   }
 
+  /** When the Home last changed (ms). */
+  get homeT(): number {
+    return this.data.homeT;
+  }
+
   /** Keep the Home as it now stands, here and in the cloud. */
   saveHome(encoded: string): void {
     if (encoded === this.data.home) return;
@@ -407,6 +412,11 @@ class Collection {
   /** What the player has built in and cleared from the Everwood ('' for nothing; see world/forestEdits.ts). */
   get wood(): string {
     return this.data.wood;
+  }
+
+  /** When the Everwood's changes last changed (ms). */
+  get woodT(): number {
+    return this.data.woodT;
   }
 
   /** Keep the Everwood's changes as they now stand, here and in the cloud. */

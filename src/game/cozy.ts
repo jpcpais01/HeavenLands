@@ -42,6 +42,8 @@ export interface CozyHooks {
   pastimes: ((world: WorldScene, at: CozySpot) => CozyPastimes | null) | null;
   /** Heaven Lands' weather over the place being played (passing showers), or null where there's none. */
   weather: ((world: WorldScene, arena: string) => CozyWeather | null) | null;
+  /** The friends button in a place: Heaven Lands' panel for inviting friends, joining them and the worlds shared with this player. */
+  friends: ((world: WorldScene) => void) | null;
 }
 
 export interface CozyWeather {
@@ -93,6 +95,8 @@ export interface CozyMap {
 export interface CozyLand {
   /** What the ground underfoot is, for a footstep's sound. */
   footing?(x: number, y: number): Footing;
+  /** What the ground at (x, y) is for building on: -1 nothing goes, 0 dry, 1 shallows, 2 deep water (see world/PlaceBuild.ts BuildGround). */
+  buildCell?(x: number, y: number): number;
   update(time: number, dt: number, daylight: number, hero: { x: number; y: number }, view: Phaser.Geom.Rectangle): void;
   destroy(): void;
 }
@@ -103,4 +107,4 @@ export interface CozyHud {
   update(dt: number, hidden: boolean): void;
 }
 
-export const cozy: CozyHooks = { on: false, character: null, spawn: null, me: null, treasure: null, hud: null, arena: null, placeName: null, land: null, map: null, light: null, pastimes: null, weather: null };
+export const cozy: CozyHooks = { on: false, character: null, spawn: null, me: null, treasure: null, hud: null, arena: null, placeName: null, land: null, map: null, light: null, pastimes: null, weather: null, friends: null };

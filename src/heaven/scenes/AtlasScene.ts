@@ -12,7 +12,8 @@
 
 import Phaser from 'phaser';
 import { PLACES, type Place } from '../places';
-import { together, travel } from '../travel';
+import { goPlace } from '../travel';
+import { openFriendsPanel } from '../ui/friendsPanel';
 import { menuZoom } from '../../game/display';
 import { PixelButton, pixelText } from '../../ui/widgets';
 import { buildPixelFont } from '../../art/font';
@@ -1058,7 +1059,7 @@ export class AtlasScene extends Phaser.Scene {
     const place = this.isles[this.picked].place;
     this.leaving = true;
     savePick(place.id);
-    travel(this, place.id);
+    goPlace(this, place.id);
   }
 
   /** Go with friends: the room panel opens over the page, and the map rests until it closes. */
@@ -1072,10 +1073,14 @@ export class AtlasScene extends Phaser.Scene {
     this.touches.clear();
     this.gesture = null;
     this.tap = null;
-    together(this, place.id, () => {
-      this.roomOpen = false;
-      if (!this.leaving) this.input.enabled = true;
-      this.refreshCard();
+    openFriendsPanel(this, {
+      place: place.id,
+      onClose: (left) => {
+        this.roomOpen = false;
+        if (left) this.leaving = true;
+        if (!this.leaving) this.input.enabled = true;
+        this.refreshCard();
+      },
     });
   }
 

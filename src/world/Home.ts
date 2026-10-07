@@ -13,6 +13,7 @@ import { CRITTERS, critterById } from '../game/critters';
 import { daynight, type Phase } from '../game/daynight';
 import { SUN_SHADOW_ALPHA, sunShadow } from '../game/Wizard';
 import { sway, treeSwayReady } from '../game/treeSway';
+import { Pieces, sendPieces } from '../net/pieces';
 import { session, type Msg } from '../net/session';
 import type { WorldScene } from '../scenes/WorldScene';
 import { HOME_SPAWN, homeWalkable, setHomeMask } from './homeGround';
@@ -21,6 +22,8 @@ import { HomeCritters } from './HomeCritters';
 import { BridgeView } from './BridgeView';
 import { RoofView } from './RoofView';
 import type { BuildLand } from './buildLand';
+import { applyPatch, diff, readPatch, snapOf, thingKey, type BuildPatch, type BuildSnap } from './buildPatch';
+import { WorldLink, type LinkHost } from './worldLink';
 import { treeLeaves } from './Scenery';
 import { Swing, hangGate } from './swing';
 import { CELL, COLS, HomeLayout, HomeMask, PLOT_H, PLOT_W, PLOT_X, PLOT_Y, ROWS, cellIndex, doorAcross, findHouses, inPlot, starterHome, type House, type Thing } from './homeLayout';
@@ -42,9 +45,8 @@ const PATCH_ROWS = PLOT_H / PATCH;
 const UNDO_MAX = 30;
 /** Walls along a house's south side, seen from inside, are cut down to this many px of face. */
 const STUB = 6;
-/** Visitors are sent the home this long after the last edit, and in pieces no longer than this. */
-const SEND_MS = 700;
-const PIECE = 12000;
+/** A change bigger than this goes to the room in pieces. */
+const PATCH_MAX = 11000;
 /** How far round the hero the build cursor must keep, px, so no wall goes down on them. */
 const HERO_R = 6;
 /** ms between leaves or petals dropping from the trees planted here. */
@@ -114,13 +116,14 @@ let uid = 0;
  * doors and windows, hipped roofs over houses that fade away as the hero
  * steps inside (the chapel's walk-in, see Chapel.ts), and everything placed,
  * lit by its lamps and the day. In build mode taps on the world build (the
- * palette is ui/buildHud.ts). Online, the owner hosts: visitors are sent the
- * home and see it change as it's built; the day and night are shared.
+ * palette is ui/buildHud.ts). Online, the room's host keeps it: visitors are
+ * sent the home and see it change as it's built, and build too if its owner
+ * lets them (see worldLink.ts); the day and night are shared.
  */
-export class Home {
+export class Home implements LinkHost {
   layout: HomeLayout;
-  /** The player's own home, which they can build and which is saved; else a friend's, being visited. */
-  readonly owner: boolean;
+  /** Whose home this is, who may build, and the cloud's copy (see worldLink.ts). */
+  readonly link: WorldLink;
   private shown = new HomeLayout();
   private mask!: HomeMask;
   private houses: House[] = [];
@@ -134,15 +137,14 @@ export class Home {
   private grid: Phaser.GameObjects.Graphics;
   private cursor: Phaser.GameObjects.Graphics;
   private ghost: Img;
-  private undoStack: string[] = [];
-  private before = '';
+  /** Each stroke's change backwards, to undo it. */
+  private undoStack: BuildPatch[] = [];
+  private before: BuildSnap | null = null;
   private lastCell: { x: number; y: number } | null = null;
   private inside = -1;
   private daylight = -1;
   private lastDay = dayKey();
-  private sendT = 0;
-  private sendSeq = 0;
-  private pieces: { k: number; parts: string[] } | null = null;
+  private pieces = new Pieces();
   private netOff: (() => void) | null = null;
   private hero = { x: 0, y: 0 };
   private id = uid++;
@@ -158,24 +160,24 @@ export class Home {
   private bridges: BridgeView;
   /** The plot as the critters and the farm see it (see buildLand.ts). */
   private land: BuildLand = this.makeLand();
-  /** A visitor has been sent the home at least once. */
+  /** A visitor has been sent the home at least once (its keeper has it from the start). */
   private arrived = false;
   /** The crops on the garden beds, and the stoves and pots to cook at. */
   private farm: Farm;
-  /** The owner's farm, sent with the home's first piece, shown once the home has come. */
-  private farmSent: string | null = null;
 
   constructor(
     private scene: WorldScene,
     private ground: (img: Img) => Img,
   ) {
     warmHome(scene);
-    // Online, the room's host is the one whose home it is; everyone else visits.
-    this.owner = !session.active || session.isHost;
-    this.layout = this.owner ? (HomeLayout.decode(collection.home) ?? starterHome()) : new HomeLayout();
-    if (this.owner) this.caught = CRITTERS.filter((c) => collection.critterCount(c.id) > 0).map((c) => c.id);
-    build.available = this.owner;
-    build.home = true;
+    // Online, the room's host keeps the home (theirs, or a friend's opened while they're away); everyone else visits.
+    this.link = new WorldLink(scene, 'home', this);
+    const initial = this.link.initial;
+    this.layout = !this.link.keeper ? new HomeLayout() : initial ? (HomeLayout.decode(initial.data) ?? starterHome()) : (HomeLayout.decode(collection.home) ?? starterHome());
+    if (this.link.mine) this.caught = CRITTERS.filter((c) => collection.critterCount(c.id) > 0).map((c) => c.id);
+    else if (initial) this.caught = initial.caught.split(',').filter((id) => critterById(id));
+    this.arrived = this.link.keeper;
+    build.available = false;
     // Every tab and every part (the Everwood keeps to fewer).
     build.tabs = TABS.map((t) => t.id);
     build.allow = null;
@@ -188,14 +190,8 @@ export class Home {
     this.cursor = add.graphics().setDepth(9000).setVisible(false);
     this.ghost = add.image(0, 0, 'home', 'chimney').setAlpha(0.6).setDepth(9001).setVisible(false);
     this.critters = new HomeCritters(scene);
-    this.farm = new Farm(
-      scene,
-      this.owner,
-      () => {
-        if (session.active && this.owner) this.sendT = SEND_MS;
-      },
-      this.land,
-    );
+    this.farm = new Farm(scene, this.link.mine, () => this.farmChanged(), this.land);
+    if (initial) this.farm.adopt(initial.farm);
     this.bridges = new BridgeView(scene, PLOT_X, PLOT_Y);
     this.roofView = new RoofView(scene, PLOT_X, PLOT_Y);
     this.refresh(true);
@@ -212,11 +208,14 @@ export class Home {
     );
     this.leaves.emitting = this.layout.things.some((t) => LEAF_TINTS[t.id]);
 
-    if (session.active) {
-      this.netOff = session.on((m) => this.receive(m));
-      // A visitor asks for the home; the owner answers them alone.
-      if (!this.owner) session.send({ t: 'hq' });
-    }
+    this.netOff = session.on((m) => this.receive(m));
+    // A visitor asks for the home; its keeper answers them alone.
+    if (!this.link.keeper) session.send({ t: 'hq' });
+  }
+
+  /** This game keeps the home: alone, or the room's host. */
+  get owner(): boolean {
+    return this.link.keeper;
   }
 
   /** The plot as the things built on it are seen by others (see buildLand.ts). */
@@ -399,7 +398,7 @@ export class Home {
     if (this.leaves) this.leaves.emitting = l.things.some((t) => LEAF_TINTS[t.id]);
     this.fillShelves();
     // Let out with a sparkle while building (or, for a visitor, once the home has come), not as the home first appears.
-    this.critters.sync(this.land, this.owner ? build.on : this.arrived);
+    this.critters.sync(this.land, build.on || (!this.owner && this.arrived));
     this.farm.sync();
   }
 
@@ -670,9 +669,11 @@ export class Home {
       for (const t of this.stillTrees.splice(0)) if (t.sprite.active) sway(t.sprite, t.anim);
     }
 
+    this.link.update(dt);
+    build.available = this.link.canBuild && this.arrived;
+    this.farm.tend = this.link.canBuild;
     this.buildStep();
     this.shareDay();
-    if (this.sendT > 0 && (this.sendT -= dt) <= 0) this.sendHome();
   }
 
   /** E or the touch button: pick the ripe crops in reach, or open the kitchen at a stove or pot. True when it did. */
@@ -693,7 +694,7 @@ export class Home {
   // ---------------------------------------------------------------- Building
 
   private buildStep(): void {
-    const on = build.on && this.owner;
+    const on = build.on && build.available;
     this.grid.setVisible(on);
     if (!on) {
       this.cursor.setVisible(false);
@@ -723,7 +724,7 @@ export class Home {
 
     if (build.pressed) {
       build.pressed = false;
-      this.before = this.layout.encode();
+      this.before = this.snap();
       this.lastCell = null;
     }
     if (p.down && !thing) this.stroke(cx, cy, erase);
@@ -920,30 +921,98 @@ export class Home {
     this.refresh();
   }
 
-  /** A stroke is over: keep it for undo, save it and show visitors. */
+  private snap(): BuildSnap {
+    const l = this.layout;
+    const cells = (a: Uint8Array) => [...a].map((v, i): [number, number] => [i, v]);
+    return snapOf({ f: cells(l.floor), w: cells(l.wall), r: cells(l.roof), t: cells(l.tent) }, l.things);
+  }
+
+  /** A stroke is over: keep its change backwards for undo, then save it and send it. */
   private endStroke(): void {
-    const now = this.layout.encode();
-    if (!this.before || now === this.before) return;
-    this.undoStack.push(this.before);
+    const before = this.before;
+    this.before = null;
+    if (!before) return;
+    const after = this.snap();
+    const change = diff(before, after);
+    if (!change) return;
+    this.undoStack.push(diff(after, before)!);
     if (this.undoStack.length > UNDO_MAX) this.undoStack.shift();
     build.canUndo = true;
-    this.before = '';
-    this.changed(now);
+    this.committed(change);
   }
 
   private undo(): void {
-    const prev = this.undoStack.pop();
+    const back = this.undoStack.pop();
     build.canUndo = this.undoStack.length > 0;
-    const l = prev ? HomeLayout.decode(prev) : null;
+    if (!back) return;
+    this.lay(back);
+    this.committed(back);
+  }
+
+  /** Lay a change on the layout and draw it again. */
+  private lay(p: BuildPatch): void {
+    const l = this.layout;
+    const layers: Record<string, Uint8Array> = { f: l.floor, w: l.wall, r: l.roof, t: l.tent };
+    applyPatch(
+      {
+        setCell: (layer, i, v) => {
+          const a = layers[layer];
+          if (a && i >= 0 && i < a.length) a[i] = v;
+        },
+        addThing: (t) => {
+          if (inPlot(t.x, t.y)) l.things.push(t);
+        },
+        removeThing: (key) => {
+          const i = l.things.findIndex((t) => thingKey(t) === key);
+          if (i >= 0) l.things.splice(i, 1);
+          return i >= 0;
+        },
+        hasThing: (key) => l.things.some((t) => thingKey(t) === key),
+      },
+      p,
+    );
+    this.refresh();
+  }
+
+  /** A change made here (a stroke, or an undo): saved, and sent to the room. */
+  private committed(p: BuildPatch): void {
+    this.keep();
+    if (!session.active) return;
+    const json = JSON.stringify(p);
+    if (json.length <= PATCH_MAX) session.send({ t: 'bp', p });
+    else sendPieces('bpl', json);
+  }
+
+  /** The home changed: into this player's save if it's theirs, and to the cloud a little later if it's shared. */
+  private keep(): void {
+    if (this.link.mine) collection.saveHome(this.layout.encode());
+    this.link.changed();
+  }
+
+  /** The farm changed (sown, picked, pulled up): to the room, and kept like the home. */
+  private farmChanged(): void {
+    this.link.changed();
+    if (session.active) session.send({ t: 'fs', s: this.farm.encoded() });
+  }
+
+  // ---------------------------------------------------------------- The world (see worldLink.ts)
+
+  state(): { data: string; farm: string; caught: string } {
+    return { data: this.layout.encode(), farm: this.farm.encoded(), caught: this.caught.join(',') };
+  }
+
+  localT(): number {
+    return collection.homeT;
+  }
+
+  /** Friends built here while this player was away: the cloud's copy, taken whole. */
+  adopt(data: string, farm: string): void {
+    const l = HomeLayout.decode(data);
     if (!l) return;
     this.layout = l;
     this.refresh();
-    this.changed(prev!);
-  }
-
-  private changed(encoded: string): void {
-    if (this.owner) collection.saveHome(encoded);
-    if (session.active && this.owner) this.sendT = SEND_MS;
+    this.farm.adopt(farm, true);
+    if (this.link.mine) collection.saveHome(data);
   }
 
   // ---------------------------------------------------------------- Online
@@ -951,31 +1020,52 @@ export class Home {
   private receive(m: Msg): void {
     switch (m.t) {
       case 'hq':
-        if (this.owner) this.sendHome(m.f);
+        // Someone just came: the home, the farm, the critters for the jar shelves and the time of day.
+        if (this.owner) {
+          sendPieces('hl', this.layout.encode(), { c: this.caught.join(','), fm: this.farm.encoded(), dn: daynight.phase, da: daynight.auto, dl: Math.round(daynight.left) }, m.f);
+        }
         break;
       case 'hl': {
         if (this.owner) break;
-        const k = m.k as number;
-        const n = m.n as number;
-        if (!this.pieces || this.pieces.k !== k) this.pieces = { k, parts: new Array(n).fill('') };
-        this.pieces.parts[m.i as number] = String(m.d ?? '');
-        if (typeof m.fm === 'string') this.farmSent = m.fm;
-        if (typeof m.c === 'string') this.caught = m.c ? m.c.split(',').filter((id) => critterById(id)) : [];
-        if (typeof m.dn === 'string') {
-          daynight.adopt(m.dn as Phase, !!m.da, m.dl as number);
+        const got = this.pieces.take(m);
+        if (!got) break;
+        const f = got.first;
+        if (typeof f.c === 'string') this.caught = f.c ? f.c.split(',').filter((id) => critterById(id)) : [];
+        if (typeof f.dn === 'string') {
+          daynight.adopt(f.dn as Phase, !!f.da, f.dl as number);
           this.lastDay = dayKey();
         }
-        if (this.pieces.parts.some((s) => !s)) break;
-        const l = HomeLayout.decode(this.pieces.parts.join(''));
-        this.pieces = null;
+        const l = HomeLayout.decode(got.s);
         if (!l) break;
         this.layout = l;
-        this.refresh();
-        if (this.farmSent !== null) this.farm.adopt(this.farmSent);
-        this.farmSent = null;
         this.arrived = true;
+        this.refresh();
+        if (typeof f.fm === 'string') this.farm.adopt(f.fm, this.link.mine);
+        if (this.link.mine) collection.saveHome(got.s);
         break;
       }
+      case 'bp': {
+        const p = readPatch(m.p);
+        if (p) this.received(p);
+        break;
+      }
+      case 'bpl': {
+        const got = this.pieces.take(m);
+        if (!got) break;
+        try {
+          const p = readPatch(JSON.parse(got.s));
+          if (p) this.received(p);
+        } catch {
+          // Garbled: whoever comes next is sent the home whole.
+        }
+        break;
+      }
+      case 'fs':
+        if (typeof m.s === 'string') {
+          this.farm.adopt(m.s, this.link.mine);
+          this.link.changed();
+        }
+        break;
       case 'dn':
         daynight.adopt(m.v as Phase, !!m.a, m.l as number);
         this.lastDay = dayKey();
@@ -983,24 +1073,10 @@ export class Home {
     }
   }
 
-  /** The home to the room (or one visitor), in pieces small enough for the server. */
-  private sendHome(to?: number): void {
-    this.sendT = 0;
-    if (!session.active || !this.owner) return;
-    const s = this.layout.encode();
-    const n = Math.max(1, Math.ceil(s.length / PIECE));
-    const k = ++this.sendSeq;
-    for (let i = 0; i < n; i++) {
-      const m: Msg = { t: 'hl', k, i, n, d: s.slice(i * PIECE, (i + 1) * PIECE) };
-      if (i === 0) {
-        m.c = this.caught.join(',');
-        m.fm = this.farm.encoded();
-        m.dn = daynight.phase;
-        m.da = daynight.auto;
-        m.dl = Math.round(daynight.left);
-      }
-      session.send(m, to);
-    }
+  /** A friend's stroke: laid here too, and kept like one of this player's own. */
+  private received(p: BuildPatch): void {
+    this.lay(p);
+    this.keep();
   }
 
   /**
@@ -1015,6 +1091,7 @@ export class Home {
   }
 
   destroy(): void {
+    this.link.destroy();
     this.netOff?.();
     this.netOff = null;
     setHomeMask(null);

@@ -8,7 +8,8 @@ import Phaser from 'phaser';
 import { menuZoom } from '../../game/display';
 import { PixelButton, pixelText } from '../../ui/widgets';
 import { profile } from '../profile';
-import { travel, together } from '../travel';
+import { goPlace } from '../travel';
+import { openFriendsPanel } from '../ui/friendsPanel';
 import { ensureWanderer, W_ORIGIN } from '../art/sheet';
 import { CLOUD_KINDS, ISLE_H, ISLE_STAND, ISLE_W, cloudSeaTexture, cloudTextures, glowTexture, isleTexture, skyTexture, sunTexture } from '../art/titleArt';
 import { titleLogo } from '../art/heavenTitle';
@@ -115,11 +116,11 @@ export class TitleScene extends Phaser.Scene {
       fn();
     };
     this.buttons = [
-      new PixelButton(this, 'Go home', BUTTON_W, BUTTON_H, HEAVEN_BUTTON, 'hl_btn_home', go(() => this.leave(() => travel(this, 'home')))),
+      new PixelButton(this, 'Go home', BUTTON_W, BUTTON_H, HEAVEN_BUTTON, 'hl_btn_home', go(() => this.leave(() => goPlace(this, 'home')))),
       new PixelButton(this, 'Explore', BUTTON_W, BUTTON_H, HEAVEN_BUTTON_SOFT, 'hl_btn_soft', go(() => this.leave(() => this.scene.start('atlas'), true))),
       new PixelButton(this, 'Wardrobe', BUTTON_W, BUTTON_H, HEAVEN_BUTTON_SOFT, 'hl_btn_soft', go(() => this.leave(() => this.scene.start('creator', {}), true))),
       new PixelButton(this, 'Companion', BUTTON_W, BUTTON_H, HEAVEN_BUTTON_SOFT, 'hl_btn_soft', go(() => this.openPicker())),
-      new PixelButton(this, 'Join a friend', BUTTON_W, BUTTON_H, HEAVEN_BUTTON_SOFT, 'hl_btn_soft', go(() => this.openTogether())),
+      new PixelButton(this, 'Friends', BUTTON_W, BUTTON_H, HEAVEN_BUTTON_SOFT, 'hl_btn_soft', go(() => this.openTogether())),
     ];
     this.buttons.forEach((b) => b.setDepth(6));
 
@@ -140,7 +141,7 @@ export class TitleScene extends Phaser.Scene {
       unwatch();
     });
     const kb = this.input.keyboard;
-    kb?.on('keydown-ENTER', go(() => this.leave(() => travel(this, 'home'))));
+    kb?.on('keydown-ENTER', go(() => this.leave(() => goPlace(this, 'home'))));
     kb?.on('keydown-M', go(() => this.leave(() => this.scene.start('atlas'), true)));
     this.time.delayedCall(80, () => window.bootLoader?.done());
     // Signed in on a device whose own wanderer differs from the account's: which to keep is asked first.
@@ -215,9 +216,12 @@ export class TitleScene extends Phaser.Scene {
   private openTogether(): void {
     this.busy = true;
     this.input.enabled = false;
-    together(this, 'home', () => {
-      this.busy = false;
-      this.input.enabled = true;
+    openFriendsPanel(this, {
+      place: 'home',
+      onClose: (left) => {
+        this.busy = left;
+        this.input.enabled = !left;
+      },
     });
   }
 
