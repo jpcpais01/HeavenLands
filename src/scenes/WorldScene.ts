@@ -2052,6 +2052,7 @@ export class WorldScene extends Phaser.Scene {
     this.pollen.emitting = open && d > 0.6 && !omenMods.dark;
     this.fireflies.emitting = open && d < 0.56 && !omenMods.dark;
     sound.setDaylight(d);
+    if (cozy.on) cozy.light?.(this.arena.dayNight ? daynight.mix : [0, d, 0, 1 - d], time);
     return d;
   }
 

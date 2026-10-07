@@ -30,6 +30,12 @@ export interface CozyHooks {
   land: ((world: WorldScene, arena: string, ground: (img: Phaser.GameObjects.Image) => Phaser.GameObjects.Image, view: Phaser.Geom.Rectangle) => CozyLand | null) | null;
   /** The map of an arena Heaven Lands adds (its endless lands), painted in tiles round where it's looked at, or null. */
   map: ((arena: string) => CozyMap | null) | null;
+  /**
+   * The light each frame, after the world's own: the weights of morning, day,
+   * sunset and night (only day and night where a place has no day cycle), and
+   * the time in ms. Heaven Lands grades its colours and veils the screen in light here.
+   */
+  light: ((weights: readonly number[], time: number) => void) | null;
 }
 
 /** An endless land's map for the minimap (scenes/MapScene.ts): tiles of `size` map pixels, one map pixel per MAP_CELL px of ground. */
@@ -54,4 +60,4 @@ export interface CozyHud {
   update(dt: number, hidden: boolean): void;
 }
 
-export const cozy: CozyHooks = { on: false, character: null, spawn: null, me: null, treasure: null, hud: null, arena: null, placeName: null, land: null, map: null };
+export const cozy: CozyHooks = { on: false, character: null, spawn: null, me: null, treasure: null, hud: null, arena: null, placeName: null, land: null, map: null, light: null };
