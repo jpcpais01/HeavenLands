@@ -291,3 +291,79 @@ export async function writeCloud(data: string, t: number, after: string | null, 
   const doc = (await res.json().catch(() => ({}))) as { updateTime?: string };
   return doc.updateTime ?? '';
 }
+
+// ---------------------------------------------------------------- Shared worlds
+
+/**
+ * A world shared with friends (net/worlds.ts): a place someone built in,
+ * kept in `worlds/{id}` so the friends they invited can open it while
+ * they're away, and so whoever plays it can tell the others which room
+ * they're in. Any signed-in player may read and write these (a world's id is
+ * only ever learned by being invited to it); the Firestore rule for the
+ * `worlds` collection says so.
+ */
+export interface WorldDoc {
+  owner: string;
+  name: string;
+  place: string;
+  /** What's built there, the farm on it, the critters for its jar shelves, and when it last changed (ms). */
+  data: string;
+  farm: string;
+  caught: string;
+  dataT: number;
+  /** The room playing it now, and when its host last said so (ms): a room not heard of for a while is gone. */
+  room: string;
+  roomT: number;
+  /** Friends may build there. */
+  open: boolean;
+  /** The owner stopped sharing it. */
+  closed: boolean;
+}
+
+/** The worlds collection can't be read or written (its rule isn't in yet): shared worlds sleep for this visit. */
+export class WorldsLocked extends CloudError {}
+
+const worldUrl = (id: string) => `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/worlds/${encodeURIComponent(id)}`;
+const bool = (v: unknown): boolean => !!(v && typeof v === 'object' && 'booleanValue' in v && (v as { booleanValue: boolean }).booleanValue);
+
+/** A shared world; null if there's no such world. */
+export async function loadWorldDoc(id: string): Promise<WorldDoc | null> {
+  if (!session) throw new CloudError('Not logged in.');
+  let res: Response;
+  try {
+    res = await fetch(worldUrl(id), { headers: { Authorization: `Bearer ${await token()}` }, cache: 'no-store' });
+  } catch (e) {
+    throw e instanceof CloudError ? e : new CloudError('No connection.');
+  }
+  if (res.status === 404) return null;
+  if (res.status === 403) throw new WorldsLocked('Shared worlds are not switched on yet.');
+  if (!res.ok) throw new CloudError('Could not open that world.');
+  const f = ((await res.json()) as { fields?: Record<string, unknown> }).fields ?? {};
+  return { owner: str(f.owner), name: str(f.name), place: str(f.place), data: str(f.data), farm: str(f.farm), caught: str(f.caught), dataT: int(f.dataT), room: str(f.room), roomT: int(f.roomT), open: bool(f.open), closed: bool(f.closed) };
+}
+
+/** Write some of a shared world's fields (the rest stay as they are). */
+export async function writeWorldDoc(id: string, fields: Partial<WorldDoc>, keepalive = false): Promise<void> {
+  if (!session) throw new CloudError('Not logged in.');
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (typeof v === 'string') out[k] = { stringValue: v };
+    else if (typeof v === 'number') out[k] = { integerValue: String(Math.floor(v)) };
+    else if (typeof v === 'boolean') out[k] = { booleanValue: v };
+  }
+  const mask = Object.keys(out).map((k) => `updateMask.fieldPaths=${k}`).join('&');
+  const body = JSON.stringify({ fields: out });
+  let res: Response;
+  try {
+    res = await fetch(`${worldUrl(id)}?${mask}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${await token()}`, 'Content-Type': 'application/json' },
+      body,
+      keepalive: keepalive && body.length < 60_000,
+    });
+  } catch (e) {
+    throw e instanceof CloudError ? e : new CloudError('No connection.');
+  }
+  if (res.status === 403) throw new WorldsLocked('Shared worlds are not switched on yet.');
+  if (!res.ok) throw new CloudError('Could not save the world.');
+}

@@ -18,6 +18,7 @@ import { heavenLight } from './glow';
 import { Pastimes } from './pastimes';
 import { Showers } from './weather';
 import { ownCompanions } from './companions';
+import { openFriendsPanel } from './ui/friendsPanel';
 import { STARWATCH_ARENA, STARWATCH_ID } from './starwatch';
 import { Starwatch } from './starwatch/Starwatch';
 
@@ -51,6 +52,7 @@ export function wireCozy(): void {
   cozy.light = heavenLight;
   cozy.pastimes = (world, at) => new Pastimes(world, at);
   cozy.weather = (world, arena) => Showers.at(world, arena);
+  cozy.friends = (world) => openFriendsPanel(world);
   cozy.placeName = (arena) => PLACES.find((p) => p.arena === arena)?.name ?? arena;
   cozy.treasure = (world, x, y) => {
     const wild = CROPS.filter((c) => c.kind === 'wild');

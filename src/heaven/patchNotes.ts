@@ -18,6 +18,17 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    v: 6,
+    date: '2026-10-07',
+    title: 'Build anywhere, together',
+    notes: [
+      'You can build everywhere now: Hearthhome, the Everwood, Cloudrest, Starwatch and every endless land. Whatever you build in a place is kept, always.',
+      'Friends: one Friends button in every place. Invite friends right where you stand, join a friend with their code, and turn on Friends can build to let them build, plant and tidy like you.',
+      'Shared worlds: once you invite friends to a place it stays theirs to visit. It shows under Friends\' worlds, and they can open it any time, even while you\'re away. What they build is kept for you too.',
+      'Opening a shared world while friends are playing in it takes you straight to them.',
+    ],
+  },
+  {
     v: 5,
     date: '2026-10-07',
     title: 'Starry nights',

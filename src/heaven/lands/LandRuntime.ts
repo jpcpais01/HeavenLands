@@ -159,6 +159,12 @@ export class LandRuntime implements CozyLand {
     return g.feet?.[FOOT_CELL.kind] ?? 'grass';
   }
 
+  /** For building: ground walked on is dry (wading depth counts as shallows); ground that isn't is deep water where it's water, else nothing goes there (a thicket, a cliff). */
+  buildCell(x: number, y: number): number {
+    const wade = this.footing(x, y) === 'wade';
+    return this.land.gen.open(x, y) ? (wade ? 1 : 0) : wade ? 2 : -1;
+  }
+
   update(time: number, dt: number, daylight: number, hero: { x: number; y: number }, view: Phaser.Geom.Rectangle): void {
     if (this.dead) return;
     this.updateGround(view, dt);
