@@ -2,7 +2,7 @@
 // (ui/buildHud.ts, in UIScene) and the world that builds it (world/Home.ts).
 // The HUD writes the pick and the pointer; the world reads them each frame.
 
-import { FLOORS, PARTS, ROOFS, TABS, TENTS, WALLS, WALL_ITEMS, critterPart, wallKind, wallMat, type BuildTab } from '../world/homeParts';
+import { FLOORS, PARTS, ROOFS, TABS, TENTS, WALLS, WALL_ITEMS, critterPart, wallKind, wallMat, type BuildTab, type PartDef, type Shelf } from '../world/homeParts';
 import { collection } from './collection';
 import { CRITTERS } from './critters';
 import { CROPS } from './farm';
@@ -22,20 +22,23 @@ export interface PaletteItem {
   count?: () => number;
 }
 
-/** Each tab's palette. The world's art must be warm (see art/homeArt.ts) before these icons exist. */
-export function palette(tab: BuildTab, partIcon: (id: string) => { key: string; frame: string }, wallIcon: (mat: number, frame: string) => { key: string; frame: string }): PaletteItem[] {
-  switch (tab) {
+/** A shelf's palette (see SHELVES in world/homeParts.ts). The world's art must be warm (see art/homeArt.ts) before these icons exist. */
+export function palette(shelf: Shelf, partIcon: (id: string) => { key: string; frame: string }, wallIcon: (mat: number, frame: string) => { key: string; frame: string }): PaletteItem[] {
+  const thing = (p: PartDef): PaletteItem => ({ layer: 'thing', value: 0, id: p.id, name: p.name, icon: partIcon(p.id) });
+  switch (shelf.tab) {
     case 'floor':
-      return FLOORS.map((f, i) => ({ layer: 'floor', value: i + 1, id: f.id, name: f.name, icon: { key: `hs_f${i + 1}` } }));
+      // Soft ground (lawns, paths, water) on one shelf, laid floors on the other.
+      return FLOORS.flatMap((f, i): PaletteItem[] => (!!f.soft === (shelf.id === 'ground') ? [{ layer: 'floor', value: i + 1, id: f.id, name: f.name, icon: { key: `hs_f${i + 1}` } }] : []));
     case 'wall':
       return [
-        ...WALL_ITEMS.map((w): PaletteItem => {
+        // House walls (with their doorways and windows) on one shelf, garden walls and their gates on the other.
+        ...WALL_ITEMS.filter((w) => WALLS[wallMat(w.value)].house === (shelf.id === 'walls')).map((w): PaletteItem => {
           const kind = wallKind(w.value);
           const frame = kind === 'door' ? 'd10' : kind === 'window' ? 'n10' : 'w10_0';
           return { layer: 'wall', value: w.value, id: w.id, name: w.name, icon: wallIcon(wallMat(w.value), frame) };
         }),
         // Doors hang in a house's doorway, so they come after the walls.
-        ...PARTS.filter((p) => p.tab === 'wall').map((p): PaletteItem => ({ layer: 'thing', value: 0, id: p.id, name: p.name, icon: partIcon(p.id) })),
+        ...PARTS.filter((p) => p.tab === 'wall' && p.shelf === shelf.id).map(thing),
       ];
     case 'roof':
       return ROOFS.map((r, i) => ({ layer: 'roof', value: i + 1, id: r.id, name: `${r.name} roof`, icon: { key: `hs_r${i + 1}` } }));
@@ -48,7 +51,7 @@ export function palette(tab: BuildTab, partIcon: (id: string) => { key: string; 
       // The seeds in the pouch; each stroke sows one a cell on garden beds.
       return CROPS.filter((c) => collection.stock(seedKey(c.id)) > 0).map((c) => ({ layer: 'seed', value: 0, id: c.id, name: `${c.name} seeds`, icon: { key: `seed_${c.id}` }, count: () => collection.stock(seedKey(c.id)) }));
     default:
-      return PARTS.filter((p) => p.tab === tab).map((p) => ({ layer: 'thing', value: 0, id: p.id, name: p.name, icon: partIcon(p.id) }));
+      return PARTS.filter((p) => p.tab === shelf.tab && p.shelf === shelf.id).map(thing);
   }
 }
 
