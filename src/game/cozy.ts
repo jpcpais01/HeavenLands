@@ -8,6 +8,7 @@ import type { CharacterDef, Hero } from './characters';
 import type Phaser from 'phaser';
 import type { WorldScene } from '../scenes/WorldScene';
 import type { ArenaDef } from '../world/arenas';
+import type { Footing } from '../audio';
 
 export interface CozyHooks {
   /** Heaven Lands is running: no monsters, no health or energy, chests give seeds and keepsakes. */
@@ -50,6 +51,8 @@ export interface CozyMap {
 }
 
 export interface CozyLand {
+  /** What the ground underfoot is, for a footstep's sound. */
+  footing?(x: number, y: number): Footing;
   update(time: number, dt: number, daylight: number, hero: { x: number; y: number }, view: Phaser.Geom.Rectangle): void;
   destroy(): void;
 }

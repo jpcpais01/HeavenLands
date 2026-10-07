@@ -113,6 +113,8 @@ export class ShoreGen implements LandGen {
     const self = this;
     this.ground = {
       kinds: SHORE_KINDS,
+      // Underfoot, by kind: Sand, Wet, Sea, Grass, Scrub, Rock, Pool, Plank, Post, Shell, Star, Kelp.
+      feet: ['sand', 'sand', 'wade', 'grass', 'grass', 'stone', 'puddle', 'wood', 'wood', 'sand', 'sand', 'puddle'],
       cell: (x, y, c) => self.cell(x, y, c),
       decorate: (f) => self.decorate(f),
     };

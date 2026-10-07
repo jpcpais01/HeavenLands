@@ -131,6 +131,8 @@ export class SaltGen implements LandGen {
     const self = this;
     this.ground = {
       kinds: SALT_KINDS,
+      // Underfoot, by kind: the mirror's film of water splashes, the crust crunches.
+      feet: ['puddle', 'puddle', 'wade', 'puddle', 'crust', 'earth', 'stone', 'grass', 'wood', 'wood', 'crust', 'wade'],
       cell: (x, y, c) => self.cell(x, y, c),
       decorate: (f) => self.decorate(f),
     };
