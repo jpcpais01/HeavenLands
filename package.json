@@ -1,0 +1,22 @@
+{
+  "name": "heaven-lands",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "typecheck": "tsc --noEmit",
+    "wanderer": "tsx scripts/wanderer.ts wanderer.png 6",
+    "lands": "tsx scripts/lands.ts"
+  },
+  "dependencies": {
+    "phaser": "3.90.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0"
+  }
+}

@@ -1,0 +1,3439 @@
+import { Mixer, filter, gain, hit, mtof, osc, panner, pick, rand, sweep } from './mixer';
+
+const SPARKLE = [2093, 2349, 2637, 3136, 3520, 4186]; // C major pentatonic, high
+/** The minstrel's tune, one note per strum (MIDI, D dorian): his attacks play it through. */
+const LUTE_TUNE = [62, 65, 69, 67, 65, 64, 62, 57, 62, 69, 67, 72, 69, 65, 67, 62];
+export const LUTE_NOTES = LUTE_TUNE.length;
+
+/** The Aurora Colosseum's frost sounds (see Sfx.frost). */
+export type FrostSound = 'crack' | 'freeze' | 'howl' | 'chime' | 'crunch' | 'gust';
+
+/** One-shot game sounds. `pan` is -1 (left) .. 1 (right) on screen. */
+export class Sfx {
+  private m: Mixer;
+  private foot = 0;
+
+  constructor(m: Mixer) {
+    this.m = m;
+  }
+
+  private out(pan: number, level: number, wet: number): GainNode {
+    const ctx = this.m.ctx;
+    // Baked clips are made unpanned: their side is set when they play (see bake.ts).
+    const g = gain(ctx, level, this.m.baking ? this.m.sfx : panner(ctx, pan * 0.7, this.m.sfx));
+    if (wet > 0) g.connect(gain(ctx, wet, this.m.reverb));
+    return g;
+  }
+
+  /** The staff swirl: a soft rising shimmer while energy gathers. */
+  charge(t: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(0, 0.5, 0.4);
+    const dur = 0.5;
+    const env = gain(ctx, 0, out);
+    env.gain.setValueAtTime(0, t);
+    env.gain.linearRampToValueAtTime(0.09, t + dur * 0.85);
+    env.gain.linearRampToValueAtTime(0, t + dur + 0.05);
+    for (const [f, lvl] of [
+      [520, 1],
+      [780, 0.6],
+      [1040, 0.35],
+    ]) {
+      const o = osc(ctx, 'sine', f, gain(ctx, lvl, env));
+      sweep(o.frequency, t, f, f * 1.6, dur);
+      o.start(t);
+      o.stop(t + dur + 0.1);
+    }
+    // Airy swirl: noise through a bandpass that circles as it rises.
+    const air = gain(ctx, 0, out);
+    air.gain.setValueAtTime(0, t);
+    air.gain.linearRampToValueAtTime(0.35, t + dur * 0.8);
+    air.gain.linearRampToValueAtTime(0, t + dur + 0.05);
+    const bp = filter(ctx, 'bandpass', 600, 4, air);
+    sweep(bp.frequency, t, 500, 2200, dur);
+    const lfo = osc(ctx, 'sine', 9, gain(ctx, 250, bp.frequency));
+    lfo.start(t);
+    lfo.stop(t + dur + 0.1);
+    const src = this.m.noiseSource();
+    src.connect(bp);
+    this.m.startNoise(src, t, dur + 0.1);
+  }
+
+  /** The energy ball leaving the staff. */
+  cast(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.8, 0.45);
+
+    // Whoosh.
+    const w = gain(ctx, 0, out);
+    hit(w.gain, t, 0.5, 0.015, 0.35);
+    const bp = filter(ctx, 'bandpass', 2000, 1.4, w);
+    sweep(bp.frequency, t, 2600, 450, 0.35);
+    const src = this.m.noiseSource();
+    src.connect(bp);
+    this.m.startNoise(src, t, 0.4);
+
+    // Magic tone: a falling fifth that settles, not a laser.
+    const z = gain(ctx, 0, filter(ctx, 'lowpass', 3500, 0.5, out));
+    hit(z.gain, t, 0.18, 0.005, 0.28);
+    for (const [f, type] of [
+      [990, 'sine'],
+      [1485, 'triangle'],
+    ] as const) {
+      const o = osc(ctx, type, f, z);
+      sweep(o.frequency, t, f, f * 0.45, 0.22);
+      o.start(t);
+      o.stop(t + 0.35);
+    }
+
+    // Soft low push.
+    const p = gain(ctx, 0, out);
+    hit(p.gain, t, 0.35, 0.004, 0.14);
+    const lo = osc(ctx, 'sine', 140, p);
+    sweep(lo.frequency, t, 140, 60, 0.14);
+    lo.start(t);
+    lo.stop(t + 0.2);
+
+    this.sparkle(out, t + 0.02, 3, 0.05);
+  }
+
+  /** The ball bursting; `struck` adds a woody knock when it hit a target. */
+  impact(t: number, pan: number, struck: boolean): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, struck ? 0.9 : 0.55, 0.5);
+
+    const b = gain(ctx, 0, out);
+    hit(b.gain, t, 0.5, 0.003, 0.3);
+    const lp = filter(ctx, 'lowpass', 2400, 0.7, b);
+    sweep(lp.frequency, t, 2400, 500, 0.3);
+    const src = this.m.noiseSource();
+    src.connect(lp);
+    this.m.startNoise(src, t, 0.35);
+
+    const th = gain(ctx, 0, out);
+    hit(th.gain, t, 0.5, 0.003, 0.2);
+    const o = osc(ctx, 'sine', 170, th);
+    sweep(o.frequency, t, 170, 48, 0.2);
+    o.start(t);
+    o.stop(t + 0.3);
+
+    if (struck) {
+      const k = gain(ctx, 0, out);
+      hit(k.gain, t, 0.35, 0.002, 0.08);
+      const wood = filter(ctx, 'bandpass', 620, 5, k);
+      const n = this.m.noiseSource();
+      n.connect(wood);
+      this.m.startNoise(n, t, 0.1);
+      const kt = gain(ctx, 0, out);
+      hit(kt.gain, t, 0.12, 0.002, 0.07);
+      const ko = osc(ctx, 'triangle', 240, kt);
+      ko.start(t);
+      ko.stop(t + 0.12);
+    }
+
+    this.sparkle(out, t + 0.03, struck ? 5 : 3, 0.035);
+  }
+
+  /** A soft footfall on packed earth and grass; alternates feet. */
+  step(t: number): void {
+    const ctx = this.m.ctx;
+    this.foot ^= 1;
+    const out = this.out(this.foot ? -0.08 : 0.08, rand(0.75, 1), 0.08);
+
+    const s = gain(ctx, 0, out);
+    hit(s.gain, t, 0.3, 0.004, 0.07);
+    const hp = filter(ctx, 'highpass', 180, 0.7, s);
+    const lp = filter(ctx, 'lowpass', rand(1200, 1700) * (this.foot ? 1 : 0.9), 0.8, hp);
+    const src = this.m.noiseSource(true);
+    src.connect(lp);
+    this.m.startNoise(src, t, 0.1);
+
+    // A whisper of grass crunch on top.
+    const c = gain(ctx, 0, out);
+    hit(c.gain, t + 0.006, 0.05, 0.002, 0.04);
+    const crunch = filter(ctx, 'highpass', 3500, 0.7, c);
+    const n = this.m.noiseSource();
+    n.connect(crunch);
+    this.m.startNoise(n, t, 0.06);
+
+    const th = gain(ctx, 0, out);
+    hit(th.gain, t, 0.14, 0.003, 0.05);
+    const o = osc(ctx, 'sine', rand(85, 100), th);
+    o.start(t);
+    o.stop(t + 0.08);
+  }
+
+  /** Start the beam's gathering hum; steer it with `set` and end it with `stop`. */
+  beamHum(t: number): BeamHum {
+    return new BeamHum(this.m, this.out(0, 0.7, 0.35), t);
+  }
+
+  /** The beam tearing loose: a deep boom, a long roaring rush and a bright ringing tone. */
+  beamFire(t: number, pan: number, power: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.6 + power * 0.4, 0.5);
+    const dur = 0.32 + power * 0.52;
+
+    const b = gain(ctx, 0, out);
+    hit(b.gain, t, 0.55, 0.004, 0.35 + power * 0.3);
+    const lo = osc(ctx, 'sine', 95, b);
+    sweep(lo.frequency, t, 95, 38, 0.35 + power * 0.3);
+    lo.start(t);
+    lo.stop(t + 0.8);
+
+    const r = gain(ctx, 0, out);
+    r.gain.setValueAtTime(0, t);
+    r.gain.linearRampToValueAtTime(0.35 + power * 0.2, t + 0.02);
+    r.gain.setValueAtTime(0.3 + power * 0.15, t + dur * 0.7);
+    r.gain.linearRampToValueAtTime(0, t + dur);
+    const lp = filter(ctx, 'lowpass', 5000, 0.9, r);
+    sweep(lp.frequency, t, 6000, 900, dur);
+    const src = this.m.noiseSource();
+    src.connect(lp);
+    this.m.startNoise(src, t, dur);
+
+    const tone = gain(ctx, 0, filter(ctx, 'lowpass', 3200, 0.6, out));
+    tone.gain.setValueAtTime(0, t);
+    tone.gain.linearRampToValueAtTime(0.07, t + 0.02);
+    tone.gain.linearRampToValueAtTime(0, t + dur);
+    for (const [f, type, lvl] of [
+      [660, 'sawtooth', 0.5],
+      [663, 'sawtooth', 0.5],
+      [1320, 'sine', 0.8],
+    ] as const) {
+      const o = osc(ctx, type, f, gain(ctx, lvl, tone));
+      sweep(o.frequency, t, f * 1.05, f * 0.94, dur);
+      o.start(t);
+      o.stop(t + dur + 0.05);
+    }
+
+    this.sparkle(out, t + 0.02, 3 + Math.round(power * 3), 0.05);
+  }
+
+  /** A held charge slipping away: a sagging tone and a spit of crackle. */
+  beamFizzle(t: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(0, 0.6, 0.35);
+    const z = gain(ctx, 0, out);
+    hit(z.gain, t, 0.12, 0.005, 0.45);
+    const o = osc(ctx, 'triangle', 700, z);
+    sweep(o.frequency, t, 700, 140, 0.45);
+    o.start(t);
+    o.stop(t + 0.55);
+
+    const c = gain(ctx, 0, out);
+    hit(c.gain, t, 0.3, 0.003, 0.25);
+    const bp = filter(ctx, 'bandpass', 3000, 1.2, c);
+    sweep(bp.frequency, t, 3500, 800, 0.25);
+    const src = this.m.noiseSource();
+    src.connect(bp);
+    this.m.startNoise(src, t, 0.3);
+  }
+
+  /** A blade cutting the air. The finisher (`step` 3) is lower, heavier and longer. */
+  swing(t: number, pan: number, step: number): void {
+    const ctx = this.m.ctx;
+    const heavy = step >= 3;
+    const out = this.out(pan, heavy ? 0.85 : 0.7, 0.2);
+    const dur = heavy ? 0.26 : 0.17;
+    const w = gain(ctx, 0, out);
+    hit(w.gain, t, heavy ? 0.6 : 0.5, 0.02, dur);
+    const bp = filter(ctx, 'bandpass', 1800, heavy ? 1.6 : 2.4, w);
+    const top = [2600, 3200, 1900][Math.min(2, step - 1)] * rand(0.95, 1.05);
+    sweep(bp.frequency, t, top * 0.6, top, dur * 0.35);
+    sweep(bp.frequency, t + dur * 0.35, top, top * 0.4, dur * 0.65);
+    const src = this.m.noiseSource();
+    src.connect(bp);
+    this.m.startNoise(src, t, dur + 0.05);
+    // A faint ring of steel.
+    const r = gain(ctx, 0, out);
+    hit(r.gain, t + 0.01, 0.025, 0.003, 0.18);
+    const o = osc(ctx, 'sine', rand(2900, 3300), r);
+    o.start(t);
+    o.stop(t + 0.25);
+    if (heavy) {
+      const g = gain(ctx, 0, out);
+      hit(g.gain, t, 0.25, 0.01, 0.2);
+      const lo = osc(ctx, 'sine', 160, g);
+      sweep(lo.frequency, t, 160, 70, 0.2);
+      lo.start(t);
+      lo.stop(t + 0.25);
+    }
+  }
+
+  /** The blade biting into a target: a thump, a crack of splinters and a bright ring of steel. */
+  clash(t: number, pan: number, heavy: boolean): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, heavy ? 1 : 0.8, 0.35);
+    const th = gain(ctx, 0, out);
+    hit(th.gain, t, heavy ? 0.7 : 0.5, 0.002, heavy ? 0.22 : 0.14);
+    const o = osc(ctx, 'sine', heavy ? 140 : 190, th);
+    sweep(o.frequency, t, heavy ? 140 : 190, 50, 0.18);
+    o.start(t);
+    o.stop(t + 0.3);
+
+    const k = gain(ctx, 0, out);
+    hit(k.gain, t, 0.45, 0.001, 0.09);
+    const wood = filter(ctx, 'bandpass', rand(700, 900), 3, k);
+    const n = this.m.noiseSource();
+    n.connect(wood);
+    this.m.startNoise(n, t, 0.12);
+
+    const ring = gain(ctx, 0, filter(ctx, 'highpass', 1200, 0.7, out));
+    hit(ring.gain, t, 0.07, 0.001, heavy ? 0.4 : 0.25);
+    for (const f of [1870, 2790, 4130]) {
+      const r = osc(ctx, 'triangle', f * rand(0.98, 1.02), gain(ctx, 0.5, ring));
+      r.start(t);
+      r.stop(t + 0.45);
+    }
+  }
+
+  /**
+   * A hammer on an anvil: a hard tick, then the anvil's ring, bright and
+   * inharmonic like struck steel, dying away over most of a second.
+   */
+  anvil(t: number, pan: number, level: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.55 * level, 0.3);
+    const k = gain(ctx, 0, out);
+    hit(k.gain, t, 0.5, 0.001, 0.04);
+    const n = this.m.noiseSource();
+    n.connect(filter(ctx, 'bandpass', rand(2600, 3200), 2, k));
+    this.m.startNoise(n, t, 0.06);
+    const ring = gain(ctx, 0, out);
+    hit(ring.gain, t, 0.22, 0.001, rand(0.5, 0.7));
+    const f0 = rand(880, 940);
+    for (const [r, a] of [
+      [1, 1],
+      [2.76, 0.5],
+      [5.4, 0.25],
+      [8.93, 0.12],
+    ]) {
+      const o = osc(ctx, 'sine', f0 * r, gain(ctx, a, ring));
+      o.start(t);
+      o.stop(t + 0.9);
+    }
+  }
+
+  /** A piece forged: three quick blows, rising, and a shimmer as it cools. */
+  forged(t: number): void {
+    for (let k = 0; k < 3; k++) this.anvil(t + k * 0.16, 0, 0.8 + k * 0.1);
+    const ctx = this.m.ctx;
+    const out = this.out(0, 0.35, 0.5);
+    for (let k = 0; k < 5; k++) {
+      const g = gain(ctx, 0, out);
+      hit(g.gain, t + 0.5 + k * 0.07, 0.25, 0.005, 0.5);
+      const o = osc(ctx, 'triangle', SPARKLE[k % SPARKLE.length], g);
+      o.start(t + 0.5 + k * 0.07);
+      o.stop(t + 1.2 + k * 0.07);
+    }
+  }
+
+  /** The whirlwind kindling: a breath of fire rising in pitch. */
+  rise(t: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(0, 0.7, 0.4);
+    const dur = 0.3;
+    const f = gain(ctx, 0, out);
+    f.gain.setValueAtTime(0, t);
+    f.gain.linearRampToValueAtTime(0.4, t + dur);
+    f.gain.linearRampToValueAtTime(0, t + dur + 0.08);
+    const bp = filter(ctx, 'bandpass', 500, 1.5, f);
+    sweep(bp.frequency, t, 400, 2200, dur);
+    const src = this.m.noiseSource();
+    src.connect(bp);
+    this.m.startNoise(src, t, dur + 0.1);
+    const tone = gain(ctx, 0, out);
+    tone.gain.setValueAtTime(0, t);
+    tone.gain.linearRampToValueAtTime(0.06, t + dur);
+    tone.gain.linearRampToValueAtTime(0, t + dur + 0.1);
+    for (const fr of [220, 330]) {
+      const o = osc(ctx, 'sawtooth', fr, filter(ctx, 'lowpass', 1400, 0.7, tone));
+      sweep(o.frequency, t, fr, fr * 2, dur);
+      o.start(t);
+      o.stop(t + dur + 0.15);
+    }
+  }
+
+  /** One turn of the whirlwind: a roaring whoosh of fire. */
+  whirl(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.65, 0.3);
+    const w = gain(ctx, 0, out);
+    hit(w.gain, t, 0.45, 0.06, 0.26);
+    const bp = filter(ctx, 'bandpass', 900, 1.1, w);
+    sweep(bp.frequency, t, 600, 1600, 0.12);
+    sweep(bp.frequency, t + 0.12, 1600, 500, 0.2);
+    const src = this.m.noiseSource();
+    src.connect(bp);
+    this.m.startNoise(src, t, 0.34);
+    const c = gain(ctx, 0, out);
+    hit(c.gain, t, 0.12, 0.01, 0.25);
+    const crackle = filter(ctx, 'highpass', 4000, 0.7, c);
+    const n = this.m.noiseSource(true);
+    n.connect(crackle);
+    this.m.startNoise(n, t, 0.3);
+  }
+
+  /** The whirlwind's closing blast: a deep boom and a roll of fire. */
+  slam(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 1, 0.55);
+    const b = gain(ctx, 0, out);
+    hit(b.gain, t, 0.8, 0.004, 0.55);
+    const lo = osc(ctx, 'sine', 110, b);
+    sweep(lo.frequency, t, 110, 32, 0.5);
+    lo.start(t);
+    lo.stop(t + 0.7);
+    const r = gain(ctx, 0, out);
+    hit(r.gain, t, 0.5, 0.005, 0.6);
+    const lp = filter(ctx, 'lowpass', 3000, 0.8, r);
+    sweep(lp.frequency, t, 4000, 300, 0.6);
+    const src = this.m.noiseSource();
+    src.connect(lp);
+    this.m.startNoise(src, t, 0.65);
+    this.sparkle(out, t + 0.04, 4, 0.04);
+  }
+
+  /** A bell of holy light: inharmonic partials, the high ones dying first. */
+  private bell(dest: AudioNode, t: number, f: number, level: number, decay: number): void {
+    const ctx = this.m.ctx;
+    for (const [r, a] of [
+      [1, 1],
+      [2, 0.45],
+      [2.76, 0.3],
+      [5.4, 0.12],
+    ]) {
+      const g = gain(ctx, 0, dest);
+      hit(g.gain, t, level * a, 0.003, decay / (0.5 + r * 0.5));
+      const o = osc(ctx, 'sine', f * r * rand(0.997, 1.003), g);
+      o.start(t);
+      o.stop(t + decay + 0.1);
+    }
+  }
+
+  /** The paladin's mace kindling: a breath of air and a rising chord of bells. */
+  hallow(t: number): void {
+    const out = this.out(0, 0.6, 0.55);
+    const ctx = this.m.ctx;
+    const dur = 0.45;
+    const air = gain(ctx, 0, out);
+    air.gain.setValueAtTime(0, t);
+    air.gain.linearRampToValueAtTime(0.22, t + dur);
+    air.gain.linearRampToValueAtTime(0, t + dur + 0.1);
+    const bp = filter(ctx, 'bandpass', 900, 2, air);
+    sweep(bp.frequency, t, 700, 3200, dur);
+    const src = this.m.noiseSource();
+    src.connect(bp);
+    this.m.startNoise(src, t, dur + 0.15);
+    [523, 659, 784, 1047].forEach((f, i) => this.bell(out, t + i * 0.09, f, 0.05, 0.9));
+  }
+
+  /** The mace coming down: a heavy thump, and a bright bell when it lands on something. */
+  smite(t: number, pan: number, struck: boolean): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.9, 0.4);
+    const th = gain(ctx, 0, out);
+    hit(th.gain, t, 0.6, 0.003, 0.2);
+    const o = osc(ctx, 'sine', 150, th);
+    sweep(o.frequency, t, 150, 45, 0.18);
+    o.start(t);
+    o.stop(t + 0.3);
+    const k = gain(ctx, 0, out);
+    hit(k.gain, t, 0.3, 0.002, 0.1);
+    const lp = filter(ctx, 'lowpass', 1400, 0.8, k);
+    const n = this.m.noiseSource(true);
+    n.connect(lp);
+    this.m.startNoise(n, t, 0.14);
+    this.bell(out, t + 0.005, struck ? rand(880, 900) : rand(660, 680), struck ? 0.07 : 0.035, struck ? 1.1 : 0.6);
+    if (struck) this.sparkle(out, t + 0.03, 3, 0.04);
+  }
+
+  /** Consecration: the ground struck, a deep boom under a swelling major chord. */
+  consecrate(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 1, 0.65);
+    const b = gain(ctx, 0, out);
+    hit(b.gain, t, 0.75, 0.004, 0.6);
+    const lo = osc(ctx, 'sine', 98, b);
+    sweep(lo.frequency, t, 98, 36, 0.55);
+    lo.start(t);
+    lo.stop(t + 0.8);
+    // A choir-like pad: soft saws through a closing lowpass, swelling then fading.
+    const pad = gain(ctx, 0, out);
+    pad.gain.setValueAtTime(0, t);
+    pad.gain.linearRampToValueAtTime(0.07, t + 0.12);
+    pad.gain.setTargetAtTime(0, t + 0.5, 0.45);
+    const lp = filter(ctx, 'lowpass', 2600, 0.6, pad);
+    sweep(lp.frequency, t, 2600, 700, 2);
+    for (const f of [262, 330, 392, 523]) {
+      for (const d of [-6, 6]) {
+        const v = osc(ctx, 'sawtooth', f, gain(ctx, 0.5, lp));
+        v.detune.value = d;
+        v.start(t);
+        v.stop(t + 2.6);
+      }
+    }
+    this.bell(out, t, 523, 0.08, 1.8);
+    this.bell(out, t + 0.07, 784, 0.05, 1.6);
+    this.sparkle(out, t + 0.05, 5, 0.05);
+  }
+
+  /** A pulse of healing: two soft rising notes. */
+  /** Quaffing a potion: two glugs, then a chime (warm for health, a quick rising run for speed). */
+  drink(t: number, swift: boolean): void {
+    const out = this.out(0, 0.55, 0.35);
+    for (const at of [0, 0.13]) {
+      this.chirp(out, t + at, 'sine', 180 * rand(0.95, 1.05), 420, 0.28, 0.08);
+      this.burstNoise(out, t + at, 'bandpass', 700, 1500, 4, 0.12, 0.07, true);
+    }
+    const c = t + 0.26;
+    if (swift) [880, 1175, 1568, 2093].forEach((f, i) => this.bell(out, c + i * 0.045, f, 0.035, 0.45));
+    else [659, 784, 1047].forEach((f, i) => this.bell(out, c + i * 0.08, f, 0.045, 0.8));
+    this.sparkle(out, c + 0.1, 3, 0.05);
+  }
+
+  /** Picking up gear: a rising chord of bells, with a sparkle and a longer run for the rarest. */
+  gear(t: number, rare: boolean): void {
+    const out = this.out(0, 0.5, 0.45);
+    const notes = rare ? [523, 659, 784, 1047, 1319] : [587, 740, 880];
+    notes.forEach((f, i) => this.bell(out, t + i * 0.06, f, 0.045, 0.9));
+    this.sparkle(out, t + 0.12, rare ? 6 : 3, 0.05);
+  }
+
+  /** A legendary on its way: a breath of air swelling as its light marks the spot, then the whistle of its fall. */
+  lootFall(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.5, 0.5);
+    const g = gain(ctx, 0, out);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.16, t + 0.85);
+    g.gain.linearRampToValueAtTime(0, t + 0.95);
+    const f = filter(ctx, 'bandpass', 500, 3, g);
+    sweep(f.frequency, t, 500, 5200, 0.9);
+    const src = this.m.noiseSource();
+    src.connect(f);
+    this.m.startNoise(src, t, 1);
+    this.chirp(out, t + 0.38, 'sine', 2600, 700, 0.07, 0.52);
+    this.sparkle(out, t + 0.1, 4, 0.08);
+  }
+
+  /**
+   * Gear landing, by how grand it is: a rare chimes, an epic lands with a soft
+   * thump and a shimmering chord, and a legendary strikes like a falling star,
+   * a boom and a swelling choir of bells.
+   */
+  lootLand(t: number, pan: number, grade: number): void {
+    const ctx = this.m.ctx;
+    if (grade <= 2) {
+      const out = this.out(pan, 0.4, 0.45);
+      [1047, 1568].forEach((f, i) => this.bell(out, t + i * 0.07, f, 0.04, 0.7));
+      this.sparkle(out, t + 0.05, 2, 0.05);
+      return;
+    }
+    const big = grade >= 4;
+    const out = this.out(pan, big ? 0.9 : 0.6, 0.6);
+    // The thump (a boom for a legendary).
+    const b = gain(ctx, 0, out);
+    hit(b.gain, t, big ? 0.7 : 0.35, 0.004, big ? 0.7 : 0.35);
+    const lo = osc(ctx, 'sine', big ? 130 : 95, b);
+    sweep(lo.frequency, t, big ? 130 : 95, big ? 30 : 45, big ? 0.6 : 0.3);
+    lo.start(t);
+    lo.stop(t + (big ? 0.8 : 0.45));
+    this.burstNoise(out, t, 'lowpass', big ? 3500 : 2200, 250, 0.8, big ? 0.35 : 0.14, big ? 0.55 : 0.3, true);
+    if (big) {
+      // A choir: pairs of soft detuned saws through a warm filter, swelling and dying slowly.
+      const choir = gain(ctx, 0, out);
+      choir.gain.setValueAtTime(0, t + 0.05);
+      choir.gain.linearRampToValueAtTime(0.06, t + 0.35);
+      choir.gain.setTargetAtTime(0, t + 0.6, 0.55);
+      const lp = filter(ctx, 'lowpass', 1600, 0.6, choir);
+      sweep(lp.frequency, t + 0.05, 900, 2400, 0.5);
+      for (const f of [262, 392, 523, 659, 784]) {
+        for (const d of [0.996, 1.004]) {
+          const o = osc(ctx, 'sawtooth', f * d, lp);
+          o.start(t + 0.05);
+          o.stop(t + 3);
+        }
+      }
+    }
+    const bells = big ? [1047, 1319, 1568, 2093, 2637] : [587, 880, 1175, 1760];
+    bells.forEach((f, i) => this.bell(out, t + 0.06 + i * (big ? 0.09 : 0.06), f, big ? 0.045 : 0.04, big ? 1.6 : 1));
+    this.sparkle(out, t + 0.15, big ? 10 : 5, big ? 0.07 : 0.05);
+  }
+
+  /** Picking an item up: a bright double blip. */
+  pickup(t: number, pan: number): void {
+    const out = this.out(pan, 0.45, 0.3);
+    this.chirp(out, t, 'triangle', 988, 1319, 0.2, 0.06);
+    this.chirp(out, t + 0.07, 'triangle', 1319, 1760, 0.18, 0.09);
+  }
+
+  // ------------------------------------------------------------ Gems and wishes
+
+  /** Gems landing: a crystal chime, a longer glittering run the more of them, and a legendary's boom for a hoard. */
+  gemLand(t: number, pan: number, n: number): void {
+    if (n >= 5) this.lootLand(t, pan, 4);
+    const out = this.out(pan, 0.5, 0.6);
+    const run = [1568, 1760, 2093, 2349, 2637, 3136, 3520];
+    const k = Math.min(run.length, 2 + Math.ceil(n / 2));
+    for (let i = 0; i < k; i++) this.bell(out, t + 0.04 + i * 0.045, run[i], 0.035, 0.8);
+    this.sparkle(out, t + 0.08, Math.min(12, 2 + n), 0.04);
+  }
+
+  /** One gem of a shower lands: a small glass tink, a different stone each time. */
+  gemTink(t: number, pan: number): void {
+    const out = this.out(pan, 0.35, 0.5);
+    const f = pick([2349, 2637, 3136, 3520, 3951]);
+    this.bell(out, t, f, 0.022, 0.35);
+    this.chirp(out, t, 'triangle', f * 1.5, f * 1.2, 0.02, 0.04);
+  }
+
+  /**
+   * One gem gathered: a bright plink, a step up a pentatonic run for each one
+   * gathered in a row, so a shower picked up climbs like a harp.
+   */
+  gemCollect(t: number, step: number): void {
+    const out = this.out(0, 0.45, 0.4);
+    const run = [1319, 1480, 1661, 1976, 2217, 2637, 2960, 3322, 3951, 4435];
+    const top = step >= run.length;
+    const f = run[Math.min(run.length - 1, step)];
+    this.chirp(out, t, 'triangle', f, f * 1.5, 0.09, 0.07);
+    this.bell(out, t + 0.02, f * 2, 0.022, 0.45);
+    // Past the top of the run, a shimmer rides on every one.
+    if (top) this.sparkle(out, t + 0.03, 2, 0.03);
+  }
+
+  /** Gems picked up: an arpeggio climbing higher the more there were, glass clinking under it. */
+  gemPickup(t: number, n: number): void {
+    const out = this.out(0, 0.5, 0.45);
+    const notes = [1319, 1568, 1976, 2349, 2637, 3136];
+    const k = Math.min(notes.length, 2 + Math.floor(Math.log2(n + 1)));
+    for (let i = 0; i < k; i++) this.chirp(out, t + i * 0.05, 'triangle', notes[i], notes[i] * 1.5, 0.12, 0.08);
+    this.bell(out, t + k * 0.05, notes[k - 1] * 2, 0.03, 0.9);
+    this.sparkle(out, t + 0.05, Math.min(10, 2 + n), 0.035);
+  }
+
+  /**
+   * Candy picked up (a season's): the crinkle of a wrapper, then a music box
+   * in a minor key, a note more the bigger the handful.
+   */
+  candyPickup(t: number, n: number): void {
+    const out = this.out(0, 0.45, 0.45);
+    for (let i = 0; i < 3; i++) this.burstNoise(out, t + i * 0.035, 'bandpass', 3200 + i * 900, 5200, 2.5, 0.05, 0.03);
+    const notes = [1319, 1568, 1976, 2349, 2637];
+    const k = Math.min(notes.length, 2 + Math.floor(Math.log2(n + 1)));
+    for (let i = 0; i < k; i++) this.bell(out, t + 0.08 + i * 0.07, notes[i], 0.035, 0.7);
+    if (n >= 8) this.sparkle(out, t + 0.12, 8, 0.04);
+  }
+
+  /** Gems spent: a quick falling tinkle as they pour into the crystal. */
+  gemSpend(t: number): void {
+    const out = this.out(0, 0.4, 0.4);
+    [2637, 2349, 2093, 1760].forEach((f, i) => this.bell(out, t + i * 0.04, f, 0.03, 0.4));
+  }
+
+  /** One gem out of a dissolving duplicate, reaching the counter. */
+  // ---- Sky Glide
+
+  /** Through a ring: a bright chime that climbs a pentatonic step for each ring in a row; the big ring rings a chord. */
+  glideRing(t: number, pan: number, step: number, big: boolean): void {
+    const out = this.out(pan, big ? 0.8 : 0.55, 0.6);
+    const scale = [0, 2, 4, 7, 9];
+    const n = Math.min(step, 14);
+    const note = 76 + Math.floor(n / 5) * 12 + scale[n % 5];
+    this.bell(out, t, mtof(note), 0.06, 0.7);
+    this.bell(out, t + 0.05, mtof(note + 7), 0.035, 0.6);
+    if (big) {
+      [0, 4, 7, 12].forEach((i, k) => this.bell(out, t + 0.04 + k * 0.05, mtof(72 + i), 0.05, 1.1));
+      this.burstNoise(out, t, 'bandpass', 3000, 700, 1.2, 0.3, 0.45);
+    } else this.burstNoise(out, t, 'bandpass', 4200, 1800, 1.5, 0.08, 0.18);
+  }
+
+  /** Into rising air: a soft swell of wind climbing, and a glassy shimmer. */
+  glideGust(t: number): void {
+    const out = this.out(0, 0.5, 0.5);
+    const ctx = this.m.ctx;
+    const g = gain(ctx, 0, out);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.28, t + 0.25);
+    g.gain.linearRampToValueAtTime(0, t + 0.9);
+    const bp = filter(ctx, 'bandpass', 500, 2.5, g);
+    sweep(bp.frequency, t, 450, 1700, 0.9);
+    const src = this.m.noiseSource(true);
+    src.connect(bp);
+    this.m.startNoise(src, t, 0.95);
+    this.sparkle(out, t + 0.15, 4, 0.06);
+  }
+
+  /** A rush of air past the ears: diving, or a boost. */
+  glideWhoosh(t: number, pan: number, level = 1): void {
+    const out = this.out(pan, 0.5 * level, 0.25);
+    this.burstNoise(out, t, 'bandpass', 2400, 500, 1.1, 0.45, 0.5, true);
+  }
+
+  /** The countdown's beeps, and a brighter, longer one for GO. */
+  glideCount(t: number, go: boolean): void {
+    const out = this.out(0, 0.5, 0.3);
+    this.chirp(out, t, 'triangle', go ? 1046 : 660, go ? 1046 : 660, go ? 0.3 : 0.22, go ? 0.5 : 0.14);
+    if (go) this.chirp(out, t, 'sine', 1568, 1568, 0.12, 0.5);
+  }
+
+  /** Sinking into the cloud sea: a soft, muffled whump going down. */
+  glideSplash(t: number): void {
+    const out = this.out(0, 0.7, 0.6);
+    this.burstNoise(out, t, 'lowpass', 1800, 200, 0.7, 0.5, 0.8, true);
+    this.chirp(out, t, 'sine', 300, 90, 0.2, 0.5);
+  }
+
+  /** Touching down on the goal: a soft thump in the grass and a little fanfare. */
+  glideLand(t: number): void {
+    const out = this.out(0, 0.8, 0.5);
+    this.burstNoise(out, t, 'lowpass', 900, 200, 0.8, 0.4, 0.25, true);
+    this.chirp(out, t, 'sine', 150, 60, 0.3, 0.22);
+    [60, 64, 67, 72, 76].forEach((m, i) => this.bell(out, t + 0.12 + i * 0.08, mtof(m + 12), 0.05, i === 4 ? 1.6 : 0.8));
+  }
+
+  // ---------------------------------------------------------------- the Everwood's wild things
+
+  /** A gust coming through the trees: a swelling roar from the side it blows from, and the leaves hissing as it passes. */
+  forestGust(t: number, strength: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const dur = 3.4;
+    const out = this.out(pan, 0.22 * strength, 0.35);
+    // The roar: pink noise through a band that rises with the gust and falls behind it.
+    const g = gain(ctx, 0, out);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(1, t + 1.3);
+    g.gain.setTargetAtTime(0, t + 1.7, 0.55);
+    const bp = filter(ctx, 'bandpass', 280, 0.7, g);
+    bp.frequency.setValueAtTime(280, t);
+    bp.frequency.linearRampToValueAtTime(520 + strength * 420, t + 1.4);
+    bp.frequency.linearRampToValueAtTime(330, t + dur);
+    const src = this.m.noiseSource(true);
+    src.connect(bp);
+    this.m.startNoise(src, t, dur);
+    // The leaves: bright noise fluttering in quick grains through the middle of it.
+    const leaves = gain(ctx, 0, out);
+    let at = t + 0.6;
+    leaves.gain.setValueAtTime(0, t);
+    while (at < t + dur - 0.4) {
+      const swell = Math.sin(((at - t) / dur) * Math.PI);
+      leaves.gain.setTargetAtTime(0.5 * swell * Math.pow(Math.random(), 1.5), at, 0.02);
+      at += rand(0.04, 0.11);
+    }
+    leaves.gain.setTargetAtTime(0, at, 0.1);
+    const hp = filter(ctx, 'highpass', 2600, 0.5, leaves);
+    const lsrc = this.m.noiseSource();
+    lsrc.connect(hp);
+    this.m.startNoise(lsrc, t, dur);
+  }
+
+  /** Birds bursting up: a flurry of wingbeats, `n` birds' worth; an owl's (`soft`) a single hushed sweep. */
+  wings(t: number, pan: number, n: number, soft = false): void {
+    const out = this.out(pan, soft ? 0.18 : 0.32, 0.25);
+    if (soft) {
+      this.burstNoise(out, t, 'lowpass', 500, 260, 0.6, 0.5, 0.5, true);
+      this.burstNoise(out, t + 0.45, 'lowpass', 450, 240, 0.6, 0.35, 0.5, true);
+      return;
+    }
+    const flaps = Math.min(16, 4 + n * 2);
+    for (let i = 0; i < flaps; i++) {
+      const at = t + i * rand(0.025, 0.05) + Math.pow(i / flaps, 1.5) * 0.25;
+      this.burstNoise(out, at, 'bandpass', rand(900, 1500), rand(500, 800), 0.9, rand(0.35, 0.6) * (1 - (i / flaps) * 0.6), rand(0.035, 0.06));
+    }
+    // A startled chirp or two among them.
+    for (let i = 0; i < Math.min(2, n - 2); i++) {
+      const f = rand(3200, 4200);
+      this.chirp(out, t + rand(0.02, 0.2), 'sine', f, f * 1.25, 0.09, 0.05);
+    }
+  }
+
+  /** A deer's alarm: a sharp blowing snort, then hooves drumming away. */
+  deerBolt(t: number, pan: number): void {
+    const out = this.out(pan, 0.4, 0.3);
+    this.burstNoise(out, t, 'bandpass', 1100, 600, 1.4, 0.55, 0.16, true);
+    this.chirp(out, t + 0.01, 'triangle', 340, 180, 0.08, 0.12);
+    for (let i = 0; i < 9; i++) {
+      // In pairs, as a bounding deer lands fore then hind, fading off into the trees.
+      const at = t + 0.3 + Math.floor(i / 2) * 0.19 + (i % 2) * 0.05;
+      const k = 1 - i / 11;
+      this.chirp(out, at, 'sine', 120, 55, 0.22 * k, 0.07);
+      this.burstNoise(out, at, 'lowpass', 600, 300, 0.7, 0.2 * k, 0.04);
+    }
+  }
+
+  /** An owl's call, from where it sits: "hoo ... hoo-hoo". */
+  owlHoot(t: number, pan: number, level: number): void {
+    const out = this.out(pan, 0.2 * level, 0.9);
+    const soft = filter(this.m.ctx, 'lowpass', 900, 0.5, out);
+    const hoot = (at: number, dur: number, f: number) => {
+      const g = gain(this.m.ctx, 0, soft);
+      g.gain.setValueAtTime(0, at);
+      g.gain.linearRampToValueAtTime(1, at + dur * 0.35);
+      g.gain.linearRampToValueAtTime(0, at + dur);
+      const o = osc(this.m.ctx, 'sine', f, g);
+      o.frequency.setValueAtTime(f, at);
+      o.frequency.linearRampToValueAtTime(f * 1.13, at + dur * 0.4);
+      o.frequency.linearRampToValueAtTime(f * 1.06, at + dur);
+      o.start(at);
+      o.stop(at + dur + 0.02);
+    };
+    const f = rand(300, 345);
+    hoot(t, 0.5, f);
+    hoot(t + 0.95, 0.22, f);
+    hoot(t + 1.22, 0.45, f * 0.97);
+  }
+
+  /** The wind round a glider, held until stopped (see WindBed). */
+  windBed(t: number): WindBed {
+    return new WindBed(this.m, this.out(0, 0.6, 0.15), t);
+  }
+
+  gemTick(t: number): void {
+    const out = this.out(0, 0.3, 0.2);
+    this.bell(out, t, pick([2349, 2637, 3136]), 0.03, 0.25);
+  }
+
+  /**
+   * The Wish Crystal charging for `dur` seconds: a swell of air and a rising
+   * shimmer, climbing as high as the best rarity inside (0 rare, 1 epic, 2
+   * legendary) will take it.
+   */
+  wishCharge(t: number, dur: number, tier: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(0, 0.6, 0.7);
+    const g = gain(ctx, 0, out);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.14 + tier * 0.05, t + dur);
+    g.gain.linearRampToValueAtTime(0, t + dur + 0.05);
+    const f = filter(ctx, 'bandpass', 400, 2.5, g);
+    sweep(f.frequency, t, 400, 3000 + tier * 1800, dur);
+    const src = this.m.noiseSource();
+    src.connect(f);
+    this.m.startNoise(src, t, dur + 0.1);
+    // A rising tone under the air, higher for better luck.
+    this.chirp(out, t, 'sine', 180, 520 + tier * 260, 0.08, dur);
+    const steps = [523, 659, 784, 1047, 1319, 1568, 2093];
+    const k = 3 + tier * 2;
+    for (let i = 0; i < k; i++) this.bell(out, t + (dur * i) / k, steps[i], 0.025, 0.5);
+  }
+
+  /** The crystal bursting open: a boom, a flash of noise, and a chord that is grander the rarer the best skin inside. */
+  wishBurst(t: number, tier: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(0, 0.9, 0.8);
+    const b = gain(ctx, 0, out);
+    hit(b.gain, t, 0.5 + tier * 0.15, 0.004, 0.8);
+    const lo = osc(ctx, 'sine', 140, b);
+    sweep(lo.frequency, t, 140, 32, 0.7);
+    lo.start(t);
+    lo.stop(t + 0.9);
+    this.burstNoise(out, t, 'lowpass', 5000, 300, 0.8, 0.3, 0.6, true);
+    const chords = [
+      [523, 659, 784],
+      [523, 659, 784, 988, 1175],
+      [523, 659, 784, 1047, 1319, 1568, 2093],
+    ];
+    chords[tier].forEach((f, i) => this.bell(out, t + 0.03 + i * 0.05, f, 0.045, 1.2 + tier * 0.4));
+    this.sparkle(out, t + 0.1, 4 + tier * 4, 0.05);
+    if (tier === 2) this.lootLand(t, 0, 4);
+  }
+
+  /** The net swept through the air: a soft airy swish. */
+  netSwish(t: number, pan: number): void {
+    const out = this.out(pan, 0.4, 0.25);
+    this.burstNoise(out, t, 'bandpass', 900, 3200, 1.4, 0.16, 0.18);
+  }
+
+  /** A critter caught and corked in its jar: a glassy pop and a little chime, brighter for a new or rare one (tier 0..2). */
+  critterCatch(t: number, tier: number): void {
+    const out = this.out(0, 0.45, 0.45);
+    this.chirp(out, t, 'sine', 420, 1100, 0.18, 0.06);
+    const bells = [
+      [1568, 2093],
+      [1319, 1760, 2349],
+      [1175, 1568, 1976, 2637],
+    ];
+    bells[tier].forEach((f, i) => this.bell(out, t + 0.07 + i * 0.07, f, 0.035, 0.8 + tier * 0.3));
+    this.sparkle(out, t + 0.1, 2 + tier * 3, 0.04);
+  }
+
+  /** A seed pressed into the bed: a soft pat of earth and a tiny rising note. */
+  plant(t: number, pan: number): void {
+    const out = this.out(pan, 0.4, 0.2);
+    this.burstNoise(out, t, 'lowpass', 900, 300, 0.9, 0.22, 0.09, true);
+    this.chirp(out, t + 0.06, 'sine', 660, 990, 0.08, 0.07);
+  }
+
+  /** Crops pulled from the bed: a rustle of leaves, a pop of earth, then a chime, brighter for wild and magic ones (tier 0..2). */
+  harvest(t: number, tier: number): void {
+    const out = this.out(0, 0.45, 0.35);
+    this.burstNoise(out, t, 'bandpass', 2600, 1400, 1.2, 0.16, 0.16);
+    this.chirp(out, t + 0.08, 'sine', 300, 140, 0.18, 0.08);
+    const bells = [
+      [1175, 1568],
+      [1175, 1480, 1760],
+      [1319, 1760, 2093, 2637],
+    ];
+    bells[tier].forEach((f, i) => this.bell(out, t + 0.14 + i * 0.06, f, 0.03, 0.6 + tier * 0.25));
+    if (tier) this.sparkle(out, t + 0.16, tier * 3, 0.035);
+  }
+
+  /** A dish done: a last sizzle, then a warm little fanfare, grander the first time it's ever made (tier 0..1). */
+  cooked(t: number, tier: number): void {
+    const out = this.out(0, 0.5, 0.45);
+    this.burstNoise(out, t, 'highpass', 4200, 6000, 0.8, 0.14, 0.18);
+    const notes = tier ? [784, 988, 1175, 1568] : [880, 1175];
+    notes.forEach((f, i) => this.bell(out, t + 0.1 + i * 0.07, f, 0.04, 0.7));
+    this.sparkle(out, t + 0.14, 2 + tier * 4, 0.04);
+  }
+
+  /** The rod cast: a swish of the rod, then the reel's quick ratchet as the line runs out. */
+  fishCast(t: number): void {
+    const out = this.out(0, 0.45, 0.3);
+    this.burstNoise(out, t, 'bandpass', 700, 2600, 1.3, 0.2, 0.2);
+    for (let i = 0; i < 9; i++) this.burstNoise(out, t + 0.12 + i * 0.035, 'bandpass', 3800, 3200, 7, 0.1 * (1 - i / 10), 0.018);
+  }
+
+  /** The float landing on the water: a small round plop. */
+  fishPlop(t: number, pan: number): void {
+    const out = this.out(pan, 0.5, 0.35);
+    this.chirp(out, t, 'sine', 620, 240, 0.14, 0.09);
+    this.burstNoise(out, t, 'bandpass', 1400, 700, 1.6, 0.1, 0.08);
+  }
+
+  /** A nibble at the bait: a tiny tap on the float. */
+  fishNibble(t: number, pan: number): void {
+    const out = this.out(pan, 0.35, 0.25);
+    this.chirp(out, t, 'sine', 900, 500, 0.06, 0.04);
+  }
+
+  /** A bite: the float pulled under with a splash, the line snapping taut. */
+  fishBite(t: number, pan: number): void {
+    const out = this.out(pan, 0.6, 0.35);
+    this.burstNoise(out, t, 'lowpass', 2400, 400, 0.8, 0.35, 0.25, true);
+    this.chirp(out, t, 'sine', 380, 140, 0.16, 0.14);
+    this.chirp(out, t + 0.03, 'triangle', 1180, 1320, 0.06, 0.12);
+  }
+
+  /** The reel wound in: one click of its ratchet. */
+  reelTick(t: number): void {
+    const out = this.out(0.1, 0.3, 0.05);
+    this.burstNoise(out, t, 'bandpass', rand(3000, 3600), 2800, 8, 0.16, 0.02);
+  }
+
+  /** A fish landed: it leaps out with a splash, then a chime, brighter for a rare one or the legend (tier 0..2). */
+  fishLanded(t: number, tier: number): void {
+    const out = this.out(0, 0.55, 0.45);
+    this.burstNoise(out, t, 'lowpass', 3000, 500, 0.8, 0.4, 0.35, true);
+    this.burstNoise(out, t + 0.02, 'highpass', 5000, 7000, 0.7, 0.08, 0.2);
+    const bells = [
+      [1047, 1319, 1568],
+      [1175, 1480, 1760, 2349],
+      [880, 1109, 1319, 1760, 2217, 2637],
+    ];
+    bells[tier].forEach((f, i) => this.bell(out, t + 0.16 + i * 0.075, f, 0.04, 0.9 + tier * 0.4));
+    this.sparkle(out, t + 0.22, 3 + tier * 4, 0.045);
+  }
+
+  /** The fish gone: the line falls slack with a sagging twang. */
+  fishLost(t: number): void {
+    const out = this.out(0, 0.45, 0.35);
+    this.chirp(out, t, 'triangle', 520, 180, 0.08, 0.35);
+    this.burstNoise(out, t, 'bandpass', 1200, 500, 1.4, 0.12, 0.15);
+  }
+
+  /** A critter let out of its jar into the Home: the cork's soft pop, then a little chime that falls away like a sigh. */
+  critterRelease(t: number, pan: number): void {
+    const out = this.out(pan, 0.4, 0.5);
+    this.chirp(out, t, 'sine', 900, 380, 0.14, 0.07);
+    [2093, 1760, 1568].forEach((f, i) => this.bell(out, t + 0.06 + i * 0.09, f, 0.028, 0.9));
+    this.sparkle(out, t + 0.05, 4, 0.05);
+  }
+
+  /**
+   * The White Stag: `appear` a soft rising chime as it steps out of the
+   * trees; `reveal` a wider, slower bloom of bells as its secret place opens;
+   * `flee` a snort and bells falling away as it bolts and fades.
+   */
+  stag(t: number, pan: number, kind: 'appear' | 'reveal' | 'flee'): void {
+    const out = this.out(pan, 0.45, 0.8);
+    if (kind === 'flee') {
+      this.burstNoise(out, t, 'bandpass', 900, 400, 1.4, 0.12, 0.16);
+      [1568, 1319, 1047, 880].forEach((f, i) => this.bell(out, t + 0.12 + i * 0.08, f, 0.03, 0.8));
+      return;
+    }
+    const notes = kind === 'appear' ? [880, 1109, 1319, 1760] : [659, 880, 1109, 1319, 1760, 2217];
+    const gap = kind === 'appear' ? 0.14 : 0.18;
+    notes.forEach((f, i) => this.bell(out, t + i * gap, f, 0.035, 1.6));
+    this.sparkle(out, t + notes.length * gap * 0.6, kind === 'appear' ? 4 : 8, 0.07);
+  }
+
+  /** A card turning over: a soft swish, then a chime in its rarity's key. */
+  cardFlip(t: number, tier: number): void {
+    const out = this.out(0, 0.45, 0.5);
+    this.burstNoise(out, t, 'bandpass', 1800, 4200, 1.2, 0.08, 0.12);
+    const bells = [
+      [1175, 1568],
+      [1319, 1760, 2093],
+      [1047, 1319, 1568, 2093, 2637],
+    ];
+    bells[tier].forEach((f, i) => this.bell(out, t + 0.08 + i * 0.06, f, 0.04, 0.9 + tier * 0.3));
+    if (tier >= 1) this.sparkle(out, t + 0.12, 2 + tier * 3, 0.045);
+  }
+
+  heal(t: number, pan: number): void {
+    const out = this.out(pan, 0.45, 0.5);
+    const i = Math.floor(Math.random() * 3);
+    this.bell(out, t, [784, 880, 988][i], 0.035, 0.5);
+    this.bell(out, t + 0.07, [1175, 1319, 1480][i], 0.03, 0.6);
+  }
+
+  // ------------------------------------------------------------ Monsters
+
+  /** Noise through a filter with a quick envelope: the building block of most creature sounds. */
+  private burstNoise(out: AudioNode, t: number, type: BiquadFilterType, from: number, to: number, q: number, level: number, dur: number, pink = false): void {
+    const ctx = this.m.ctx;
+    const g = gain(ctx, 0, out);
+    hit(g.gain, t, level, 0.004, dur);
+    const f = filter(ctx, type, from, q, g);
+    sweep(f.frequency, t, from, to, dur);
+    const src = this.m.noiseSource(pink);
+    src.connect(f);
+    this.m.startNoise(src, t, dur + 0.05);
+  }
+
+  /** A pitched blip that slides from `from` to `to` Hz. */
+  private chirp(out: AudioNode, t: number, type: OscillatorType, from: number, to: number, level: number, dur: number): void {
+    const ctx = this.m.ctx;
+    const g = gain(ctx, 0, out);
+    hit(g.gain, t, level, 0.004, dur);
+    const o = osc(ctx, type, from, g);
+    sweep(o.frequency, t, from, to, dur);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+  }
+
+  /** A monster spots the player: a short, rising two-note call. */
+  notice(t: number, pan: number): void {
+    const out = this.out(pan, 0.35, 0.2);
+    this.chirp(out, t, 'triangle', 420, 640, 0.25, 0.08);
+    this.chirp(out, t + 0.07, 'triangle', 560, 900, 0.2, 0.1);
+  }
+
+  /** The frog's throat swelling: a low, wet, rising croak. */
+  gulp(t: number, pan: number): void {
+    const out = this.out(pan, 0.6, 0.25);
+    const ctx = this.m.ctx;
+    const g = gain(ctx, 0, filter(ctx, 'lowpass', 900, 3, out));
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.35, t + 0.25);
+    g.gain.linearRampToValueAtTime(0, t + 0.55);
+    const o = osc(ctx, 'sawtooth', 90, g);
+    sweep(o.frequency, t, 90, 150, 0.5);
+    const lfo = osc(ctx, 'sine', 22, gain(ctx, 25, o.frequency));
+    lfo.start(t);
+    lfo.stop(t + 0.6);
+    o.start(t);
+    o.stop(t + 0.6);
+  }
+
+  /** The venom leaving the frog's mouth: a wet pop and a little glitter. */
+  spit(t: number, pan: number): void {
+    const out = this.out(pan, 0.7, 0.35);
+    this.chirp(out, t, 'sine', 900, 260, 0.35, 0.09);
+    this.burstNoise(out, t, 'bandpass', 2400, 700, 2, 0.35, 0.12);
+    this.sparkle(out, t + 0.04, 2, 0.04);
+  }
+
+  /** A soft hop on the grass. */
+  hop(t: number, pan: number): void {
+    const out = this.out(pan, 0.3, 0.05);
+    this.chirp(out, t, 'sine', 240, 120, 0.25, 0.06);
+  }
+
+  /** Venom bursting: a fizzy splat. */
+  splash(t: number, pan: number): void {
+    const out = this.out(pan, 0.6, 0.3);
+    this.burstNoise(out, t, 'bandpass', 1800, 500, 1.5, 0.45, 0.2);
+    this.burstNoise(out, t + 0.02, 'highpass', 5000, 7000, 0.7, 0.1, 0.25);
+    this.sparkle(out, t + 0.03, 3, 0.03);
+  }
+
+  /** The beetle bracing to charge: dry clicks of chitin, quickening. */
+  chitter(t: number, pan: number): void {
+    const out = this.out(pan, 0.7, 0.2);
+    for (let i = 0; i < 7; i++) {
+      const at = t + i * (0.11 - i * 0.008);
+      this.burstNoise(out, at, 'bandpass', rand(2600, 3400), 2000, 6, 0.4, 0.025);
+    }
+    this.chirp(out, t, 'sawtooth', 60, 110, 0.12, 0.7);
+  }
+
+  /** Wings blurring into a charge: a rough buzzing drone. */
+  buzz(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.6, 0.25);
+    const g = gain(ctx, 0, filter(ctx, 'lowpass', 1600, 1, out));
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.3, t + 0.04);
+    g.gain.setTargetAtTime(0, t + 0.45, 0.08);
+    for (const f of [118, 121]) {
+      const o = osc(ctx, 'sawtooth', f, g);
+      sweep(o.frequency, t, f * 1.2, f, 0.3);
+      o.start(t);
+      o.stop(t + 0.9);
+    }
+  }
+
+  /** The beetle landing: a heavy thump, and a crack if it hit a wall. */
+  thud(t: number, pan: number, hard: boolean): void {
+    const out = this.out(pan, hard ? 1 : 0.7, 0.3);
+    this.chirp(out, t, 'sine', 120, 40, 0.6, 0.22);
+    this.burstNoise(out, t, 'lowpass', 1200, 300, 0.7, 0.35, 0.15, true);
+    if (hard) this.burstNoise(out, t, 'bandpass', 800, 600, 3, 0.4, 0.1);
+  }
+
+  /** The puffcap swelling: an airy, rising hiss. */
+  swell(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.5, 0.3);
+    const g = gain(ctx, 0, out);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.3, t + 0.65);
+    g.gain.linearRampToValueAtTime(0, t + 0.72);
+    const bp = filter(ctx, 'bandpass', 500, 3, g);
+    sweep(bp.frequency, t, 500, 2600, 0.7);
+    const src = this.m.noiseSource();
+    src.connect(bp);
+    this.m.startNoise(src, t, 0.75);
+  }
+
+  /** The spores bursting out: a soft, round whoomp. */
+  puff(t: number, pan: number): void {
+    const out = this.out(pan, 0.8, 0.5);
+    this.chirp(out, t, 'sine', 180, 60, 0.45, 0.2);
+    this.burstNoise(out, t, 'lowpass', 2200, 400, 0.8, 0.5, 0.35, true);
+    this.sparkle(out, t + 0.05, 3, 0.05);
+  }
+
+  /** A monster falling: a descending chirp and a puff; heavier monsters sound lower. */
+  monsterDie(t: number, pan: number, mass: number): void {
+    const out = this.out(pan, 0.7, 0.4);
+    const k = 1 / Math.sqrt(mass);
+    this.chirp(out, t, 'triangle', 700 * k, 160 * k, 0.3, 0.3);
+    this.burstNoise(out, t + 0.05, 'lowpass', 1800, 300, 0.7, 0.3, 0.3, true);
+    this.bell(out, t + 0.08, 1320, 0.03, 0.5);
+  }
+
+  /** The Warden calls the stars down: a rising chord of bells over a shimmer. */
+  starcall(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.8, 0.7);
+    [392, 523, 659, 784].forEach((f, i) => this.bell(out, t + i * 0.11, f, 0.05, 1.4));
+    const g = gain(ctx, 0, out);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.25, t + 0.6);
+    g.gain.linearRampToValueAtTime(0, t + 0.95);
+    const bp = filter(ctx, 'bandpass', 1200, 5, g);
+    sweep(bp.frequency, t, 900, 4200, 0.9);
+    const src = this.m.noiseSource();
+    src.connect(bp);
+    this.m.startNoise(src, t, 1);
+    this.sparkle(out, t + 0.3, 6, 0.07);
+  }
+
+  /**
+   * An omen coming: a deep, slow gong under a chord of bells, dark (minor,
+   * falling) for a threat, bright (major, rising) for a boon, and strange
+   * (a hollow fourth, shimmering) for a wonder.
+   */
+  omen(t: number, mood: 'dark' | 'bright' | 'strange'): void {
+    const ctx = this.m.ctx;
+    const out = this.out(0, 0.8, 0.85);
+    // The gong: two low partials beating slowly, a long tail.
+    const g = gain(ctx, 0, filter(ctx, 'lowpass', 1400, 0.7, out));
+    hit(g.gain, t, 0.5, 0.01, 2.6);
+    const root = mood === 'dark' ? 55 : mood === 'bright' ? 65.4 : 58.3;
+    for (const [f, lvl] of [
+      [root, 1],
+      [root * 2.02, 0.5],
+      [root * 2.76, 0.28],
+      [root * 4.1, 0.14],
+    ]) {
+      const o = osc(ctx, 'sine', f, gain(ctx, lvl, g));
+      o.start(t);
+      o.stop(t + 3);
+    }
+    this.burstNoise(out, t, 'lowpass', 900, 200, 0.7, 0.18, 0.5, true);
+    const chord = mood === 'dark' ? [440, 523, 659, 831] : mood === 'bright' ? [523, 659, 784, 1047] : [466, 622, 698, 932];
+    const order = mood === 'dark' ? [...chord].reverse() : chord;
+    order.forEach((f, i) => this.bell(out, t + 0.25 + i * 0.16, f, 0.04, 1.8));
+    if (mood !== 'dark') this.sparkle(out, t + 0.5, mood === 'bright' ? 7 : 4, 0.07);
+  }
+
+  /** A portal tearing open: air rushing round and in, with a rising shimmer. */
+  portal(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.6, 0.6);
+    const air = gain(ctx, 0, out);
+    air.gain.setValueAtTime(0, t);
+    air.gain.linearRampToValueAtTime(0.4, t + 0.25);
+    air.gain.linearRampToValueAtTime(0, t + 0.9);
+    const bp = filter(ctx, 'bandpass', 400, 5, air);
+    sweep(bp.frequency, t, 300, 2400, 0.8);
+    const lfo = osc(ctx, 'sine', 11, gain(ctx, 300, bp.frequency));
+    lfo.start(t);
+    lfo.stop(t + 1);
+    const src = this.m.noiseSource();
+    src.connect(bp);
+    this.m.startNoise(src, t, 1);
+    this.chirp(out, t + 0.05, 'triangle', 330, 990, 0.08, 0.6);
+    this.sparkle(out, t + 0.2, 4, 0.06);
+  }
+
+  /** The Treasure Imp's cackle: a quick run of nasal, bouncing yips. */
+  cackle(t: number, pan: number): void {
+    const out = this.out(pan, 0.5, 0.3);
+    const base = pick([880, 932, 988]);
+    for (let i = 0; i < 5; i++) {
+      const f = base * (1 + (i % 2) * 0.26) * (1 - i * 0.04);
+      this.chirp(out, t + i * 0.075, 'square', f * 1.2, f * 0.8, 0.045, 0.06);
+    }
+  }
+
+  /** A falling star striking the platform: a bright crack and a deep thud. */
+  starImpact(t: number, pan: number): void {
+    const out = this.out(pan, 0.75, 0.45);
+    this.chirp(out, t, 'sine', 220, 38, 0.6, 0.35);
+    this.burstNoise(out, t, 'lowpass', 5000, 400, 0.8, 0.45, 0.3, true);
+    this.sparkle(out, t + 0.02, 3, 0.04);
+  }
+
+  /** The singularity forming: a low drone that climbs and tightens for `dur` seconds. */
+  gravityWell(t: number, dur: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(0, 0.9, 0.6);
+    const g = gain(ctx, 0, filter(ctx, 'lowpass', 900, 1, out));
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.35, t + dur * 0.8);
+    g.gain.linearRampToValueAtTime(0, t + dur + 0.05);
+    for (const f of [41, 41.6, 82]) {
+      const o = osc(ctx, 'sawtooth', f, g);
+      sweep(o.frequency, t, f, f * 2.2, dur);
+      o.start(t);
+      o.stop(t + dur + 0.1);
+    }
+    const air = gain(ctx, 0, out);
+    air.gain.setValueAtTime(0, t);
+    air.gain.linearRampToValueAtTime(0.3, t + dur);
+    air.gain.linearRampToValueAtTime(0, t + dur + 0.05);
+    const bp = filter(ctx, 'bandpass', 300, 6, air);
+    sweep(bp.frequency, t, 300, 1800, dur);
+    const lfo = osc(ctx, 'sine', 6, gain(ctx, 120, bp.frequency));
+    lfo.start(t);
+    lfo.stop(t + dur + 0.1);
+    const src = this.m.noiseSource();
+    src.connect(bp);
+    this.m.startNoise(src, t, dur + 0.1);
+  }
+
+  /**
+   * A boss shows itself for the first time: a ground-shaking boom under a
+   * growl that bends down, with a rush of air. A Myth's is deeper and longer.
+   */
+  bossRoar(t: number, pan: number, myth: boolean): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 1, 0.7);
+    const len = myth ? 1.5 : 1.1;
+    this.chirp(out, t, 'sine', myth ? 70 : 90, 26, 1, len);
+    const growl = filter(ctx, 'lowpass', 700, 2, out);
+    sweep(growl.frequency, t, 900, 240, len);
+    for (const f of myth ? [58, 58.8, 87] : [73, 73.9, 110]) this.chirp(growl, t + 0.04, 'sawtooth', f * 1.35, f * 0.8, 0.16, len);
+    this.burstNoise(out, t, 'lowpass', 2600, 160, 0.8, 0.6, len, true);
+    this.burstNoise(out, t + 0.05, 'bandpass', 500, 1400, 2, 0.12, len * 0.8, true);
+  }
+
+  /**
+   * The boss's name comes up: a brass stab of a minor chord over a timpani
+   * hit, ringing out long. A Myth's adds a low octave and a bell high above.
+   */
+  bossTitle(t: number, myth: boolean): void {
+    const ctx = this.m.ctx;
+    const out = this.out(0, 0.9, 0.9);
+    this.chirp(out, t, 'sine', 110, 48, 0.9, 0.9);
+    this.burstNoise(out, t, 'lowpass', 1200, 200, 0.7, 0.35, 0.4, true);
+    const brass = gain(ctx, 0, filter(ctx, 'lowpass', 1500, 1.2, out));
+    hit(brass.gain, t, 0.22, 0.03, 2.6);
+    for (const f of myth ? [110, 220, 261.6, 329.6, 440] : [220, 261.6, 329.6]) {
+      for (const d of [-4, 4]) {
+        const o = osc(ctx, 'sawtooth', f, brass);
+        o.detune.value = d;
+        o.start(t);
+        o.stop(t + 2.8);
+      }
+    }
+    if (myth) this.bell(out, t + 0.04, 880, 0.05, 2.6);
+  }
+
+  /**
+   * The killing blow on a boss: a hard crack, the world dropping out under a
+   * deep boom, and a high ring hanging in the air through the slow motion.
+   */
+  finalBlow(t: number, myth: boolean): void {
+    const ctx = this.m.ctx;
+    const out = this.out(0, 1, 0.85);
+    this.burstNoise(out, t, 'highpass', 5000, 1800, 0.8, 0.8, 0.12);
+    this.chirp(out, t, 'square', 1400, 180, 0.12, 0.1);
+    const b = gain(ctx, 0, out);
+    hit(b.gain, t + 0.02, 1, 0.004, myth ? 1.8 : 1.3);
+    const lo = osc(ctx, 'sine', 80, b);
+    sweep(lo.frequency, t + 0.02, 80, 22, myth ? 1.6 : 1.2);
+    lo.start(t);
+    lo.stop(t + 2);
+    this.burstNoise(out, t + 0.02, 'lowpass', 3000, 120, 0.7, 0.5, myth ? 1.6 : 1.2, true);
+    this.bell(out, t + 0.06, myth ? 1318.5 : 1568, 0.05, 3);
+  }
+
+  /** The supernova: a huge boom, a roar of light and a ringing chord. */
+  nova(t: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(0, 1, 0.8);
+    const b = gain(ctx, 0, out);
+    hit(b.gain, t, 1, 0.004, 1.1);
+    const lo = osc(ctx, 'sine', 90, b);
+    sweep(lo.frequency, t, 90, 24, 1);
+    lo.start(t);
+    lo.stop(t + 1.2);
+    this.burstNoise(out, t, 'lowpass', 6000, 250, 0.7, 0.7, 1, true);
+    [523, 659, 784, 1047].forEach((f) => this.bell(out, t + 0.05, f, 0.045, 2));
+    this.sparkle(out, t + 0.08, 8, 0.05);
+  }
+
+  /** The player is struck: a dull thump and a short grunt-like buzz. */
+  hurt(t: number): void {
+    const out = this.out(0, 0.9, 0.2);
+    this.chirp(out, t, 'sine', 160, 55, 0.6, 0.18);
+    this.burstNoise(out, t, 'bandpass', 900, 400, 1.5, 0.35, 0.12);
+    this.chirp(filter(this.m.ctx, 'lowpass', 900, 1, out), t, 'sawtooth', 220, 150, 0.08, 0.12);
+  }
+
+  /** The player falls: a long, sinking chord. */
+  fall(t: number): void {
+    const out = this.out(0, 0.8, 0.7);
+    for (const [f, d] of [
+      [392, 0],
+      [311, 0.12],
+      [262, 0.24],
+    ]) this.chirp(out, t + d, 'triangle', f, f * 0.7, 0.18, 1.1);
+    this.burstNoise(out, t, 'lowpass', 1400, 200, 0.7, 0.3, 0.6, true);
+  }
+
+  /** The player rises again: a bright, rising arpeggio. */
+  revive(t: number): void {
+    const out = this.out(0, 0.6, 0.6);
+    [523, 659, 784, 1047, 1319].forEach((f, i) => this.bell(out, t + i * 0.07, f, 0.05, 1.1));
+    this.sparkle(out, t + 0.3, 4, 0.05);
+  }
+
+  /** A saber's hum rising and falling as the blade sweeps past: two detuned buzzes under a whoosh. */
+  saberSwing(t: number, pan: number, step: number): void {
+    const ctx = this.m.ctx;
+    const twirl = step >= 3;
+    const dur = twirl ? 0.34 : 0.2;
+    const out = this.out(pan, twirl ? 0.8 : 0.7, 0.3);
+    const hum = gain(ctx, 0, out);
+    hit(hum.gain, t, 0.22, 0.03, dur);
+    const lp = filter(ctx, 'lowpass', 900, 2.5, hum);
+    sweep(lp.frequency, t, 500, twirl ? 1800 : 1400, dur * 0.4);
+    sweep(lp.frequency, t + dur * 0.4, twirl ? 1800 : 1400, 400, dur * 0.6);
+    const f0 = [92, 104, 86][Math.min(2, step - 1)] * rand(0.97, 1.03);
+    for (const [f, d] of [
+      [f0, -8],
+      [f0 * 1.5, 7],
+    ]) {
+      const o = osc(ctx, 'sawtooth', f, lp);
+      o.detune.value = d;
+      // The Doppler bend of the blade passing close.
+      sweep(o.frequency, t, f, f * 1.45, dur * 0.4);
+      sweep(o.frequency, t + dur * 0.4, f * 1.45, f * 0.8, dur * 0.6);
+      o.start(t);
+      o.stop(t + dur + 0.05);
+    }
+    const w = gain(ctx, 0, out);
+    hit(w.gain, t, 0.3, 0.03, dur);
+    const bp = filter(ctx, 'bandpass', 1200, 1.4, w);
+    sweep(bp.frequency, t, 700, 2200, dur * 0.4);
+    sweep(bp.frequency, t + dur * 0.4, 2200, 600, dur * 0.6);
+    const src = this.m.noiseSource();
+    src.connect(bp);
+    this.m.startNoise(src, t, dur + 0.05);
+  }
+
+  /** The blade burning into a target: a crackling sizzle and a buzzing bite. */
+  saberHit(t: number, pan: number, heavy: boolean): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, heavy ? 0.9 : 0.75, 0.3);
+    const z = gain(ctx, 0, out);
+    hit(z.gain, t, 0.45, 0.002, heavy ? 0.28 : 0.18);
+    const hp = filter(ctx, 'highpass', 2500, 0.8, z);
+    const n = this.m.noiseSource();
+    n.connect(hp);
+    this.m.startNoise(n, t, 0.3);
+    const b = gain(ctx, 0, out);
+    hit(b.gain, t, 0.2, 0.002, 0.16);
+    const o = osc(ctx, 'sawtooth', 220, filter(ctx, 'lowpass', 1600, 1, b));
+    sweep(o.frequency, t, 220, 70, 0.15);
+    o.start(t);
+    o.stop(t + 0.2);
+    const th = gain(ctx, 0, out);
+    hit(th.gain, t, heavy ? 0.4 : 0.25, 0.002, 0.12);
+    const lo = osc(ctx, 'sine', 150, th);
+    sweep(lo.frequency, t, 150, 55, 0.12);
+    lo.start(t);
+    lo.stop(t + 0.18);
+  }
+
+  /** The saber lighting: a snap, then a hum swelling up to pitch. */
+  ignite(t: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(0, 0.55, 0.3);
+    const snap = gain(ctx, 0, out);
+    hit(snap.gain, t, 0.35, 0.001, 0.08);
+    const hp = filter(ctx, 'highpass', 1800, 0.7, snap);
+    const n = this.m.noiseSource();
+    n.connect(hp);
+    this.m.startNoise(n, t, 0.1);
+    const hum = gain(ctx, 0, out);
+    hum.gain.setValueAtTime(0, t);
+    hum.gain.linearRampToValueAtTime(0.16, t + 0.12);
+    hum.gain.setTargetAtTime(0, t + 0.35, 0.18);
+    const lp = filter(ctx, 'lowpass', 700, 2, hum);
+    sweep(lp.frequency, t, 2400, 600, 0.4);
+    for (const [f, d] of [
+      [90, -6],
+      [135, 6],
+    ]) {
+      const o = osc(ctx, 'sawtooth', f * 0.5, lp);
+      o.detune.value = d;
+      sweep(o.frequency, t, f * 0.5, f, 0.2);
+      o.start(t);
+      o.stop(t + 1.2);
+    }
+  }
+
+  /** The Force gathering in the palm: air drawn in, rising. */
+  forceGather(t: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(0, 0.6, 0.5);
+    const dur = 0.3;
+    const air = gain(ctx, 0, out);
+    air.gain.setValueAtTime(0, t);
+    air.gain.linearRampToValueAtTime(0.35, t + dur);
+    air.gain.linearRampToValueAtTime(0, t + dur + 0.06);
+    const lp = filter(ctx, 'lowpass', 300, 1.5, air);
+    sweep(lp.frequency, t, 250, 1800, dur);
+    const src = this.m.noiseSource(true);
+    src.connect(lp);
+    this.m.startNoise(src, t, dur + 0.1);
+    const lo = gain(ctx, 0, out);
+    lo.gain.setValueAtTime(0, t);
+    lo.gain.linearRampToValueAtTime(0.18, t + dur);
+    lo.gain.linearRampToValueAtTime(0, t + dur + 0.08);
+    const o = osc(ctx, 'sine', 55, lo);
+    sweep(o.frequency, t, 55, 90, dur);
+    o.start(t);
+    o.stop(t + dur + 0.1);
+  }
+
+  /** The push: a deep, rolling whump of air; on the dark side, a crackle of lightning with it. */
+  forcePush(t: number, pan: number, dark: boolean): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 1, 0.6);
+    const b = gain(ctx, 0, out);
+    hit(b.gain, t, 0.8, 0.01, 0.5);
+    const lo = osc(ctx, 'sine', 95, b);
+    sweep(lo.frequency, t, 95, 30, 0.45);
+    lo.start(t);
+    lo.stop(t + 0.6);
+    const r = gain(ctx, 0, out);
+    hit(r.gain, t, 0.55, 0.02, 0.5);
+    const lp = filter(ctx, 'lowpass', 2400, 0.9, r);
+    sweep(lp.frequency, t, 2600, 250, 0.5);
+    const src = this.m.noiseSource(true);
+    src.connect(lp);
+    this.m.startNoise(src, t, 0.55);
+    if (dark) {
+      const z = gain(ctx, 0, out);
+      hit(z.gain, t + 0.01, 0.3, 0.004, 0.35);
+      const hp = filter(ctx, 'highpass', 3000, 0.7, z);
+      const trem = osc(ctx, 'square', 37, gain(ctx, 0.25, z.gain));
+      trem.start(t);
+      trem.stop(t + 0.4);
+      const n = this.m.noiseSource();
+      n.connect(hp);
+      this.m.startNoise(n, t, 0.4);
+    } else {
+      this.sparkle(out, t + 0.05, 3, 0.05);
+    }
+  }
+
+  /**
+   * Force lightning pouring from the hand: a sustained, snarling crackle for
+   * `dur` seconds, bright noise stuttering under a fast tremolo that wanders,
+   * over a low electric growl, with snaps of static along the way.
+   */
+  forceLightning(t: number, pan: number, dur: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.8, 0.35);
+    const z = gain(ctx, 0, out);
+    z.gain.setValueAtTime(0, t);
+    z.gain.linearRampToValueAtTime(0.32, t + 0.03);
+    z.gain.setValueAtTime(0.28, t + dur - 0.08);
+    z.gain.linearRampToValueAtTime(0, t + dur);
+    const tremDepth = gain(ctx, 0.22, z.gain);
+    const trem = osc(ctx, 'square', 52, tremDepth);
+    sweep(trem.frequency, t, 48, 71, dur);
+    trem.start(t);
+    trem.stop(t + dur + 0.05);
+    const bp = filter(ctx, 'bandpass', 3400, 0.9, z);
+    sweep(bp.frequency, t, 2600, 4200, dur);
+    const n = this.m.noiseSource();
+    n.connect(bp);
+    this.m.startNoise(n, t, dur + 0.05);
+    const hum = gain(ctx, 0, filter(ctx, 'lowpass', 900, 1.4, out));
+    hum.gain.setValueAtTime(0, t);
+    hum.gain.linearRampToValueAtTime(0.1, t + 0.05);
+    hum.gain.setValueAtTime(0.1, t + dur - 0.1);
+    hum.gain.linearRampToValueAtTime(0, t + dur);
+    for (const f of [61, 92]) {
+      const o = osc(ctx, 'sawtooth', f, hum);
+      o.detune.value = f > 70 ? 9 : -9;
+      o.start(t);
+      o.stop(t + dur + 0.05);
+    }
+    for (let k = 0; k < Math.floor(dur / 0.09); k++) this.zap(out, t + k * 0.09 + rand(0, 0.04), rand(0.12, 0.22), rand(0.03, 0.06));
+  }
+
+  /** The Force grip closing: a low, rising strain of air, as of something squeezed. */
+  forceGrip(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.8, 0.6);
+    const g = gain(ctx, 0, filter(ctx, 'lowpass', 700, 2.5, out));
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.32, t + 0.5);
+    g.gain.setTargetAtTime(0, t + 1.3, 0.15);
+    for (const [f, type] of [[48, 'sawtooth'], [73, 'square']] as const) {
+      const o = osc(ctx, type, f, g);
+      sweep(o.frequency, t, f, f * 1.35, 1.4);
+      o.start(t);
+      o.stop(t + 1.9);
+    }
+    const air = gain(ctx, 0, out);
+    air.gain.setValueAtTime(0, t);
+    air.gain.linearRampToValueAtTime(0.16, t + 0.8);
+    air.gain.setTargetAtTime(0, t + 1.3, 0.15);
+    const bp = filter(ctx, 'bandpass', 500, 3, air);
+    sweep(bp.frequency, t, 400, 1400, 1.4);
+    const src = this.m.noiseSource(true);
+    src.connect(bp);
+    this.m.startNoise(src, t, 1.9);
+  }
+
+  /** The grip crushing down: a deep, heavy crunch and a thud into the ground. */
+  forceCrush(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 1, 0.6);
+    const b = gain(ctx, 0, out);
+    hit(b.gain, t, 0.9, 0.004, 0.45);
+    const lo = osc(ctx, 'sine', 120, b);
+    sweep(lo.frequency, t, 120, 32, 0.4);
+    lo.start(t);
+    lo.stop(t + 0.5);
+    this.burstNoise(out, t, 'lowpass', 2600, 300, 0.9, 0.55, 0.35, true);
+    this.burstNoise(out, t + 0.01, 'bandpass', 1800, 900, 2, 0.3, 0.12);
+  }
+
+  /**
+   * The Force Sage's stones: 'rip', a stone torn out of the ground (a gritty
+   * crunch and a rising hum of the Force under it); 'hit', it shatters on a
+   * foe (a dry crack and pebbles); 'big', a slab bursting on the ground (a
+   * deep thud under the crack, and rubble raining down).
+   */
+  forceStone(t: number, pan: number, kind: 'rip' | 'hit' | 'big'): void {
+    const ctx = this.m.ctx;
+    if (kind === 'rip') {
+      const out = this.out(pan, 0.6, 0.3);
+      this.burstNoise(out, t, 'lowpass', 900, 300, 1.2, 0.35, 0.16, true);
+      for (let i = 0; i < 4; i++) this.burstNoise(out, t + i * rand(0.015, 0.03), 'bandpass', rand(1800, 2600), rand(1200, 1800), 3, 0.12, 0.03);
+      this.chirp(filter(ctx, 'lowpass', 1400, 1.5, out), t + 0.02, 'triangle', 160, 420, 0.1, 0.22);
+      return;
+    }
+    const big = kind === 'big';
+    const out = this.out(pan, big ? 1 : 0.75, big ? 0.45 : 0.25);
+    // The crack.
+    this.burstNoise(out, t, 'bandpass', big ? 1600 : 2400, big ? 600 : 900, 1.1, big ? 0.55 : 0.42, big ? 0.14 : 0.08);
+    this.chirp(out, t, 'sine', big ? 150 : 210, big ? 38 : 70, big ? 0.6 : 0.35, big ? 0.32 : 0.14);
+    // Pebbles skittering off.
+    for (let i = 0; i < (big ? 8 : 4); i++) this.burstNoise(out, t + 0.03 + i * rand(0.02, 0.045), 'bandpass', rand(2600, 4200), rand(1800, 3000), 4, big ? 0.14 : 0.1, 0.025);
+    if (big) this.burstNoise(out, t, 'lowpass', 1200, 200, 0.8, 0.5, 0.45, true);
+  }
+
+  /**
+   * The Force barrier: 'up', a dome of light springing up (a soft rising
+   * shimmer over a hum); 'hit', a blow turned on it (a glassy ping); 'break',
+   * it bursts outward (a ringing shatter and a push of air).
+   */
+  forceBarrier(t: number, pan: number, kind: 'up' | 'hit' | 'break'): void {
+    const ctx = this.m.ctx;
+    if (kind === 'hit') {
+      const out = this.out(pan, 0.55, 0.4);
+      this.bell(out, t, rand(1500, 1700), 0.06, 0.4);
+      this.burstNoise(out, t, 'highpass', 3000, 5000, 0.7, 0.12, 0.08);
+      return;
+    }
+    if (kind === 'up') {
+      const out = this.out(pan, 0.7, 0.6);
+      this.chirp(filter(ctx, 'lowpass', 1600, 1.2, out), t, 'triangle', 220, 660, 0.18, 0.5);
+      this.chirp(out, t + 0.05, 'sine', 440, 1320, 0.08, 0.45);
+      this.sparkle(out, t + 0.08, 4, 0.06);
+      return;
+    }
+    const out = this.out(pan, 0.9, 0.55);
+    this.bell(out, t, 1320, 0.08, 0.6);
+    this.bell(out, t + 0.02, 1980, 0.05, 0.45);
+    for (let i = 0; i < 6; i++) this.burstNoise(out, t + i * rand(0.01, 0.02), 'bandpass', rand(4000, 7000), rand(3000, 5000), 5, 0.18, 0.03);
+    this.burstNoise(out, t, 'lowpass', 2000, 250, 0.9, 0.45, 0.4, true);
+    this.chirp(out, t, 'sine', 120, 40, 0.4, 0.35);
+  }
+
+  /** A punch cutting the air: a short, tight whoosh, heavier and lower down the combo. */
+  punch(t: number, pan: number, step: number): void {
+    const ctx = this.m.ctx;
+    const heavy = step >= 5;
+    const dur = heavy ? 0.24 : 0.09 + step * 0.012;
+    const out = this.out(pan, heavy ? 0.85 : 0.6, 0.15);
+    const w = gain(ctx, 0, out);
+    hit(w.gain, t, heavy ? 0.55 : 0.45, 0.008, dur);
+    const bp = filter(ctx, 'bandpass', 1500, heavy ? 1.2 : 1.8, w);
+    const top = (heavy ? 1300 : [3000, 2600, 2200, 2400][Math.min(3, step - 1)]) * rand(0.94, 1.06);
+    sweep(bp.frequency, t, top * 0.5, top, dur * 0.3);
+    sweep(bp.frequency, t + dur * 0.3, top, top * 0.45, dur * 0.7);
+    const src = this.m.noiseSource();
+    src.connect(bp);
+    this.m.startNoise(src, t, dur + 0.03);
+    if (heavy) {
+      // The finisher's wind-up snaps into a deep push of air.
+      this.chirp(out, t, 'sine', 180, 55, 0.4, 0.22);
+    }
+  }
+
+  /** A fist landing: a meaty thump under the slap of leather. */
+  punchHit(t: number, pan: number, heavy: boolean): void {
+    const out = this.out(pan, heavy ? 1 : 0.75, heavy ? 0.35 : 0.2);
+    this.chirp(out, t, 'sine', heavy ? 150 : 190, heavy ? 42 : 60, heavy ? 0.75 : 0.55, heavy ? 0.2 : 0.11);
+    this.burstNoise(out, t, 'lowpass', 2600, 500, 0.8, heavy ? 0.6 : 0.45, heavy ? 0.12 : 0.06, true);
+    this.burstNoise(out, t, 'bandpass', rand(1300, 1700), 900, 2.2, heavy ? 0.45 : 0.35, 0.035);
+    if (heavy) this.burstNoise(out, t + 0.01, 'bandpass', 420, 180, 1.5, 0.4, 0.18, true);
+  }
+
+  /** One fist of the barrage: the lightest tick of air, so dozens a second never pile up. */
+  flurry(t: number, pan: number): void {
+    const out = this.out(pan, 0.4, 0.1);
+    this.burstNoise(out, t, 'bandpass', rand(2600, 3400), rand(1200, 1600), 2, 0.35, 0.045);
+  }
+
+  /** The barrage kindling: breath drawn in hard and a rising roar of fire. */
+  kiai(t: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(0, 0.75, 0.45);
+    const dur = 0.4;
+    const air = gain(ctx, 0, out);
+    air.gain.setValueAtTime(0, t);
+    air.gain.linearRampToValueAtTime(0.45, t + dur * 0.8);
+    air.gain.linearRampToValueAtTime(0, t + dur + 0.1);
+    const bp = filter(ctx, 'bandpass', 400, 1.2, air);
+    sweep(bp.frequency, t, 300, 2400, dur);
+    const src = this.m.noiseSource(true);
+    src.connect(bp);
+    this.m.startNoise(src, t, dur + 0.15);
+    const lo = gain(ctx, 0, out);
+    lo.gain.setValueAtTime(0, t);
+    lo.gain.linearRampToValueAtTime(0.25, t + dur * 0.9);
+    lo.gain.linearRampToValueAtTime(0, t + dur + 0.12);
+    const o = osc(ctx, 'sawtooth', 70, filter(ctx, 'lowpass', 500, 1, lo));
+    sweep(o.frequency, t, 70, 140, dur);
+    o.start(t);
+    o.stop(t + dur + 0.15);
+  }
+
+  /** A flask lobbed: a soft swish of the coat and the glass clinking as it leaves the hand. */
+  toss(t: number, pan: number, big: boolean): void {
+    const out = this.out(pan, big ? 0.75 : 0.55, 0.2);
+    this.burstNoise(out, t, 'bandpass', big ? 1400 : 2000, big ? 500 : 800, 1.4, big ? 0.4 : 0.3, big ? 0.22 : 0.13);
+    this.bell(out, t + 0.01, big ? 1760 : 2350, 0.03, 0.18);
+    // The poison sloshing inside.
+    this.chirp(filter(this.m.ctx, 'lowpass', 900, 2, out), t + 0.03, 'sine', big ? 300 : 420, big ? 520 : 700, 0.12, 0.08);
+  }
+
+  /** A flask bursting: glass breaking, a wet splat and the fizz of the poison eating into the ground. */
+  shatter(t: number, pan: number, big: boolean): void {
+    const out = this.out(pan, big ? 1 : 0.7, big ? 0.45 : 0.3);
+    // Glass: bright, dense ticks and a couple of ringing shards.
+    for (let i = 0; i < (big ? 7 : 5); i++) this.burstNoise(out, t + i * rand(0.008, 0.018), 'bandpass', rand(4200, 7200), rand(3000, 5000), 5, 0.3, 0.03);
+    this.bell(out, t, rand(2900, 3300), big ? 0.05 : 0.035, 0.35);
+    this.bell(out, t + 0.03, rand(3900, 4400), 0.025, 0.25);
+    // The splash.
+    this.burstNoise(out, t, 'lowpass', big ? 1600 : 2200, 350, 0.9, big ? 0.6 : 0.4, big ? 0.28 : 0.16, true);
+    if (big) this.chirp(out, t, 'sine', 140, 45, 0.55, 0.25);
+    // The fizz.
+    this.burstNoise(out, t + 0.05, 'highpass', 5200, 6800, 0.7, big ? 0.16 : 0.1, big ? 0.9 : 0.45);
+  }
+
+  /** The great flask brought to the boil: quick bubbles rising in pitch and a cork straining. */
+  brew(t: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(0, 0.6, 0.35);
+    const lp = filter(ctx, 'lowpass', 1600, 1.5, out);
+    for (let i = 0; i < 9; i++) {
+      const at = t + i * 0.055 * rand(0.8, 1.2);
+      const f = 260 + i * 45 + rand(-30, 30);
+      this.chirp(lp, at, 'sine', f, f * 1.9, 0.22, 0.05);
+    }
+    this.burstNoise(out, t, 'bandpass', 500, 1400, 1.2, 0.18, 0.5, true);
+  }
+
+  /** The bog spreading: a deep glug and a long seething hiss. */
+  bog(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.8, 0.55);
+    this.chirp(filter(ctx, 'lowpass', 600, 3, out), t, 'sawtooth', 80, 55, 0.35, 0.45);
+    const g = gain(ctx, 0, out);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.18, t + 0.15);
+    g.gain.setTargetAtTime(0, t + 0.5, 0.5);
+    const bp = filter(ctx, 'bandpass', 3000, 0.8, g);
+    sweep(bp.frequency, t, 1800, 4200, 1.2);
+    const src = this.m.noiseSource();
+    src.connect(bp);
+    this.m.startNoise(src, t, 2.2);
+  }
+
+  /** Poison biting: a tiny acid sizzle and one wet bubble. */
+  sizzle(t: number, pan: number): void {
+    const out = this.out(pan, 0.35, 0.15);
+    this.burstNoise(out, t, 'highpass', 4800, 6400, 0.8, 0.22, 0.12);
+    const f = rand(380, 520);
+    this.chirp(filter(this.m.ctx, 'lowpass', 1200, 1, out), t + 0.02, 'sine', f, f * 1.8, 0.12, 0.05);
+  }
+
+  /** A soul bolt loosed: a hollow, falling moan and a breath of air; the blood lance is a wet, sharp hiss. */
+  soulCast(t: number, pan: number, blood: boolean): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.7, 0.5);
+    if (blood) {
+      this.burstNoise(out, t, 'bandpass', 2400, 900, 2.2, 0.35, 0.16);
+      this.chirp(filter(ctx, 'lowpass', 1400, 1, out), t, 'sawtooth', 320, 140, 0.12, 0.14);
+      return;
+    }
+    const g = gain(ctx, 0, filter(ctx, 'lowpass', 1800, 1.5, out));
+    hit(g.gain, t, 0.16, 0.03, 0.4);
+    for (const f of [440, 466]) {
+      const o = osc(ctx, 'triangle', f, g);
+      sweep(o.frequency, t, f, f * 0.6, 0.4);
+      o.start(t);
+      o.stop(t + 0.45);
+    }
+    this.burstNoise(out, t, 'bandpass', 900, 2600, 1.2, 0.18, 0.3);
+  }
+
+  /** A soul bolt striking: a cold chime and a puff; blood strikes wetter and lower. */
+  soulHit(t: number, pan: number, blood: boolean): void {
+    const out = this.out(pan, 0.7, 0.35);
+    if (blood) {
+      this.chirp(out, t, 'sine', 180, 60, 0.45, 0.1);
+      this.burstNoise(out, t, 'lowpass', 1400, 300, 1, 0.35, 0.12, true);
+      return;
+    }
+    this.bell(out, t, rand(1500, 1700), 0.04, 0.3);
+    this.burstNoise(out, t, 'bandpass', 1800, 700, 1.4, 0.3, 0.14);
+  }
+
+  /** The staff driven into the ground and the dead answering: a deep thud, a rising chord of wails, earth cracking. */
+  raiseDead(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.9, 0.6);
+    this.chirp(out, t, 'sine', 110, 40, 0.7, 0.4);
+    this.burstNoise(out, t, 'lowpass', 900, 200, 0.8, 0.45, 0.35, true);
+    const g = gain(ctx, 0, filter(ctx, 'lowpass', 2200, 1, out));
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.1, t + 0.25);
+    g.gain.linearRampToValueAtTime(0, t + 1.1);
+    for (const f of [220, 262, 330]) {
+      const o = osc(ctx, 'triangle', f * 0.8, g);
+      sweep(o.frequency, t, f * 0.8, f, 0.9);
+      o.start(t);
+      o.stop(t + 1.15);
+    }
+    for (let i = 0; i < 4; i++) this.burstNoise(out, t + 0.1 + i * rand(0.05, 0.1), 'bandpass', rand(1800, 2600), 900, 3, 0.2, 0.04);
+  }
+
+  /** A risen blade biting: a dry bony clack and a scrape. */
+  boneHit(t: number, pan: number): void {
+    const out = this.out(pan, 0.5, 0.15);
+    this.burstNoise(out, t, 'bandpass', rand(2600, 3200), 1800, 4, 0.35, 0.03);
+    this.chirp(out, t, 'triangle', 600, 300, 0.12, 0.04);
+    this.burstNoise(out, t + 0.02, 'highpass', 4000, 5200, 0.8, 0.12, 0.08);
+  }
+
+  /** The risen falling apart: a patter of bones on the ground. */
+  boneCrumble(t: number, pan: number): void {
+    const out = this.out(pan, 0.45, 0.2);
+    for (let i = 0; i < 6; i++) this.burstNoise(out, t + i * rand(0.03, 0.07), 'bandpass', rand(1400, 2600), rand(900, 1400), 4, 0.25, 0.03);
+  }
+
+  /** The crimson nova: a heartbeat, then a wet roar spreading out. */
+  bloodNova(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.95, 0.55);
+    this.chirp(out, t, 'sine', 90, 45, 0.7, 0.18);
+    this.chirp(out, t + 0.14, 'sine', 80, 40, 0.55, 0.2);
+    const g = gain(ctx, 0, out);
+    g.gain.setValueAtTime(0, t + 0.12);
+    g.gain.linearRampToValueAtTime(0.4, t + 0.18);
+    g.gain.setTargetAtTime(0, t + 0.3, 0.2);
+    const lp = filter(ctx, 'lowpass', 2400, 1, g);
+    sweep(lp.frequency, t + 0.12, 2400, 500, 0.6);
+    const src = this.m.noiseSource();
+    src.connect(lp);
+    this.m.startNoise(src, t + 0.12, 0.9);
+  }
+
+  /**
+   * The Barrow Knight's grave maul heaved through the air: a slow, low whoosh
+   * of a great weight, the creak of its iron bands riding it; lower and
+   * longer for the dragging backhand.
+   */
+  maulSwing(t: number, pan: number, heavy: boolean): void {
+    const out = this.out(pan, heavy ? 0.55 : 0.45, 0.14);
+    const dur = heavy ? 0.26 : 0.2;
+    this.burstNoise(out, t, 'bandpass', heavy ? 320 : 480, heavy ? 900 : 1300, 1.1, 0.34, dur, true);
+    this.chirp(out, t, 'triangle', heavy ? 120 : 160, 60, 0.1, dur * 0.8);
+    // The iron bands and the haft's socket grating.
+    this.chirp(out, t + 0.02, 'sawtooth', rand(210, 240), rand(170, 190), 0.018, 0.09);
+  }
+
+  /** The gravestone brought down: a deep thud of stone into earth, a dull ring of iron, grit and stone chips after. */
+  maulSlam(t: number, pan: number): void {
+    const out = this.out(pan, 0.95, 0.45);
+    this.chirp(out, t, 'sine', 110, 32, 0.85, 0.32);
+    this.burstNoise(out, t, 'lowpass', 900, 150, 0.8, 0.55, 0.32, true);
+    // Stone on earth: a short, hard crack before the rumble.
+    this.burstNoise(out, t, 'bandpass', 1800, 900, 1.5, 0.3, 0.04);
+    this.bell(out, t + 0.01, rand(380, 430), 0.045, 0.3);
+    for (let i = 0; i < 5; i++) this.burstNoise(out, t + 0.06 + i * rand(0.04, 0.08), 'bandpass', rand(700, 1400), 500, 2.5, 0.14, 0.04, true);
+  }
+
+  /** The ground torn open: earth splitting, a groan from below, bones clattering up. */
+  graveOpen(t: number, pan: number): void {
+    const out = this.out(pan, 0.85, 0.5);
+    this.chirp(out, t, 'sine', 90, 34, 0.6, 0.45);
+    this.burstNoise(out, t, 'lowpass', 700, 140, 0.9, 0.45, 0.5, true);
+    this.chirp(out, t + 0.05, 'sawtooth', 70, 55, 0.08, 0.6);
+    for (let i = 0; i < 7; i++) this.burstNoise(out, t + 0.08 + i * rand(0.03, 0.06), 'bandpass', rand(1800, 3000), 1400, 4, 0.18, 0.03);
+  }
+
+  /** Headstones heaving up out of the earth: a grinding rumble and a stony knock. */
+  tombRise(t: number, pan: number): void {
+    const out = this.out(pan, 0.9, 0.55);
+    this.chirp(out, t, 'sine', 70, 30, 0.7, 0.6);
+    this.burstNoise(out, t, 'bandpass', 300, 600, 1.5, 0.4, 0.55, true);
+    for (let i = 0; i < 6; i++) this.burstNoise(out, t + 0.1 + i * rand(0.04, 0.09), 'bandpass', rand(700, 1300), 500, 3, 0.2, 0.05, true);
+  }
+
+  // ------------------------------------------------------------ The Reaper
+
+  /** A scythe swung: a long low whoosh of a heavy blade through the air, a cold ring of its edge riding it. */
+  reap(t: number, pan: number, heavy: boolean): void {
+    const out = this.out(pan, heavy ? 0.8 : 0.65, 0.35);
+    const dur = heavy ? 0.42 : 0.26;
+    this.burstNoise(out, t, 'bandpass', 380, heavy ? 1800 : 1400, 1.3, heavy ? 0.45 : 0.36, dur, true);
+    this.burstNoise(out, t + dur * 0.4, 'bandpass', 1600, 700, 1.1, 0.18, dur * 0.6, true);
+    this.chirp(out, t + 0.03, 'sine', rand(2900, 3100), rand(2500, 2600), 0.02, dur);
+    if (heavy) this.chirp(out, t + 0.15, 'sine', rand(3300, 3400), 2900, 0.018, 0.25);
+  }
+
+  /** The scythe biting: a dry hiss of a cut, a hollow knock, and a breath of something leaving. */
+  reapHit(t: number, pan: number, heavy: boolean): void {
+    const out = this.out(pan, heavy ? 0.85 : 0.7, 0.4);
+    this.burstNoise(out, t, 'highpass', 2800, 1500, 0.8, heavy ? 0.42 : 0.32, heavy ? 0.12 : 0.08);
+    this.chirp(out, t, 'sine', heavy ? 160 : 200, 55, heavy ? 0.34 : 0.22, 0.12);
+    this.chirp(out, t + 0.05, 'triangle', 640, 1100, 0.035, 0.22);
+  }
+
+  /** Death's step: a hiss drawn in, a hollow rush of shade, and a breath out where he forms. */
+  deathStep(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.7, 0.55);
+    this.burstNoise(out, t, 'bandpass', 3200, 900, 1.2, 0.2, 0.14);
+    const g = gain(ctx, 0, out);
+    g.gain.setValueAtTime(0, t + 0.08);
+    g.gain.linearRampToValueAtTime(0.32, t + 0.14);
+    g.gain.setTargetAtTime(0, t + 0.2, 0.08);
+    const bp = filter(ctx, 'bandpass', 260, 2, g);
+    sweep(bp.frequency, t + 0.08, 260, 1400, 0.25);
+    const src = this.m.noiseSource(true);
+    src.connect(bp);
+    this.m.startNoise(src, t + 0.08, 0.5);
+    this.chirp(out, t + 0.1, 'sine', 180, 90, 0.18, 0.25);
+  }
+
+  /**
+   * The Harvest: first a deep bell tolling (n 0), then the great spectral
+   * scythe's whoosh each time it comes round (n 1, 2), and the last reap (n 3):
+   * a cleave and a rising chorus of souls let go.
+   */
+  reapHarvest(t: number, pan: number, n: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.9, 0.7);
+    if (n === 0) {
+      this.bell(out, t, 98, 0.22, 2.2);
+      this.bell(out, t, 196, 0.1, 1.6);
+      this.bell(out, t + 0.01, 293, 0.05, 1.2);
+      return;
+    }
+    if (n < 3) {
+      this.burstNoise(out, t, 'bandpass', 200, 1200, 1.2, 0.5, 0.5, true);
+      this.burstNoise(out, t + 0.2, 'bandpass', 1400, 400, 1.2, 0.3, 0.35, true);
+      this.chirp(out, t + 0.05, 'sine', 2600, 2100, 0.02, 0.4);
+      return;
+    }
+    this.burstNoise(out, t, 'highpass', 3600, 1400, 0.8, 0.5, 0.18);
+    this.chirp(out, t, 'sine', 130, 38, 0.6, 0.4);
+    const g = gain(ctx, 0, filter(ctx, 'lowpass', 2600, 1, out));
+    g.gain.setValueAtTime(0, t + 0.05);
+    g.gain.linearRampToValueAtTime(0.09, t + 0.3);
+    g.gain.linearRampToValueAtTime(0, t + 1.2);
+    for (const f of [330, 415, 494]) {
+      const o = osc(ctx, 'triangle', f * 0.7, g);
+      sweep(o.frequency, t + 0.05, f * 0.7, f * 1.25, 1.1);
+      o.start(t + 0.05);
+      o.stop(t + 1.3);
+    }
+  }
+
+  /** The bow drawn: the wood creaking as the string comes back, longer for the volley. */
+  bowDraw(t: number, big: boolean): void {
+    const ctx = this.m.ctx;
+    const dur = big ? 0.5 : 0.14;
+    const out = this.out(0, big ? 0.5 : 0.28, 0.15);
+    const g = gain(ctx, 0, out);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(big ? 0.3 : 0.22, t + dur * 0.8);
+    g.gain.linearRampToValueAtTime(0, t + dur + 0.04);
+    const bp = filter(ctx, 'bandpass', 700, 6, g);
+    sweep(bp.frequency, t, 520, big ? 1100 : 900, dur);
+    // A creak is a fast train of clicks: a low square wave through the resonance.
+    const o = osc(ctx, 'square', big ? 38 : 55, bp);
+    sweep(o.frequency, t, big ? 30 : 45, big ? 70 : 80, dur);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+  }
+
+  /** An arrow loosed: the string's twang, the thrum of the limbs and a whip of air; the storm bow snaps with a spark. */
+  bowShot(t: number, pan: number, storm: boolean): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.75, 0.2);
+    const tw = gain(ctx, 0, out);
+    hit(tw.gain, t, 0.4, 0.002, 0.16);
+    const f = rand(150, 175);
+    const o = osc(ctx, 'triangle', f * 2.2, filter(ctx, 'lowpass', 2600, 2, tw));
+    sweep(o.frequency, t, f * 2.2, f, 0.05);
+    o.start(t);
+    o.stop(t + 0.2);
+    this.chirp(out, t, 'sine', 120, 70, 0.3, 0.08);
+    this.burstNoise(out, t + 0.01, 'bandpass', 3200, 1400, 1.6, 0.35, 0.12);
+    if (storm) this.zap(out, t, 0.18, 0.12);
+  }
+
+  /** A crossbow's steel prod letting go: a hard metallic snap and a deep thrum, heavier than a bow's twang. */
+  crossbow(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.8, 0.2);
+    this.burstNoise(out, t, 'bandpass', rand(2600, 3000), 1800, 4, 0.5, 0.025);
+    this.chirp(out, t, 'square', rand(520, 560), 260, 0.14, 0.03);
+    const tw = gain(ctx, 0, out);
+    hit(tw.gain, t, 0.35, 0.002, 0.22);
+    const f = rand(88, 98);
+    const o = osc(ctx, 'triangle', f * 2, filter(ctx, 'lowpass', 1400, 2, tw));
+    sweep(o.frequency, t, f * 2, f, 0.08);
+    o.start(t);
+    o.stop(t + 0.26);
+    this.burstNoise(out, t + 0.01, 'bandpass', 1400, 500, 1.4, 0.3, 0.1);
+  }
+
+  /** An arrow striking home: a hard wooden thock into the body; the storm arrow bursts in a crackle. */
+  arrowHit(t: number, pan: number, storm: boolean): void {
+    const out = this.out(pan, 0.8, 0.2);
+    this.chirp(out, t, 'sine', 220, 70, 0.55, 0.08);
+    this.burstNoise(out, t, 'bandpass', rand(1500, 1900), 700, 3, 0.45, 0.04);
+    this.burstNoise(out, t, 'lowpass', 1800, 300, 0.8, 0.3, 0.06, true);
+    if (storm) this.zap(out, t + 0.005, 0.26, 0.18);
+  }
+
+  /** An arrow thudding into the ground. */
+  arrowStick(t: number, pan: number, level: number): void {
+    const out = this.out(pan, level, 0.1);
+    this.chirp(out, t, 'sine', 180, 90, 0.35, 0.05);
+    this.burstNoise(out, t, 'bandpass', rand(900, 1300), 500, 2.5, 0.25, 0.03);
+  }
+
+  /** The volley loosed skyward: a deep twang and the arrow whistling up out of sight. */
+  volley(t: number, pan: number, storm: boolean): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.85, 0.45);
+    const tw = gain(ctx, 0, out);
+    hit(tw.gain, t, 0.45, 0.002, 0.3);
+    const o = osc(ctx, 'triangle', 240, filter(ctx, 'lowpass', 2200, 2, tw));
+    sweep(o.frequency, t, 260, 110, 0.08);
+    o.start(t);
+    o.stop(t + 0.35);
+    const w = gain(ctx, 0, out);
+    w.gain.setValueAtTime(0, t);
+    w.gain.linearRampToValueAtTime(0.12, t + 0.05);
+    w.gain.linearRampToValueAtTime(0, t + 0.5);
+    const wo = osc(ctx, 'sine', 1400, w);
+    sweep(wo.frequency, t, 1300, 3200, 0.5);
+    wo.start(t);
+    wo.stop(t + 0.55);
+    if (storm) this.zap(out, t, 0.3, 0.3);
+  }
+
+  /** The rain coming down: a swarm of falling whistles; in the storm, a crack of thunder and its rumble. */
+  arrowRain(t: number, pan: number, storm: boolean): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.7, 0.5);
+    for (let i = 0; i < 5; i++) {
+      const at = t + i * 0.06 * rand(0.7, 1.3);
+      const g = gain(ctx, 0, out);
+      g.gain.setValueAtTime(0, at);
+      g.gain.linearRampToValueAtTime(0.05, at + 0.05);
+      g.gain.linearRampToValueAtTime(0, at + 0.35);
+      const f = rand(2600, 3400);
+      const o = osc(ctx, 'sine', f, g);
+      sweep(o.frequency, at, f, f * 0.45, 0.35);
+      o.start(at);
+      o.stop(at + 0.4);
+    }
+    if (storm) {
+      this.zap(out, t, 0.5, 0.25);
+      const r = gain(ctx, 0, out);
+      r.gain.setValueAtTime(0, t);
+      r.gain.linearRampToValueAtTime(0.7, t + 0.03);
+      r.gain.setTargetAtTime(0, t + 0.1, 0.45);
+      const lp = filter(ctx, 'lowpass', 900, 0.8, r);
+      sweep(lp.frequency, t, 1400, 160, 1.2);
+      const src = this.m.noiseSource(true);
+      src.connect(lp);
+      this.m.startNoise(src, t, 2);
+    }
+  }
+
+  /** A dagger flicked out: a thin, quick hiss of steel, lower and longer on the finisher. */
+  knife(t: number, pan: number, step: number, finisher: boolean): void {
+    const dur = finisher ? 0.16 : 0.07;
+    const out = this.out(pan, finisher ? 0.7 : 0.5, 0.15);
+    const top = finisher ? 3200 : [5200, 4600, 4900, 4400][Math.min(3, step - 1)] * rand(0.95, 1.05);
+    this.burstNoise(out, t, 'bandpass', top * 0.6, top, 3, 0.4, dur);
+    // A ring of the blade's edge.
+    this.chirp(out, t, 'triangle', top * 0.5, top * 0.62, 0.04, dur * 1.4);
+    if (finisher) this.burstNoise(out, t + 0.05, 'bandpass', 2200, 900, 1.6, 0.35, 0.12);
+  }
+
+  /** A dagger going in: a sharp, dry bite and a small thock. */
+  knifeHit(t: number, pan: number, heavy: boolean): void {
+    const out = this.out(pan, heavy ? 0.85 : 0.65, 0.15);
+    this.burstNoise(out, t, 'highpass', rand(3200, 4200), 2400, 0.9, heavy ? 0.5 : 0.4, 0.035);
+    this.chirp(out, t, 'sine', heavy ? 260 : 320, heavy ? 80 : 110, heavy ? 0.45 : 0.32, heavy ? 0.1 : 0.06);
+    if (heavy) this.burstNoise(out, t + 0.008, 'bandpass', 1400, 600, 1.8, 0.35, 0.09);
+  }
+
+  /** Vanishing into smoke: a soft, falling poof of air (with a shimmer for the dancer). */
+  vanish(t: number, pan: number, dance: boolean): void {
+    const out = this.out(pan, 0.7, 0.4);
+    this.burstNoise(out, t, 'lowpass', 2600, 300, 0.7, 0.55, 0.3, true);
+    this.burstNoise(out, t + 0.02, 'bandpass', 5200, 1800, 1.2, 0.2, 0.22);
+    if (dance) for (let i = 0; i < 3; i++) this.chirp(out, t + 0.03 + i * 0.05, 'sine', SPARKLE[i * 2], SPARKLE[i * 2] * 1.2, 0.05, 0.14);
+  }
+
+  /** A blink through the shadows to the next foe: a quick breath of air swept upward. */
+  blink(t: number, pan: number): void {
+    const out = this.out(pan, 0.5, 0.25);
+    this.burstNoise(out, t, 'bandpass', 900, 4200, 1.4, 0.3, 0.07);
+  }
+
+  /** Electricity: bright noise stuttered by a fast square tremolo. */
+  private zap(out: AudioNode, t: number, level: number, dur: number): void {
+    const ctx = this.m.ctx;
+    const z = gain(ctx, 0, out);
+    hit(z.gain, t, level, 0.002, dur);
+    const trem = osc(ctx, 'square', rand(45, 70), gain(ctx, level * 0.8, z.gain));
+    trem.start(t);
+    trem.stop(t + dur + 0.05);
+    const hp = filter(ctx, 'highpass', 2800, 0.7, z);
+    const n = this.m.noiseSource();
+    n.connect(hp);
+    this.m.startNoise(n, t, dur + 0.05);
+  }
+
+  /** A Special gathering: a deep swell and a bright riser that climb together for `dur` seconds. */
+  ultCharge(t: number, dur: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(0, 0.8, 0.7);
+    const g = gain(ctx, 0, filter(ctx, 'lowpass', 2400, 0.8, out));
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.22, t + dur * 0.9);
+    g.gain.linearRampToValueAtTime(0, t + dur + 0.06);
+    for (const [f, type] of [
+      [55, 'sawtooth'],
+      [82.5, 'sawtooth'],
+      [220, 'triangle'],
+    ] as const) {
+      const o = osc(ctx, type, f, g);
+      sweep(o.frequency, t, f, f * 2, dur);
+      o.start(t);
+      o.stop(t + dur + 0.1);
+    }
+    const air = gain(ctx, 0, out);
+    air.gain.setValueAtTime(0, t);
+    air.gain.linearRampToValueAtTime(0.4, t + dur);
+    air.gain.linearRampToValueAtTime(0, t + dur + 0.05);
+    const bp = filter(ctx, 'bandpass', 400, 3, air);
+    sweep(bp.frequency, t, 400, 4200, dur);
+    const src = this.m.noiseSource();
+    src.connect(bp);
+    this.m.startNoise(src, t, dur + 0.1);
+    this.sparkle(out, t + dur * 0.5, 4, dur * 0.1);
+  }
+
+  /** A Special unleashed: a heavy boom under a triumphant, ringing chord. */
+  ultRelease(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 1, 0.8);
+    const b = gain(ctx, 0, out);
+    hit(b.gain, t, 0.9, 0.004, 0.9);
+    const lo = osc(ctx, 'sine', 110, b);
+    sweep(lo.frequency, t, 110, 30, 0.8);
+    lo.start(t);
+    lo.stop(t + 1);
+    this.burstNoise(out, t, 'lowpass', 7000, 300, 0.7, 0.55, 0.6, true);
+    [392, 523, 659, 784].forEach((f) => this.bell(out, t + 0.03, f, 0.04, 1.6));
+    this.sparkle(out, t + 0.06, 6, 0.045);
+  }
+
+  /** Energy soaked up from a fallen foe: a soft, rising blip. */
+  energy(t: number, pan: number, step = 0): void {
+    const out = this.out(pan, 0.35, 0.35);
+    // Up a major pentatonic, so a kill's motes land as a little rising run.
+    const f = 1047 * Math.pow(2, [0, 2, 4, 7, 9, 12, 14, 16][Math.min(step, 7)] / 12);
+    this.bell(out, t, f, 0.05, 0.28);
+    this.chirp(out, t, 'sine', f * 0.5, f, 0.05, 0.05);
+  }
+
+  /** The Special is ready: a quick, bright fanfare. */
+  ultReady(t: number): void {
+    const out = this.out(0, 0.55, 0.6);
+    [659, 784, 988, 1319].forEach((f, i) => this.bell(out, t + i * 0.06, f, 0.05, 0.9));
+    this.sparkle(out, t + 0.22, 4, 0.04);
+  }
+
+  /** A plucked gut string: a bright twang that mellows as it rings, and the pick's tick. */
+  private pluck(dest: AudioNode, t: number, f: number, level: number, decay: number, click = true): void {
+    const ctx = this.m.ctx;
+    const g = gain(ctx, 0, dest);
+    hit(g.gain, t, level, 0.002, decay);
+    const lp = filter(ctx, 'lowpass', f * 8, 0.9, g);
+    lp.frequency.setValueAtTime(f * 8, t);
+    lp.frequency.setTargetAtTime(f * 1.6, t + 0.005, decay * 0.2);
+    const o = osc(ctx, 'triangle', f, lp);
+    const b = osc(ctx, 'sawtooth', f * rand(0.998, 1.002), gain(ctx, 0.22, lp));
+    for (const x of [o, b]) {
+      x.start(t);
+      x.stop(t + decay + 0.1);
+    }
+    if (click) this.burstNoise(dest, t, 'bandpass', 3200, 2200, 1.5, level * 0.35, 0.02);
+  }
+
+  /** A strum across the lute: a low string and the tune's next note on top, a hair apart. */
+  lutePluck(t: number, pan: number, note: number): void {
+    const out = this.out(pan, 0.7, 0.4);
+    const top = LUTE_TUNE[note % LUTE_TUNE.length];
+    this.pluck(out, t, mtof(top - 12), 0.12, 0.45);
+    this.pluck(out, t + 0.028, mtof(top), 0.2, 0.7, false);
+  }
+
+  /** A note striking: a bell that rings a step higher with every foe it leaps to. */
+  noteHit(t: number, pan: number, leap: number): void {
+    const out = this.out(pan, 0.6, 0.4);
+    this.bell(out, t, mtof(81 + [0, 4, 7, 12, 16][Math.min(4, leap)]), 0.045, 0.4);
+    this.burstNoise(out, t, 'highpass', 5000, 7000, 0.8, 0.08, 0.05);
+  }
+
+  /** The song of haste: a quick, bright run up the lute over a warm swell of strings. */
+  song(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.75, 0.55);
+    [62, 66, 69, 74, 78, 74, 81, 86].forEach((m, i) => this.pluck(out, t + i * 0.085, mtof(m), 0.16, 0.6, i % 2 === 0));
+    const pad = gain(ctx, 0, filter(ctx, 'lowpass', 1800, 0.7, out));
+    pad.gain.setValueAtTime(0, t);
+    pad.gain.linearRampToValueAtTime(0.07, t + 0.4);
+    pad.gain.linearRampToValueAtTime(0, t + 1.3);
+    for (const m of [50, 57, 62, 66]) {
+      const o = osc(ctx, 'sawtooth', mtof(m) * rand(0.997, 1.003), pad);
+      o.start(t);
+      o.stop(t + 1.35);
+    }
+    this.sparkle(out, t + 0.6, 4, 0.05);
+  }
+
+  /** The encore: a harp-like sweep up two octaves and a ringing chord. */
+  encore(t: number, pan: number): void {
+    const out = this.out(pan, 0.8, 0.7);
+    [62, 64, 66, 69, 71, 74, 76, 78, 81, 83, 86].forEach((m, i) => this.pluck(out, t + i * 0.035, mtof(m), 0.12, 0.8, false));
+    [74, 78, 81, 86].forEach((m) => this.bell(out, t + 0.4, mtof(m), 0.035, 1.4));
+  }
+
+  /** A war drum struck: the hide's slap and a deep, falling boom; heavier blows roll on under the ground. */
+  drumBeat(t: number, pan: number, heavy: boolean): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, heavy ? 1 : 0.85, heavy ? 0.55 : 0.35);
+    this.chirp(out, t, 'sine', heavy ? 125 : 165, heavy ? 36 : 55, heavy ? 0.95 : 0.8, heavy ? 0.7 : 0.35);
+    this.chirp(out, t, 'triangle', heavy ? 190 : 240, heavy ? 80 : 110, 0.22, 0.1);
+    this.burstNoise(out, t, 'lowpass', 2200, 300, 0.8, heavy ? 0.5 : 0.4, 0.09);
+    if (!heavy) return;
+    const r = gain(ctx, 0, out);
+    r.gain.setValueAtTime(0, t);
+    r.gain.linearRampToValueAtTime(0.3, t + 0.05);
+    r.gain.setTargetAtTime(0, t + 0.1, 0.25);
+    const lp = filter(ctx, 'lowpass', 380, 1, r);
+    const src = this.m.noiseSource(true);
+    src.connect(lp);
+    this.m.startNoise(src, t, 0.9);
+  }
+
+  /** A drum roll building fast and loud, stroke after stroke. */
+  drumRoll(t: number, pan: number): void {
+    const out = this.out(pan, 0.8, 0.4);
+    for (let i = 0; i < 6; i++) {
+      const at = t + i * 0.071;
+      const k = 0.35 + i * 0.1;
+      this.chirp(out, at, 'sine', 210, 90, k * 0.6, 0.12);
+      this.burstNoise(out, at, 'bandpass', 1400, 600, 1.2, k * 0.35, 0.05);
+    }
+  }
+
+  /** A clockwork tick: a dry click and a tiny ring of brass. */
+  private tick(out: AudioNode, t: number, level: number, f = 2600): void {
+    this.burstNoise(out, t, 'highpass', 5200, 3800, 1.2, level, 0.018);
+    this.bell(out, t + 0.002, f, level * 0.12, 0.12);
+  }
+
+  /** A second hand loosed: two ticks and a glassy rise; the paradox's shards ring higher and thinner. */
+  chronoCast(t: number, pan: number, rift: boolean): void {
+    const out = this.out(pan, 0.55, 0.4);
+    this.tick(out, t, 0.28, rift ? 3400 : 2400);
+    this.tick(out, t + 0.06, 0.2, rift ? 4200 : 3000);
+    this.chirp(out, t, 'triangle', rift ? 900 : 620, rift ? 2400 : 1500, 0.07, 0.14);
+  }
+
+  /** A foe caught in slowed time: a soft bell that bends downward, as if the moment stretched. */
+  chronoHit(t: number, pan: number, rift: boolean): void {
+    const out = this.out(pan, 0.55, 0.45);
+    this.chirp(out, t, 'sine', rift ? 1760 : 1320, rift ? 1100 : 780, 0.08, 0.3);
+    this.bell(out, t, rift ? 1480 : 988, 0.035, 0.5);
+  }
+
+  /** The stasis clock set on the ground: a deep bell, and ticking that slows as it winds down. */
+  stasis(t: number, pan: number): void {
+    const out = this.out(pan, 0.7, 0.6);
+    this.bell(out, t, 196, 0.07, 2.2);
+    this.bell(out, t + 0.02, 294, 0.04, 1.8);
+    let at = t + 0.18;
+    for (let i = 0; i < 9; i++) {
+      this.tick(out, at, 0.18 * (1 - i / 12));
+      at += 0.16 + i * 0.035;
+    }
+  }
+
+  /** The hour strikes: a clock's chime, three bells over a low gong. */
+  /** The King's decree: a short brass fanfare over a bell and a low boom. */
+  decree(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.8, 0.7);
+    // Two horns a fifth apart, rising G, C, then a held E.
+    const horn = gain(ctx, 0, filter(ctx, 'lowpass', 1900, 1.2, out));
+    horn.gain.setValueAtTime(0, t);
+    horn.gain.linearRampToValueAtTime(0.07, t + 0.03);
+    horn.gain.setValueAtTime(0.07, t + 0.5);
+    horn.gain.linearRampToValueAtTime(0, t + 0.95);
+    for (const [f, at] of [[392, 0], [523, 0.13], [659, 0.26]] as const) {
+      for (const k of [1, 1.5]) {
+        const o = osc(ctx, 'sawtooth', f * k * rand(0.997, 1.003), gain(ctx, k === 1 ? 1 : 0.45, horn));
+        o.start(t + at);
+        o.stop(at < 0.2 ? t + at + 0.14 : t + 1);
+      }
+    }
+    this.bell(out, t + 0.26, 1319, 0.04, 1.2);
+    this.burstNoise(out, t, 'lowpass', 900, 120, 0.9, 0.4, 0.3);
+  }
+
+  hourStrike(t: number, pan: number): void {
+    const out = this.out(pan, 0.8, 0.7);
+    this.bell(out, t, 131, 0.09, 2.4);
+    [523, 659, 784].forEach((f, i) => this.bell(out, t + i * 0.11, f, 0.05, 1.2));
+    this.burstNoise(out, t, 'lowpass', 1400, 200, 0.8, 0.25, 0.25);
+  }
+
+  /** Time running backwards: a swell that rises out of nothing and snaps off, over ticks falling the wrong way. */
+  rewind(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.7, 0.6);
+    const g = gain(ctx, 0, filter(ctx, 'bandpass', 900, 0.9, out));
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.35, t + 0.32);
+    g.gain.linearRampToValueAtTime(0, t + 0.36);
+    const n = this.m.noiseSource();
+    n.connect(g);
+    this.m.startNoise(n, t, 0.4);
+    this.chirp(out, t, 'sawtooth', 220, 1760, 0.05, 0.36);
+    for (let i = 0; i < 6; i++) this.tick(out, t + 0.3 - i * 0.05, 0.16, 3600 - i * 280);
+    this.bell(out, t + 0.36, 1319, 0.05, 0.9);
+  }
+
+  /** Time stops: everything falls to a hush under one long, bright tone and a slow, heavy tick. */
+  timeStop(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.85, 0.8);
+    this.chirp(out, t, 'sine', 1400, 180, 0.14, 0.6);
+    this.burstNoise(out, t, 'bandpass', 5000, 400, 1, 0.3, 0.55);
+    const pad = gain(ctx, 0, filter(ctx, 'lowpass', 2600, 0.7, out));
+    pad.gain.setValueAtTime(0, t + 0.4);
+    pad.gain.linearRampToValueAtTime(0.05, t + 0.9);
+    pad.gain.linearRampToValueAtTime(0, t + 3.8);
+    for (const f of [587, 880, 1175]) {
+      const o = osc(ctx, 'sine', f * rand(0.998, 1.002), pad);
+      o.start(t + 0.4);
+      o.stop(t + 3.9);
+    }
+    for (let i = 0; i < 4; i++) this.tick(out, t + 0.7 + i * 0.8, 0.3, 1800);
+  }
+
+  /** Echoes stepping out of other moments: a chord smeared across time, each voice a little late. */
+  echoes(t: number, pan: number): void {
+    const out = this.out(pan, 0.7, 0.8);
+    [74, 78, 81, 86, 90].forEach((m, i) => {
+      this.bell(out, t + i * 0.07, mtof(m), 0.04, 1.1);
+      this.bell(out, t + i * 0.07 + 0.19, mtof(m), 0.02, 0.9);
+    });
+    this.burstNoise(out, t, 'bandpass', 600, 3000, 1.2, 0.2, 0.4);
+  }
+
+  /** A hollow wooden knock and a tin swish; the heavy one lands with a thump. */
+  clack(t: number, pan: number, heavy: boolean): void {
+    const out = this.out(pan, heavy ? 0.85 : 0.7, heavy ? 0.4 : 0.25);
+    this.burstNoise(out, t, 'highpass', 2600, 6000, 0.7, 0.22, 0.07);
+    this.chirp(out, t + 0.02, 'triangle', heavy ? 520 : 760, heavy ? 240 : 380, 0.32, 0.06);
+    this.burstNoise(out, t + 0.02, 'bandpass', 1500, 1100, 6, 0.45, 0.05);
+    this.bell(out, t + 0.03, heavy ? 1180 : 1560, 0.025, 0.25);
+    if (heavy) this.chirp(out, t + 0.02, 'sine', 140, 48, 0.6, 0.3);
+  }
+
+  /** A katana cut: a thin steel shing over a fast breath of air; the heavy one sweeps wider. */
+  katana(t: number, pan: number, heavy: boolean): void {
+    const out = this.out(pan, heavy ? 0.75 : 0.6, 0.25);
+    this.burstNoise(out, t, 'bandpass', heavy ? 700 : 1100, heavy ? 3600 : 5200, 1.6, heavy ? 0.4 : 0.3, heavy ? 0.2 : 0.11);
+    this.chirp(out, t + 0.01, 'sine', rand(5200, 5600), rand(4300, 4600), 0.025, heavy ? 0.22 : 0.14);
+    this.chirp(out, t + 0.01, 'triangle', rand(2600, 2800), 2200, 0.02, 0.1);
+  }
+
+  /** The katana biting: a dry slice and a low thud. */
+  katanaHit(t: number, pan: number, heavy: boolean): void {
+    const out = this.out(pan, heavy ? 0.85 : 0.7, 0.25);
+    this.burstNoise(out, t, 'highpass', 3200, 1800, 0.8, heavy ? 0.45 : 0.32, heavy ? 0.12 : 0.07);
+    this.chirp(out, t, 'sine', heavy ? 170 : 210, 60, heavy ? 0.32 : 0.2, 0.12);
+    this.chirp(out, t + 0.004, 'triangle', 3100, 2500, 0.03, 0.08);
+  }
+
+  /** A gust leaving the blade: a howl of wind that swirls up and away. */
+  gust(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.75, 0.45);
+    const dur = 0.55;
+    const g = gain(ctx, 0, out);
+    hit(g.gain, t, 0.5, 0.05, dur);
+    const bp = filter(ctx, 'bandpass', 500, 3, g);
+    sweep(bp.frequency, t, 380, 1500, dur);
+    const lfo = osc(ctx, 'sine', 11, gain(ctx, 260, bp.frequency));
+    lfo.start(t);
+    lfo.stop(t + dur + 0.1);
+    const src = this.m.noiseSource(true);
+    src.connect(bp);
+    this.m.startNoise(src, t, dur + 0.1);
+    this.chirp(out, t, 'sine', 320, 760, 0.06, dur * 0.8);
+  }
+
+  /** The blade charged with wind: a soft rising whistle. */
+  windCharge(t: number, pan: number): void {
+    const out = this.out(pan, 0.5, 0.5);
+    this.chirp(out, t, 'sine', 900, 1800, 0.06, 0.25);
+    this.chirp(out, t + 0.06, 'sine', 1350, 2700, 0.04, 0.22);
+    this.burstNoise(out, t, 'bandpass', 1200, 4200, 2, 0.15, 0.25);
+  }
+
+  /** A dash on the wind: a short rushing whoosh. */
+  windDash(t: number, pan: number): void {
+    const out = this.out(pan, 0.6, 0.3);
+    this.burstNoise(out, t, 'bandpass', 600, 3000, 1.1, 0.4, 0.16, true);
+    this.burstNoise(out, t + 0.03, 'highpass', 4000, 6000, 0.8, 0.12, 0.1);
+  }
+
+  /** The blade slid home: a scrape of steel and the click of the guard. */
+  sheathe(t: number, pan: number): void {
+    const out = this.out(pan, 0.6, 0.35);
+    this.burstNoise(out, t, 'bandpass', 4800, 2600, 3, 0.18, 0.16);
+    this.chirp(out, t, 'sine', 4200, 3600, 0.02, 0.16);
+    this.tick(out, t + 0.17, 0.4, 1900);
+  }
+
+  /** Cuts opening all at once: a volley of slices and a deep cleave. */
+  sever(t: number, pan: number, n: number): void {
+    const out = this.out(pan, 0.8, 0.35);
+    const k = Math.min(6, Math.max(2, n + 1));
+    for (let i = 0; i < k; i++) this.burstNoise(out, t + i * 0.025, 'highpass', 3600 - i * 200, 1600, 0.9, 0.3, 0.07);
+    this.chirp(out, t, 'sine', 140, 45, 0.4, 0.25);
+    this.chirp(out, t + 0.01, 'sine', 5000, 3800, 0.03, 0.2);
+  }
+
+  /** The sky breaking open: a thunderclap, a deep rolling rumble and a hard rush of rain. */
+  skyQuake(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.9, 0.7);
+    this.burstNoise(out, t, 'lowpass', 3000, 200, 0.7, 0.8, 0.5, true);
+    this.chirp(out, t, 'sine', 90, 34, 0.5, 1.2);
+    const dur = 2;
+    const rain = gain(ctx, 0, out);
+    rain.gain.setValueAtTime(0, t);
+    rain.gain.linearRampToValueAtTime(0.35, t + 0.15);
+    rain.gain.setValueAtTime(0.35, t + dur - 0.3);
+    rain.gain.linearRampToValueAtTime(0, t + dur);
+    const hp = filter(ctx, 'highpass', 2400, 0.6, rain);
+    const src = this.m.noiseSource();
+    src.connect(hp);
+    this.m.startNoise(src, t, dur + 0.1);
+    const rumble = gain(ctx, 0, out);
+    rumble.gain.setValueAtTime(0, t);
+    rumble.gain.linearRampToValueAtTime(0.4, t + 0.3);
+    rumble.gain.linearRampToValueAtTime(0, t + dur);
+    const lp = filter(ctx, 'lowpass', 160, 0.8, rumble);
+    const r = this.m.noiseSource(true);
+    r.connect(lp);
+    this.m.startNoise(r, t, dur + 0.1);
+  }
+
+  /** The quake's end: everything slammed down at once. */
+  quakeSlam(t: number, pan: number): void {
+    const out = this.out(pan, 1, 0.6);
+    this.chirp(out, t, 'sine', 120, 30, 0.7, 0.5);
+    this.burstNoise(out, t, 'lowpass', 2400, 120, 0.8, 0.7, 0.45, true);
+    this.burstNoise(out, t + 0.02, 'highpass', 3000, 1400, 0.7, 0.3, 0.15);
+  }
+
+  /** The hundred cuts: a hiss of steel as he vanishes. */
+  hundredCuts(t: number, pan: number): void {
+    const out = this.out(pan, 0.7, 0.4);
+    this.burstNoise(out, t, 'bandpass', 2000, 7000, 1.4, 0.35, 0.25);
+    for (let i = 0; i < 4; i++) this.chirp(out, t + i * 0.05, 'sine', 5400 - i * 300, 4200, 0.02, 0.12);
+  }
+
+  // ------------------------------------------------------------ The Phantom
+
+  /** A ghost's wail: a hollow "oooo" sliding down, wavering. */
+  wail(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.45, 0.6);
+    const g = gain(ctx, 0, filter(ctx, 'lowpass', 1400, 1, out));
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.22, t + 0.12);
+    g.gain.setTargetAtTime(0, t + 0.5, 0.15);
+    // A slow waver on the pitch.
+    const depth = gain(ctx, 14);
+    const vib = osc(ctx, 'sine', 6, depth);
+    for (const [f, type] of [[520, 'sine'], [780, 'triangle']] as const) {
+      const o = osc(ctx, type, f, g);
+      depth.connect(o.frequency);
+      sweep(o.frequency, t, f, f * 0.62, 0.8);
+      o.start(t);
+      o.stop(t + 1.1);
+    }
+    vib.start(t);
+    vib.stop(t + 1.1);
+  }
+
+  /** Old wood creaking and things rattling: the poltergeist's doing. */
+  creak(t: number, pan: number): void {
+    const out = this.out(pan, 0.6, 0.3);
+    this.chirp(out, t, 'sawtooth', 90, 140, 0.12, 0.25);
+    for (let i = 0; i < 5; i++) this.burstNoise(out, t + i * 0.045, 'bandpass', rand(1800, 3200), 1200, 5, 0.25, 0.03);
+  }
+
+  /** A Home door swinging open: the latch lifting, then a short, soft groan from its hinges. */
+  doorOpen(t: number, pan: number, level: number): void {
+    const out = this.out(pan, 0.4 * level, 0.25);
+    this.burstNoise(out, t, 'bandpass', 2600, 2200, 6, 0.18, 0.025);
+    this.chirp(out, t + 0.05, 'sawtooth', rand(120, 140), rand(170, 190), 0.05, 0.3);
+    // A creak is a train of clicks, slowing as the door swings free.
+    for (let i = 0; i < 6; i++) this.burstNoise(out, t + 0.06 + i * (0.03 + i * 0.008), 'bandpass', rand(1400, 2200), 900, 6, 0.12 - i * 0.012, 0.02);
+  }
+
+  /** A Home door shutting: a round wooden knock against the frame, and the latch dropping. */
+  doorShut(t: number, pan: number, level: number): void {
+    const out = this.out(pan, 0.6 * level, 0.3);
+    this.chirp(out, t, 'sine', 170, 70, 0.4, 0.12);
+    this.burstNoise(out, t, 'lowpass', 1100, 260, 0.8, 0.35, 0.09, true);
+    this.burstNoise(out, t + 0.05, 'bandpass', 3400, 2800, 7, 0.16, 0.02);
+  }
+
+  /** A garden gate opening: the latch lifting with a click, then its hinges: a dry wooden creak, or an iron gate's thin squeal. */
+  gateOpen(t: number, pan: number, iron: boolean): void {
+    const out = this.out(pan, 0.35, 0.2);
+    this.burstNoise(out, t, 'bandpass', 3800, 3200, 8, 0.16, 0.018);
+    this.chirp(out, t, 'square', 1500, 1300, 0.03, 0.02);
+    if (iron) {
+      // Rusty hinges sing a wavering note that sags as the gate swings free.
+      const f = rand(1700, 2000);
+      this.chirp(out, t + 0.05, 'triangle', f, f * 1.18, 0.05, 0.12);
+      this.chirp(out, t + 0.16, 'triangle', f * 1.15, f * 0.92, 0.04, 0.16);
+      return;
+    }
+    for (let i = 0; i < 4; i++) this.burstNoise(out, t + 0.05 + i * (0.035 + i * 0.01), 'bandpass', rand(1100, 1700), 800, 6, 0.1 - i * 0.015, 0.018);
+  }
+
+  /** A garden gate swinging shut: a light clack of wood (or a ring of iron) on its post, and the latch dropping. */
+  gateShut(t: number, pan: number, level: number, iron: boolean): void {
+    const out = this.out(pan, 0.5 * level, 0.25);
+    if (iron) {
+      this.chirp(out, t, 'triangle', 1250, 1210, 0.14, 0.22);
+      this.chirp(out, t, 'sine', 2730, 2700, 0.06, 0.16);
+      this.burstNoise(out, t, 'highpass', 3000, 2400, 0.7, 0.18, 0.03);
+    } else {
+      this.chirp(out, t, 'sine', 320, 150, 0.3, 0.06);
+      this.burstNoise(out, t, 'bandpass', 1500, 700, 1.2, 0.3, 0.05);
+    }
+    this.burstNoise(out, t + 0.04, 'bandpass', 4200, 3600, 8, 0.14, 0.015);
+    this.chirp(out, t + 0.04, 'square', 2100, 1900, 0.025, 0.015);
+  }
+
+  // ------------------------------------------------------------ The Automaton
+
+  /** A mech cannon: a hard, low bark and a metal clank as the breech kicks; the scrap's nail gun is a flat pneumatic thwack. */
+  cannon(t: number, pan: number, scrap: boolean): void {
+    const out = this.out(pan, scrap ? 0.6 : 0.75, 0.2);
+    if (scrap) {
+      this.burstNoise(out, t, 'bandpass', 2400, 900, 2, 0.4, 0.05);
+      this.chirp(out, t, 'square', 320, 140, 0.12, 0.04);
+      return;
+    }
+    this.chirp(out, t, 'sine', 170, 45, 0.6, 0.12);
+    this.burstNoise(out, t, 'lowpass', 2600, 300, 0.9, 0.5, 0.09, true);
+    this.chirp(out, t + 0.05, 'square', rand(900, 1100), 700, 0.05, 0.03);
+  }
+
+  /** A missile (or a bottle rocket) leaving its pod: a rushing whoosh that climbs. */
+  missile(t: number, pan: number, scrap: boolean): void {
+    const out = this.out(pan, 0.5, 0.25);
+    this.burstNoise(out, t, 'bandpass', 700, scrap ? 5200 : 2600, 1.4, 0.35, 0.35);
+    if (scrap) this.chirp(out, t, 'sine', 1400, 3200, 0.1, 0.3);
+  }
+
+  /** A target painted: a short electronic blip, higher with each mark. */
+  lockOn(t: number, n: number): void {
+    const out = this.out(0, 0.35, 0.05);
+    const f = 900 * Math.pow(2, Math.min(n, 8) / 12);
+    this.chirp(out, t, 'square', f, f, 0.1, 0.05);
+    this.chirp(out, t + 0.06, 'square', f * 1.5, f * 1.5, 0.08, 0.05);
+  }
+
+  /** A missile going off: a thump and a crackle. */
+  blast(t: number, pan: number): void {
+    const out = this.out(pan, 0.7, 0.35);
+    this.chirp(out, t, 'sine', 140, 38, 0.55, 0.22);
+    this.burstNoise(out, t, 'lowpass', 3400, 250, 0.8, 0.5, 0.25, true);
+  }
+
+  /** Overheating: a klaxon's two notes, a clank, and steam hissing out. */
+  vent(t: number): void {
+    const out = this.out(0, 0.7, 0.3);
+    this.chirp(out, t, 'sawtooth', 620, 620, 0.08, 0.14);
+    this.chirp(out, t + 0.16, 'sawtooth', 460, 460, 0.08, 0.14);
+    this.chirp(out, t + 0.02, 'square', 180, 90, 0.2, 0.06);
+    this.burstNoise(out, t + 0.05, 'highpass', 3000, 5000, 0.7, 0.4, 0.9);
+  }
+
+  /** A drone's zap: a bright, buzzing crack of static. */
+  droneZap(t: number, pan: number, hive: boolean): void {
+    const out = this.out(pan, 0.45, 0.15);
+    if (hive) {
+      this.chirp(out, t, 'sawtooth', 240, 180, 0.12, 0.09);
+      this.burstNoise(out, t, 'bandpass', 3000, 1800, 4, 0.2, 0.05);
+      return;
+    }
+    this.zap(out, t, 0.2, 0.08);
+    this.chirp(out, t, 'square', 1800, 600, 0.06, 0.06);
+  }
+
+  /** Servos whirring: the drones flying to their posts, or the siege legs coming down. */
+  servo(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.4, 0.1);
+    const g = gain(ctx, 0, filter(ctx, 'bandpass', 1200, 2, out));
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.25, t + 0.04);
+    g.gain.setTargetAtTime(0, t + 0.3, 0.05);
+    const o = osc(ctx, 'sawtooth', 260, g);
+    sweep(o.frequency, t, 260, 520, 0.3);
+    o.start(t);
+    o.stop(t + 0.5);
+  }
+
+  // ------------------------------------------------------------ The Inventor
+
+  /** The wrench on a foe: a dull metal clank; the bonk rings out like a struck pipe. */
+  wrench(t: number, pan: number, heavy: boolean): void {
+    const out = this.out(pan, heavy ? 0.9 : 0.7, heavy ? 0.35 : 0.2);
+    this.burstNoise(out, t, 'bandpass', heavy ? 1800 : 2400, 900, 3, 0.4, 0.05);
+    this.chirp(out, t, 'triangle', heavy ? 330 : 440, heavy ? 180 : 260, 0.35, 0.08);
+    this.bell(out, t + 0.005, heavy ? 740 : 1180, heavy ? 0.06 : 0.035, heavy ? 0.6 : 0.3);
+    if (heavy) {
+      this.bell(out, t + 0.005, 1110, 0.03, 0.5);
+      this.chirp(out, t, 'sine', 150, 50, 0.6, 0.2);
+    }
+  }
+
+  /** A sentry unfolding: a ratchet's quick clicks and a clunk as it locks. */
+  ratchet(t: number, pan: number): void {
+    const out = this.out(pan, 0.5, 0.15);
+    for (let i = 0; i < 5; i++) this.burstNoise(out, t + i * 0.045, 'highpass', 3200, 5200, 1, 0.3, 0.015);
+    this.chirp(out, t + 0.25, 'square', 220, 110, 0.18, 0.05);
+    this.burstNoise(out, t + 0.25, 'lowpass', 900, 300, 1, 0.35, 0.06, true);
+  }
+
+  /** A sentry's shot: a sharp little pop (the giant's is deeper, and comes in bursts). */
+  turretShot(t: number, pan: number, mega: boolean): void {
+    const out = this.out(pan, mega ? 0.45 : 0.4, 0.1);
+    this.burstNoise(out, t, 'bandpass', mega ? 1600 : 2600, mega ? 700 : 1400, 1.5, 0.45, 0.04);
+    this.chirp(out, t, 'square', mega ? 260 : 520, mega ? 90 : 200, 0.12, 0.03);
+  }
+
+  /** The Tesla arc: a crackling buzz; a longer, brighter one when it leaps between foes. */
+  tesla(t: number, pan: number, chain: boolean): void {
+    const out = this.out(pan, 0.5, 0.2);
+    this.zap(out, t, 0.28, chain ? 0.16 : 0.09);
+    this.chirp(out, t, 'sawtooth', chain ? 2400 : 1900, chain ? 500 : 700, 0.07, chain ? 0.14 : 0.07);
+    if (chain) this.zap(out, t + 0.08, 0.2, 0.08);
+  }
+
+  // ------------------------------------------------------------ The Beastkin
+
+  /** Razor feathers leaving the eagle's hand: a quick hiss of air through a vane. */
+  feather(t: number, pan: number): void {
+    const out = this.out(pan, 0.4, 0.15);
+    this.burstNoise(out, t, 'bandpass', 3800, 1800, 2.5, 0.28, 0.1);
+    this.chirp(out, t, 'triangle', 1600, 2600, 0.05, 0.06);
+  }
+
+  /** The eagle's cry: a thin, falling scream with a rasp to it. */
+  screech(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.4, 0.5);
+    const g = gain(ctx, 0, filter(ctx, 'bandpass', 2600, 1.2, out));
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.26, t + 0.04);
+    g.gain.setTargetAtTime(0, t + 0.3, 0.1);
+    const depth = gain(ctx, 60);
+    const vib = osc(ctx, 'sine', 32, depth);
+    for (const [f, type] of [[2900, 'sawtooth'], [3400, 'triangle']] as const) {
+      const o = osc(ctx, type, f, g);
+      depth.connect(o.frequency);
+      sweep(o.frequency, t, f, f * 0.62, 0.45);
+      o.start(t);
+      o.stop(t + 0.6);
+    }
+    vib.start(t);
+    vib.stop(t + 0.6);
+    this.burstNoise(out, t, 'highpass', 3000, 5000, 1, 0.08, 0.2);
+  }
+  /** A falcon's chatter, "kek-kek-kek-kek", hard and quick; or a golden eagle's ringing scream, two long yelps falling away. */
+  falconCall(t: number, pan: number, eagle: boolean): void {
+    const out = this.out(pan, 0.35, 0.45);
+    if (eagle) {
+      const ring = filter(this.m.ctx, 'bandpass', 1900, 2.5, out);
+      for (let i = 0; i < 2; i++) {
+        const at = t + i * 0.26;
+        const f = rand(1750, 1850) - i * 120;
+        this.chirp(ring, at, 'sawtooth', f, f * 0.62, 0.2 * (1 - i * 0.25), 0.22 + i * 0.06);
+        this.chirp(out, at, 'triangle', f * 1.02, f * 0.66, 0.07, 0.2);
+        this.burstNoise(out, at, 'bandpass', 2600, 1500, 2, 0.05, 0.18);
+      }
+      return;
+    }
+    for (let i = 0; i < 4; i++) {
+      const at = t + i * 0.075;
+      const f = rand(2500, 2700) - i * 60;
+      this.chirp(out, at, 'sawtooth', f, f * 0.82, 0.12 * (1 - i * 0.12), 0.05);
+      this.chirp(out, at, 'triangle', f * 1.5, f * 1.2, 0.08, 0.04);
+    }
+  }
+
+  /** A falconer's whistle: breath, a long note sliding up, held, and snapped down at the end. */
+  whistle(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.4, 0.55);
+    const g = gain(ctx, 0, out);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.2, t + 0.05);
+    g.gain.setValueAtTime(0.2, t + 0.5);
+    g.gain.linearRampToValueAtTime(0, t + 0.68);
+    const o = osc(ctx, 'sine', 1700, g);
+    o.frequency.setValueAtTime(1700, t);
+    o.frequency.linearRampToValueAtTime(2600, t + 0.3);
+    o.frequency.setValueAtTime(2600, t + 0.5);
+    o.frequency.linearRampToValueAtTime(1900, t + 0.66);
+    const depth = gain(ctx, 18);
+    const vib = osc(ctx, 'sine', 6, depth);
+    depth.connect(o.frequency);
+    o.start(t);
+    o.stop(t + 0.72);
+    vib.start(t);
+    vib.stop(t + 0.72);
+    this.burstNoise(out, t, 'bandpass', 2400, 2800, 3, 0.06, 0.6);
+  }
+
+
+  /**
+   * The Aurora Colosseum's frost, by kind:
+   *   crack:  ice splitting (a spike erupting, a footstep on the lake)
+   *   freeze: a crystalline shimmer over a hiss (frost spreading, a chill)
+   *   howl:   a wolf's long howl (`big`: a great wolf's)
+   *   chime:  a bright clink of ice (a dart shattering)
+   *   crunch: a heavy footfall in packed snow (`big`: a giant's)
+   *   gust:   a blast of freezing wind
+   */
+  frost(t: number, kind: FrostSound, pan: number, big: boolean): void {
+    const ctx = this.m.ctx;
+    switch (kind) {
+      case 'crack': {
+        const out = this.out(pan, big ? 0.9 : 0.6, 0.35);
+        // A sharp split, a few splinters, and a low settle under it.
+        this.burstNoise(out, t, 'highpass', 2600, 1400, 0.8, 0.5, 0.05);
+        for (let i = 0; i < 4; i++) this.burstNoise(out, t + 0.012 + i * rand(0.01, 0.03), 'bandpass', rand(3200, 6000), rand(2000, 3500), 6, 0.22, 0.04);
+        this.chirp(filter(ctx, 'lowpass', 800, 1, out), t, 'triangle', big ? 120 : 180, 60, big ? 0.35 : 0.2, 0.18);
+        this.bell(out, t + 0.02, rand(2400, 2800), 0.02, 0.25);
+        break;
+      }
+      case 'freeze': {
+        const out = this.out(pan, 0.55, 0.6);
+        // Glassy tones climbing over a soft hiss of frost spreading.
+        for (let i = 0; i < 5; i++) this.bell(out, t + i * 0.045, 1800 + i * 420 + rand(-40, 40), 0.018, 0.4);
+        const g = gain(ctx, 0, out);
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.12, t + 0.08);
+        g.gain.setTargetAtTime(0, t + 0.2, 0.15);
+        const hp = filter(ctx, 'highpass', 5000, 0.7, g);
+        sweep(hp.frequency, t, 3500, 7000, 0.5);
+        const src = this.m.noiseSource();
+        src.connect(hp);
+        this.m.startNoise(src, t, 0.7);
+        break;
+      }
+      case 'howl': {
+        const dur = big ? 1.6 : 1.05;
+        const out = this.out(pan, big ? 0.7 : 0.45, 0.75);
+        const g = gain(ctx, 0, filter(ctx, 'lowpass', big ? 1500 : 2200, 2, out));
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.3, t + dur * 0.3);
+        g.gain.setTargetAtTime(0, t + dur * 0.7, dur * 0.12);
+        const depth = gain(ctx, 6);
+        const vib = osc(ctx, 'sine', 5.5, depth);
+        const base = big ? 260 : 420;
+        for (const [r, type, lvl] of [[1, 'sawtooth', 0.6], [2, 'triangle', 0.35], [1.5, 'sine', 0.3]] as const) {
+          const o = osc(ctx, type, base * r, gain(ctx, lvl, g));
+          depth.connect(o.frequency);
+          o.frequency.setValueAtTime(base * r * 0.8, t);
+          o.frequency.linearRampToValueAtTime(base * r * 1.25, t + dur * 0.35);
+          o.frequency.linearRampToValueAtTime(base * r * 1.1, t + dur * 0.7);
+          o.frequency.linearRampToValueAtTime(base * r * 0.75, t + dur);
+          o.start(t);
+          o.stop(t + dur + 0.2);
+        }
+        vib.start(t);
+        vib.stop(t + dur + 0.2);
+        break;
+      }
+      case 'chime': {
+        const out = this.out(pan, 0.4, 0.4);
+        this.bell(out, t, rand(3000, 3600), 0.03, 0.22);
+        this.burstNoise(out, t, 'highpass', 6000, 8000, 0.7, 0.12, 0.08);
+        break;
+      }
+      case 'crunch': {
+        const out = this.out(pan, big ? 0.85 : 0.5, 0.2);
+        // Packed snow giving underfoot: a muffled crunch, crisp grains on top.
+        this.burstNoise(out, t, 'lowpass', big ? 700 : 1200, big ? 200 : 400, 0.8, big ? 0.6 : 0.35, big ? 0.25 : 0.12, true);
+        for (let i = 0; i < 3; i++) this.burstNoise(out, t + i * 0.02, 'bandpass', rand(2500, 4000), rand(1500, 2500), 3, 0.12, 0.04);
+        if (big) this.chirp(out, t, 'sine', 90, 40, 0.4, 0.3);
+        break;
+      }
+      case 'gust': {
+        const dur = big ? 0.9 : 0.55;
+        const out = this.out(pan, big ? 0.7 : 0.5, 0.5);
+        const g = gain(ctx, 0, out);
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.4, t + dur * 0.25);
+        g.gain.setTargetAtTime(0, t + dur * 0.5, dur * 0.2);
+        const bp = filter(ctx, 'bandpass', 700, 1.5, g);
+        sweep(bp.frequency, t, 400, big ? 1800 : 2600, dur);
+        const src = this.m.noiseSource(true);
+        src.connect(bp);
+        this.m.startNoise(src, t, dur + 0.1);
+        this.burstNoise(out, t + dur * 0.2, 'highpass', 4000, 6000, 0.6, 0.1, dur * 0.6);
+        break;
+      }
+    }
+  }
+
+  /** A lion's roar: a deep growl swelling into a rasping bellow; the great one rolls on longer. */
+  roar(t: number, pan: number, big: boolean): void {
+    const ctx = this.m.ctx;
+    const dur = big ? 1.1 : 0.7;
+    const out = this.out(pan, big ? 0.95 : 0.8, 0.5);
+    const g = gain(ctx, 0, filter(ctx, 'lowpass', 1400, 1.2, out));
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.4, t + dur * 0.25);
+    g.gain.setTargetAtTime(0, t + dur * 0.6, dur * 0.2);
+    const depth = gain(ctx, 18);
+    const flutter = osc(ctx, 'square', 23, depth);
+    for (const [f, type] of [[92, 'sawtooth'], [138, 'sawtooth'], [61, 'square']] as const) {
+      const o = osc(ctx, type, f, g);
+      depth.connect(o.frequency);
+      sweep(o.frequency, t, f * 0.8, f * 1.25, dur * 0.35);
+      o.start(t);
+      o.stop(t + dur + 0.3);
+    }
+    flutter.start(t);
+    flutter.stop(t + dur + 0.3);
+    const air = gain(ctx, 0, out);
+    air.gain.setValueAtTime(0, t);
+    air.gain.linearRampToValueAtTime(0.28, t + dur * 0.3);
+    air.gain.setTargetAtTime(0, t + dur * 0.6, dur * 0.2);
+    const bp = filter(ctx, 'bandpass', 600, 1.4, air);
+    sweep(bp.frequency, t, 400, 900, dur * 0.4);
+    const src = this.m.noiseSource(true);
+    src.connect(bp);
+    this.m.startNoise(src, t, dur + 0.3);
+  }
+
+  /** A claw raking a foe: a tearing rip; the pounce lands with a thump under it. */
+  rake(t: number, pan: number, heavy: boolean): void {
+    const out = this.out(pan, heavy ? 0.75 : 0.55, 0.15);
+    this.burstNoise(out, t, 'bandpass', 2600, 900, 1.6, 0.4, heavy ? 0.14 : 0.09);
+    this.burstNoise(out, t + 0.03, 'highpass', 3600, 2400, 1, 0.2, 0.06);
+    if (heavy) this.chirp(out, t, 'sine', 160, 50, 0.5, 0.18);
+  }
+
+  /** Dragonfire spat: a whoomp of flame and a crackle; blue fire burns higher and brighter. */
+  fireball(t: number, pan: number): void {
+    const out = this.out(pan, 0.6, 0.25);
+    this.burstNoise(out, t, 'lowpass', 900, 2600, 0.9, 0.42, 0.16, true);
+    this.chirp(out, t, 'sine', 90, 220, 0.25, 0.1);
+    this.burstNoise(out, t + 0.06, 'highpass', 4200, 5600, 0.8, 0.12, 0.1);
+  }
+
+  /** A gout of the dragon's breath: a roaring rush of flame, played again as it goes on. */
+  flame(t: number, pan: number): void {
+    const out = this.out(pan, 0.5, 0.3);
+    this.burstNoise(out, t, 'lowpass', 700, 1600, 0.7, 0.4, 0.34, true);
+    this.burstNoise(out, t + 0.02, 'bandpass', 2200, 3400, 1.2, 0.12, 0.25);
+    for (let i = 0; i < 3; i++) this.burstNoise(out, t + 0.05 + i * 0.08 + rand(0, 0.03), 'highpass', 4800, 6400, 0.8, 0.14, 0.03);
+  }
+
+  /** An echo wakes at its grave: a hollow breath, and a cold, wavering chord that sighs downward. */
+  echoWake(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.55, 0.85);
+    this.burstNoise(out, t, 'bandpass', 600, 1500, 3, 0.16, 1.0, true);
+    for (const [f, d] of [
+      [440, 0],
+      [415, 0.06],
+      [330, 0.12],
+    ]) {
+      const g = gain(ctx, 0, filter(ctx, 'lowpass', 1800, 0.7, out));
+      g.gain.setValueAtTime(0, t + d);
+      g.gain.linearRampToValueAtTime(0.045, t + d + 0.35);
+      g.gain.linearRampToValueAtTime(0, t + d + 1.6);
+      const o = osc(ctx, 'sine', f, g);
+      sweep(o.frequency, t + d, f, f * 0.84, 1.6);
+      // A slow, uneasy vibrato.
+      const vib = osc(ctx, 'sine', rand(4.5, 6), gain(ctx, f * 0.012, o.frequency));
+      o.start(t + d);
+      o.stop(t + d + 1.7);
+      vib.start(t + d);
+      vib.stop(t + d + 1.7);
+    }
+  }
+
+  /** An echo's blessing reaches the hero: soft, far-off bells in a minor key, rising, and a shimmer. */
+  echoBless(t: number): void {
+    const out = this.out(0, 0.55, 0.8);
+    [440, 523, 659, 880].forEach((f, i) => this.bell(out, t + i * 0.09, f, 0.04, 1.6));
+    this.sparkle(out, t + 0.35, 3, 0.07);
+  }
+
+  /**
+   * A ring saber thrown: its two blades' hum chopped into a fast wub-wub as
+   * it spins, bending down as it flies off and back up as it comes home.
+   */
+  ringSaber(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const dur = 0.62;
+    const out = this.out(pan, 0.6, 0.3);
+    const hum = gain(ctx, 0, out);
+    hum.gain.setValueAtTime(0, t);
+    hum.gain.linearRampToValueAtTime(0.2, t + 0.04);
+    hum.gain.setTargetAtTime(0.12, t + 0.2, 0.1);
+    hum.gain.setTargetAtTime(0, t + dur - 0.1, 0.05);
+    // The spin: the hum's loudness wheeling round many times a second.
+    const chop = gain(ctx, 0.5, hum);
+    const wob = osc(ctx, 'triangle', 18, gain(ctx, 0.5, chop.gain));
+    sweep(wob.frequency, t, 16, 24, dur);
+    const lp = filter(ctx, 'lowpass', 1100, 2.2, chop);
+    for (const [f, d] of [
+      [96, -7],
+      [144, 6],
+    ]) {
+      const o = osc(ctx, 'sawtooth', f, lp);
+      o.detune.value = d;
+      sweep(o.frequency, t, f * 1.25, f * 0.8, dur * 0.5);
+      sweep(o.frequency, t + dur * 0.5, f * 0.8, f * 1.15, dur * 0.5);
+      o.start(t);
+      o.stop(t + dur + 0.05);
+    }
+    wob.start(t);
+    wob.stop(t + dur + 0.05);
+    this.burstNoise(out, t, 'bandpass', 900, 2400, 1.6, 0.14, dur * 0.8);
+  }
+
+  // ------------------------------------------------------------ The Transmuter
+
+  /** A bead of quicksilver flicked off the gauntlet: a liquid, rising plip and a little metal ring. */
+  quicksilver(t: number, pan: number): void {
+    const out = this.out(pan, 0.4, 0.2);
+    this.chirp(out, t, 'sine', 700, 1700, 0.14, 0.06);
+    this.bell(out, t + 0.01, 2600, 0.025, 0.18);
+  }
+
+  /** Quicksilver bursting on a foe: a wet splat and a scatter of tiny bright drips (fewer for a split bead). */
+  quickSplash(t: number, pan: number, small: boolean): void {
+    const out = this.out(pan, 0.45, 0.2);
+    this.burstNoise(out, t, 'bandpass', 2400, 900, 1.6, small ? 0.12 : 0.22, 0.08);
+    this.chirp(out, t, 'sine', 1500, 500, small ? 0.06 : 0.1, 0.07);
+    for (let i = 0; i < (small ? 1 : 3); i++) this.chirp(out, t + 0.04 + i * 0.035, 'sine', rand(1800, 2600), rand(2800, 3400), 0.04, 0.03);
+  }
+
+  /** Chalk scratching a circle on stone: a dry, quick scrape, round and round. */
+  chalk(t: number, pan: number): void {
+    const out = this.out(pan, 0.4, 0.15);
+    for (let i = 0; i < 4; i++) this.burstNoise(out, t + i * 0.1, 'bandpass', rand(3000, 3800), rand(4200, 5000), 4, 0.1, 0.07);
+  }
+
+  /** The circle kindles and flesh turns to lead: a low, heavy clang and a dull settling thud. */
+  transmute(t: number, pan: number, struck: boolean): void {
+    const out = this.out(pan, 0.55, 0.4);
+    this.chirp(out, t, 'triangle', 1100, 1600, 0.08, 0.12);
+    this.sparkle(out, t, 3, 0.05);
+    if (!struck) return;
+    this.bell(out, t + 0.04, 180, 0.14, 0.7);
+    this.burstNoise(out, t + 0.04, 'lowpass', 600, 120, 0.7, 0.3, 0.2, true);
+  }
+
+  /** The golden array: a rising chord of bells; `gild`, the foes turning to gold, rings it out bright. */
+  gild(t: number, pan: number, gild: boolean): void {
+    const out = this.out(pan, 0.6, 0.7);
+    const notes = gild ? [523, 659, 784, 1047] : [392, 494, 587];
+    notes.forEach((f, i) => this.bell(out, t + i * 0.06, f, gild ? 0.07 : 0.05, 1.4));
+    this.sparkle(out, t + 0.1, gild ? 5 : 3, 0.06);
+  }
+
+  /** The statues shatter: a great crack, ringing shards of metal, and a low boom under it. */
+  opusShatter(t: number, pan: number): void {
+    const out = this.out(pan, 0.7, 0.5);
+    this.burstNoise(out, t, 'highpass', 2000, 6000, 0.8, 0.4, 0.18);
+    this.burstNoise(out, t, 'lowpass', 400, 60, 0.7, 0.5, 0.5, true);
+    for (let i = 0; i < 6; i++) this.bell(out, t + 0.02 + i * 0.045, rand(1400, 3200), 0.05, 0.6);
+    this.sparkle(out, t + 0.15, 4, 0.07);
+  }
+
+  /** The Brewmaster's paddle landing: a hollow wooden thwock and a wet slap of foam; the slam adds a deep belly thump. */
+  paddle(t: number, pan: number, heavy: boolean): void {
+    const out = this.out(pan, heavy ? 0.9 : 0.7, heavy ? 0.3 : 0.18);
+    this.chirp(out, t, 'triangle', heavy ? 260 : 340, heavy ? 120 : 170, 0.4, heavy ? 0.1 : 0.07);
+    this.burstNoise(out, t, 'bandpass', heavy ? 900 : 1300, 500, 2.5, 0.45, 0.05);
+    this.burstNoise(out, t + 0.02, 'highpass', 2600, 4200, 0.8, 0.16, 0.12);
+    if (heavy) {
+      this.chirp(out, t, 'sine', 140, 45, 0.65, 0.24);
+      this.burstNoise(out, t, 'lowpass', 900, 200, 0.7, 0.4, 0.18, true);
+    }
+  }
+
+  /** The keg rolling: a low wooden rumble that wobbles as the staves come round. */
+  kegRoll(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.6, 0.25);
+    const g = gain(ctx, 0, out);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.35, t + 0.12);
+    g.gain.linearRampToValueAtTime(0.25, t + 0.9);
+    g.gain.linearRampToValueAtTime(0, t + 1.1);
+    const lp = filter(ctx, 'lowpass', 260, 2, g);
+    const trem = osc(ctx, 'sine', 9, gain(ctx, 120, lp.frequency));
+    const src = this.m.noiseSource();
+    src.connect(lp);
+    this.m.startNoise(src, t, 1.15);
+    trem.start(t);
+    trem.stop(t + 1.15);
+    for (let i = 0; i < 4; i++) this.chirp(out, t + 0.1 + i * 0.24 + rand(0, 0.04), 'triangle', 150, 90, 0.12, 0.06);
+  }
+
+  /** The keg bursting: a boom, splintering staves, and a long frothy hiss of foam. */
+  foamBurst(t: number, pan: number): void {
+    const out = this.out(pan, 1, 0.5);
+    this.chirp(out, t, 'sine', 120, 35, 0.8, 0.4);
+    this.burstNoise(out, t, 'lowpass', 1400, 200, 0.7, 0.6, 0.3, true);
+    for (let i = 0; i < 4; i++) this.burstNoise(out, t + 0.01 + i * 0.03 + rand(0, 0.02), 'bandpass', rand(1200, 2200), 700, 3, 0.25, 0.04);
+    this.burstNoise(out, t + 0.06, 'highpass', 3000, 6000, 0.7, 0.22, 0.8);
+    this.burstNoise(out, t + 0.1, 'bandpass', 2400, 1400, 1.2, 0.12, 0.7);
+  }
+
+  private sparkle(dest: AudioNode, t: number, n: number, gap: number): void {
+    const ctx = this.m.ctx;
+    for (let i = 0; i < n; i++) {
+      const at = t + i * gap * rand(0.8, 1.2);
+      const g = gain(ctx, 0, dest);
+      hit(g.gain, at, 0.05 * (1 - i / (n + 1)), 0.002, 0.25);
+      const o = osc(ctx, 'sine', pick(SPARKLE), g);
+      o.start(at);
+      o.stop(at + 0.3);
+    }
+  }
+
+  // ------------------------------------------------------------ The Twin Blade
+
+  /**
+   * A blow turned on two crossed sabers: a hard electric snap, the blades
+   * grinding against each other, then a bright ring like a struck bell, a
+   * little out of tune between its two blades.
+   */
+  saberParry(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.9, 0.4);
+    this.burstNoise(out, t, 'highpass', 3200, 6000, 0.8, 0.45, 0.09);
+    const grind = gain(ctx, 0, filter(ctx, 'bandpass', 1400, 2, out));
+    hit(grind.gain, t, 0.22, 0.002, 0.16);
+    for (const f of [118, 131]) {
+      const o = osc(ctx, 'sawtooth', f, grind);
+      sweep(o.frequency, t, f * 1.8, f, 0.14);
+      o.start(t);
+      o.stop(t + 0.2);
+    }
+    const ring = gain(ctx, 0, filter(ctx, 'highpass', 900, 0.7, out));
+    hit(ring.gain, t + 0.01, 0.11, 0.002, 0.7);
+    for (const f of [1320, 1395, 2210, 3480]) {
+      const r = osc(ctx, 'triangle', f * rand(0.99, 1.01), gain(ctx, 0.45, ring));
+      r.start(t + 0.01);
+      r.stop(t + 0.8);
+    }
+    const th = gain(ctx, 0, out);
+    hit(th.gain, t, 0.35, 0.002, 0.12);
+    const lo = osc(ctx, 'sine', 170, th);
+    sweep(lo.frequency, t, 170, 60, 0.12);
+    lo.start(t);
+    lo.stop(t + 0.16);
+  }
+
+  /** Thousand Cuts' last flash: two blades crossing at once, a rising hiss and a deep, double saber bite. */
+  saberCross(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 1, 0.5);
+    this.burstNoise(out, t, 'bandpass', 900, 6200, 1.2, 0.4, 0.22);
+    for (const [d, f] of [[0, 96], [0.045, 128]] as const) {
+      const g = gain(ctx, 0, filter(ctx, 'lowpass', 2200, 1.5, out));
+      hit(g.gain, t + d, 0.3, 0.003, 0.3);
+      const o = osc(ctx, 'sawtooth', f, g);
+      sweep(o.frequency, t + d, f * 2.2, f * 0.7, 0.28);
+      o.start(t + d);
+      o.stop(t + d + 0.34);
+    }
+    const th = gain(ctx, 0, out);
+    hit(th.gain, t + 0.04, 0.55, 0.003, 0.3);
+    const lo = osc(ctx, 'sine', 120, th);
+    sweep(lo.frequency, t + 0.04, 120, 38, 0.3);
+    lo.start(t + 0.04);
+    lo.stop(t + 0.4);
+  }
+
+  // ------------------------------------------------------------ The Lightwright
+
+  /** The focus beam: a bright glassy zing through the lens, and a hiss where it sears. */
+  focusRay(t: number, pan: number, struck: boolean): void {
+    const out = this.out(pan, 0.45, 0.3);
+    this.chirp(out, t, 'sine', 2600, 1700, 0.12, 0.09);
+    this.chirp(out, t, 'triangle', 1320, 1180, 0.08, 0.12);
+    this.bell(out, t, 3136, 0.025, 0.25);
+    if (struck) this.burstNoise(out, t + 0.03, 'highpass', 2600, 4200, 1, 0.22, 0.12);
+  }
+
+  /** The prism: a crystal chime as it settles in the air, a soft glassy hum while it turns, a tinkling shatter. */
+  prism(t: number, pan: number, hum: boolean, shatter: boolean): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, shatter ? 0.6 : hum ? 0.25 : 0.45, 0.6);
+    if (shatter) {
+      this.burstNoise(out, t, 'highpass', 4000, 6000, 1, 0.3, 0.2);
+      [2637, 3136, 3520, 4186, 2349].forEach((f, i) => this.bell(out, t + i * 0.035, f, 0.03, 0.5));
+      return;
+    }
+    if (hum) {
+      const g = gain(ctx, 0, filter(ctx, 'lowpass', 2400, 0.7, out));
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.04, t + 0.2);
+      g.gain.linearRampToValueAtTime(0, t + 0.6);
+      for (const f of [880, 1318]) {
+        const o = osc(ctx, 'sine', f * rand(0.995, 1.005), g);
+        o.start(t);
+        o.stop(t + 0.65);
+      }
+      return;
+    }
+    [1568, 2093, 2637].forEach((f, i) => this.bell(out, t + i * 0.05, f, 0.045, 0.9));
+  }
+
+  /** The Burning Mirror: petals of metal clacking open, then the sun caught, a deep swelling roar with a bright ring over it. */
+  burningMirror(t: number, pan: number, lit: boolean): void {
+    const ctx = this.m.ctx;
+    if (!lit) {
+      const out = this.out(pan, 0.5, 0.25);
+      for (let i = 0; i < 8; i++) this.burstNoise(out, t + i * 0.05, 'bandpass', 2600, 1800, 3, 0.25, 0.03);
+      this.bell(out, t + 0.4, 740, 0.04, 0.6);
+      return;
+    }
+    const out = this.out(pan, 0.8, 0.6);
+    const g = gain(ctx, 0, out);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.4, t + 0.08);
+    g.gain.setTargetAtTime(0, t + 0.5, 0.25);
+    const lo = osc(ctx, 'sine', 90, g);
+    sweep(lo.frequency, t, 70, 140, 0.6);
+    lo.start(t);
+    lo.stop(t + 1.6);
+    this.burstNoise(out, t, 'lowpass', 900, 3200, 0.8, 0.45, 0.9);
+    this.bell(out, t + 0.02, 1760, 0.05, 1.4);
+    this.bell(out, t + 0.02, 2637, 0.03, 1.2);
+  }
+
+  // ------------------------------------------------------------ The Aquanaut
+
+  /** The harpoon gun: a deep pneumatic thunk, a hiss of escaping air and the line whipping out. */
+  harpoon(t: number, pan: number): void {
+    const out = this.out(pan, 0.7, 0.25);
+    this.chirp(out, t, 'sine', 150, 55, 0.6, 0.18);
+    this.burstNoise(out, t, 'lowpass', 1600, 300, 0.8, 0.45, 0.08, true);
+    this.burstNoise(out, t + 0.02, 'highpass', 4200, 2400, 0.7, 0.18, 0.22);
+    this.chirp(out, t + 0.03, 'triangle', 900, 1500, 0.05, 0.12);
+  }
+
+  /** The reel's chain: a run of iron clinks over the ratchet's grind. */
+  chainReel(t: number, pan: number): void {
+    const out = this.out(pan, 0.55, 0.2);
+    this.chirp(out, t, 'sawtooth', 70, 95, 0.08, 0.35);
+    for (let i = 0; i < 7; i++) this.burstNoise(out, t + i * 0.045, 'bandpass', rand(2600, 3800), 2000, 9, 0.22 - i * 0.02, 0.03);
+  }
+
+  /** The torpedo set loose: a valve's release and a churning, bubbling whoosh. */
+  torpedo(t: number, pan: number): void {
+    const out = this.out(pan, 0.65, 0.35);
+    this.burstNoise(out, t, 'highpass', 3000, 1200, 0.8, 0.25, 0.18);
+    this.burstNoise(out, t + 0.05, 'bandpass', 400, 1400, 1.2, 0.3, 0.6, true);
+    // Bubbles: little sine blips, each rising in pitch as it pops.
+    for (let i = 0; i < 6; i++) {
+      const f = rand(300, 650);
+      this.chirp(out, t + 0.08 + i * rand(0.05, 0.09), 'sine', f, f * 1.8, 0.07, 0.05);
+    }
+  }
+
+  /** The torpedo bursts: a deep watery boom, a heavy splash, and spray pattering back down. */
+  seaBurst(t: number, pan: number): void {
+    const out = this.out(pan, 0.85, 0.6);
+    this.chirp(out, t, 'sine', 110, 32, 0.8, 0.55);
+    this.burstNoise(out, t, 'lowpass', 1800, 200, 0.7, 0.6, 0.5, true);
+    this.burstNoise(out, t + 0.04, 'bandpass', 900, 2600, 0.9, 0.35, 0.45);
+    for (let i = 0; i < 8; i++) this.burstNoise(out, t + 0.25 + i * rand(0.03, 0.07), 'highpass', rand(3000, 5000), 2500, 1, 0.08, 0.04);
+  }
+
+  /** A bear's growl: deeper and rougher than the lion's roar, a chesty rumble that rises into a bellow; the wrath's rolls on longer. */
+  bearGrowl(t: number, pan: number, big: boolean): void {
+    const ctx = this.m.ctx;
+    const dur = big ? 1.2 : 0.6;
+    const out = this.out(pan, big ? 0.95 : 0.75, 0.45);
+    const g = gain(ctx, 0, filter(ctx, 'lowpass', 900, 1.4, out));
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.42, t + dur * 0.3);
+    g.gain.setTargetAtTime(0, t + dur * 0.65, dur * 0.2);
+    // A slow, ragged flutter: the growl's grit.
+    const depth = gain(ctx, 14);
+    const flutter = osc(ctx, 'square', 17, depth);
+    for (const [f, type] of [[62, 'sawtooth'], [93, 'sawtooth'], [41, 'square']] as const) {
+      const o = osc(ctx, type, f, g);
+      depth.connect(o.frequency);
+      sweep(o.frequency, t, f * 0.85, f * 1.2, dur * 0.4);
+      o.start(t);
+      o.stop(t + dur + 0.3);
+    }
+    flutter.start(t);
+    flutter.stop(t + dur + 0.3);
+    const air = gain(ctx, 0, out);
+    air.gain.setValueAtTime(0, t);
+    air.gain.linearRampToValueAtTime(0.22, t + dur * 0.35);
+    air.gain.setTargetAtTime(0, t + dur * 0.6, dur * 0.2);
+    const bp = filter(ctx, 'bandpass', 420, 1.6, air);
+    sweep(bp.frequency, t, 300, 640, dur * 0.4);
+    const src = this.m.noiseSource(true);
+    src.connect(bp);
+    this.m.startNoise(src, t, dur + 0.3);
+  }
+
+  // ------------------------------------------------------------ The Aviator
+
+  /** The flare pistol: a hollow pop and the flare's fizzing hiss; the star shell's deeper, with a crackle. */
+  flareShot(t: number, pan: number, star: boolean): void {
+    const out = this.out(pan, star ? 0.7 : 0.55, 0.2);
+    this.chirp(out, t, 'sine', star ? 260 : 340, 90, 0.4, 0.08);
+    this.burstNoise(out, t, 'bandpass', 1800, 900, 1.2, 0.35, 0.05);
+    this.burstNoise(out, t + 0.02, 'highpass', 4200, 6800, 0.8, 0.14, star ? 0.32 : 0.22);
+    if (star) for (let i = 0; i < 4; i++) this.burstNoise(out, t + 0.06 + i * 0.035 * rand(0.8, 1.3), 'highpass', 3000, 4000, 1, 0.18, 0.015);
+  }
+
+  /** The jetpack lighting for a hop: a cough, then a rushing roar that climbs and dies away. */
+  jetHop(t: number, pan: number): void {
+    const out = this.out(pan, 0.7, 0.25);
+    this.chirp(out, t, 'square', 140, 60, 0.18, 0.05);
+    this.burstNoise(out, t + 0.04, 'lowpass', 600, 2800, 0.9, 0.5, 0.42, true);
+    this.burstNoise(out, t + 0.06, 'bandpass', 1200, 3600, 1.4, 0.2, 0.36);
+    this.chirp(out, t + 0.05, 'sawtooth', 70, 140, 0.08, 0.35);
+  }
+
+  /** The biplane's pass: an engine's putter, swelling as it comes, its pitch dropping as it goes by, fading off. */
+  biplane(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const dur = 2.3;
+    const out = this.out(pan, 0.55, 0.25);
+    const env = gain(ctx, 0, filter(ctx, 'lowpass', 1400, 0.8, out));
+    env.gain.setValueAtTime(0, t);
+    env.gain.linearRampToValueAtTime(0.28, t + dur * 0.45);
+    env.gain.linearRampToValueAtTime(0.18, t + dur * 0.6);
+    env.gain.linearRampToValueAtTime(0, t + dur);
+    // The cylinders' putter: the engine note pulsed by a fast tremolo.
+    const putter = gain(ctx, 0.5, env);
+    const trem = osc(ctx, 'square', 22, gain(ctx, 0.5, putter.gain));
+    for (const [type, mul] of [['sawtooth', 1], ['square', 0.5]] as const) {
+      const o = osc(ctx, type, 118 * mul, putter);
+      o.frequency.setValueAtTime(118 * mul, t);
+      o.frequency.setValueAtTime(118 * mul, t + dur * 0.45);
+      o.frequency.linearRampToValueAtTime(92 * mul, t + dur * 0.62);
+      o.start(t);
+      o.stop(t + dur + 0.05);
+    }
+    trem.start(t);
+    trem.stop(t + dur + 0.05);
+    // The rush of air as it goes over.
+    this.burstNoise(out, t + dur * 0.35, 'bandpass', 500, 1400, 1, 0.12, dur * 0.35, true);
+  }
+
+  /** A bomb falling: a thin whistle sliding down. */
+  bombWhistle(t: number, pan: number): void {
+    const out = this.out(pan, 0.35, 0.2);
+    this.chirp(out, t, 'sine', 1900, 700, 0.12, 0.4);
+  }
+
+  /** The Roman candle's shot: a soft paper thump and a short rising whistle as the star leaves the tube. */
+  candle(t: number, pan: number): void {
+    const out = this.out(pan, 0.55, 0.2);
+    this.chirp(out, t, 'sine', 180, 70, 0.4, 0.07);
+    this.burstNoise(out, t, 'bandpass', 1600, 700, 1.4, 0.3, 0.06, true);
+    const f = rand(1500, 1800);
+    this.chirp(filter(this.m.ctx, 'lowpass', 4200, 1, out), t + 0.02, 'sine', f, f * 1.6, 0.06, 0.1);
+  }
+
+  /** A star bursting on a foe: a crackle of tiny pops and a glint. */
+  starPop(t: number, pan: number): void {
+    const out = this.out(pan, 0.5, 0.25);
+    for (let i = 0; i < 4; i++) this.burstNoise(out, t + i * rand(0.02, 0.04), 'highpass', rand(3200, 4800), 6000, 0.8, 0.22, 0.025);
+    this.chirp(out, t, 'triangle', rand(1900, 2300), 1500, 0.06, 0.12);
+  }
+
+  /** A firecracker going off: a hard, dry crack with a little thump under it. */
+  firecracker(t: number, pan: number): void {
+    const out = this.out(pan, 0.6, 0.18);
+    this.burstNoise(out, t, 'highpass', rand(1800, 2600), 1200, 0.7, 0.6, 0.035);
+    this.burstNoise(out, t, 'bandpass', rand(900, 1200), 500, 1.2, 0.35, 0.05, true);
+    this.chirp(out, t, 'sine', rand(260, 320), 80, 0.3, 0.05);
+  }
+
+  /** A skyrocket climbing: a whistle that rises and wavers, over a rushing hiss. */
+  rocketWhistle(t: number, pan: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.35, 0.3);
+    const g = gain(ctx, 0, out);
+    hit(g.gain, t, 0.07, 0.04, 0.5);
+    const f = rand(900, 1100);
+    const o = osc(ctx, 'sine', f, g);
+    sweep(o.frequency, t, f, f * 2.4, 0.5);
+    const vib = osc(ctx, 'sine', 18, gain(ctx, 40, o.frequency));
+    o.start(t);
+    o.stop(t + 0.6);
+    vib.start(t);
+    vib.stop(t + 0.6);
+    this.burstNoise(out, t, 'bandpass', 1200, 3600, 1.2, 0.18, 0.45);
+  }
+
+  /** A great firework bursting in the sky: a deep boom, then a long tail of crackling glitter. */
+  fireworkBurst(t: number, pan: number): void {
+    const out = this.out(pan, 0.7, 0.6);
+    this.chirp(out, t, 'sine', 120, 34, 0.6, 0.35);
+    this.burstNoise(out, t, 'lowpass', 2400, 200, 0.8, 0.5, 0.4, true);
+    for (let i = 0; i < 12; i++) {
+      const at = t + 0.12 + i * rand(0.04, 0.08);
+      this.burstNoise(out, at, 'highpass', rand(3000, 5200), 6400, 0.9, 0.12 * (1 - i / 14), 0.02);
+    }
+    this.sparkle(out, t + 0.2, 3, 0.09);
+  }
+}
+
+/**
+ * The beam gathering: a pair of detuned saws and an airy shimmer that climb in
+ * pitch, brightness and tremolo speed as the charge fills, then wobble once the
+ * charge turns unstable.
+ */
+export class BeamHum {
+  private env: GainNode;
+  private oscs: OscillatorNode[] = [];
+  private lp: BiquadFilterNode;
+  private trem: OscillatorNode;
+  private wobble: GainNode;
+  private air: GainNode;
+  private noise: AudioBufferSourceNode;
+
+  constructor(m: Mixer, out: AudioNode, t: number) {
+    const ctx = m.ctx;
+    this.env = gain(ctx, 0, out);
+    this.env.gain.setValueAtTime(0, t);
+    this.env.gain.linearRampToValueAtTime(0.05, t + 0.15);
+
+    // Tremolo: the level pulses, faster as the charge builds.
+    const body = gain(ctx, 0.75, this.env);
+    this.trem = osc(ctx, 'sine', 5, gain(ctx, 0.25, body.gain));
+    this.lp = filter(ctx, 'lowpass', 500, 2, body);
+    // Pitch wobble, only once unstable.
+    this.wobble = gain(ctx, 0, undefined);
+    const vib = osc(ctx, 'sine', 11, this.wobble);
+    for (const [f, type, lvl] of [
+      [110, 'sawtooth', 0.4],
+      [110.8, 'sawtooth', 0.4],
+      [220, 'sine', 0.6],
+    ] as const) {
+      const o = osc(ctx, type, f, gain(ctx, lvl, this.lp));
+      this.wobble.connect(o.detune);
+      this.oscs.push(o);
+    }
+
+    this.air = gain(ctx, 0, this.env);
+    const bp = filter(ctx, 'bandpass', 1800, 3, this.air);
+    this.noise = m.noiseLoop();
+    this.noise.connect(bp);
+
+    for (const o of [...this.oscs, this.trem, vib]) o.start(t);
+    this.noise.start(t);
+    this.oscs.push(this.trem, vib);
+  }
+
+  /** `level` 0..1 is the charge, `over` 0..1 how far into the unstable hold it is. */
+  set(level: number, over: number, t: number): void {
+    const k = 0.05;
+    const f = 110 * Math.pow(2, level * 1.2);
+    this.oscs[0].frequency.setTargetAtTime(f, t, k);
+    this.oscs[1].frequency.setTargetAtTime(f * 1.007, t, k);
+    this.oscs[2].frequency.setTargetAtTime(f * 2, t, k);
+    this.lp.frequency.setTargetAtTime(500 + level * 2600, t, k);
+    this.trem.frequency.setTargetAtTime(5 + level * 9 + over * 8, t, k);
+    this.wobble.gain.setTargetAtTime(over * 60, t, k);
+    this.env.gain.setTargetAtTime(0.05 + level * 0.07, t, k);
+    this.air.gain.setTargetAtTime(0.05 + level * 0.25, t, k);
+  }
+
+  stop(t: number): void {
+    this.env.gain.cancelScheduledValues(t);
+    this.env.gain.setTargetAtTime(0, t, 0.03);
+    for (const o of this.oscs) o.stop(t + 0.25);
+    this.noise.stop(t + 0.25);
+  }
+}
+
+/** The wind past a glider: a bed of noise that swells and brightens with speed, and roars in a dive. */
+export class WindBed {
+  private env: GainNode;
+  private lp: BiquadFilterNode;
+  private bp: BiquadFilterNode;
+  private whistle: GainNode;
+  private noise: AudioBufferSourceNode;
+  private hiss: AudioBufferSourceNode;
+
+  constructor(m: Mixer, out: AudioNode, t: number) {
+    const ctx = m.ctx;
+    this.env = gain(ctx, 0, out);
+    this.env.gain.setValueAtTime(0, t);
+    this.env.gain.linearRampToValueAtTime(0.18, t + 0.6);
+    this.lp = filter(ctx, 'lowpass', 500, 0.6, this.env);
+    this.noise = m.noiseLoop(true);
+    this.noise.connect(this.lp);
+    this.whistle = gain(ctx, 0, this.env);
+    this.bp = filter(ctx, 'bandpass', 1500, 6, this.whistle);
+    this.hiss = m.noiseLoop();
+    this.hiss.connect(this.bp);
+    this.noise.start(t);
+    this.hiss.start(t);
+  }
+
+  /** `speed` 0..1 of top speed; `dive` while diving. */
+  set(speed: number, dive: boolean, t: number): void {
+    const k = 0.12;
+    this.env.gain.setTargetAtTime(0.1 + speed * 0.3, t, k);
+    this.lp.frequency.setTargetAtTime(300 + speed * 1600 + (dive ? 700 : 0), t, k);
+    this.bp.frequency.setTargetAtTime(900 + speed * 1800, t, k);
+    this.whistle.gain.setTargetAtTime(dive ? 0.18 : speed * 0.06, t, k);
+  }
+
+  stop(t: number): void {
+    this.env.gain.cancelScheduledValues(t);
+    this.env.gain.setTargetAtTime(0, t, 0.15);
+    this.noise.stop(t + 0.8);
+    this.hiss.stop(t + 0.8);
+  }
+}

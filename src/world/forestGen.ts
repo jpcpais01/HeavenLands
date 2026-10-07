@@ -1,0 +1,1606 @@
+// The Everwood: an endless forest grown from a seed. Everything here is a
+// pure function of the seed and world coordinates, so the same seed always
+// gives the same forest, any piece of it can be made in any order (a ground
+// tile, a patch of trees, whether a spot can be walked on), and two players
+// with the same seed walk the same woods. No Phaser: the arena worker paints
+// the map panel's window with it too.
+//
+// The land is split into regions (a warped Voronoi), each one kind of wood:
+// oak woods, birch groves, pine hills, Sakura glades, flower meadows, autumn
+// maples, mushroom hollows. Where two meet they mingle over a band rather
+// than change at a line. Over them run smooth fields, sampled on a 4 px
+// lattice and blended between its nodes (cheap enough to ask per pixel):
+//  - groves, where the trees stand close, trunk by trunk, with ferns between;
+//  - streams, the contour lines of a noise, widening and fading with a
+//    second one, with shallow fords here and there;
+//  - ponds, the high ground of another noise;
+//  - trails, the contour lines of a third, worn into the ground, crossing
+//    water on plank bridges.
+// Under it all lies the land: a smooth height field, cut into terraces a
+// cliff's height apart (see `terrain`). Where it faces south the edge of a
+// terrace shows a rock face; trails climb it on stairs, streams wear it down
+// into a gentle ravine, and here and there it eases into a walkable slope.
+// Trees, undergrowth, sunbeams, creatures and rare places (a campfire, a
+// shrine, a chest, old ruins, standing stones, an elder tree, a fairy ring;
+// and wilder ones: a sunlit glade, a misty bog, a grove of glowing
+// mushrooms, a bramble patch, a hunter's camp) are picked cell by cell on grids of their own, each cell from its own
+// hash, so a chunk's contents never depend on which chunks were made first.
+
+import { hash2, valueNoise } from '../art/env';
+
+/** The world's size: about two hours' walk from the middle to any edge. */
+export const FOREST_WORLD = 1 << 20;
+export const FOREST_MID = FOREST_WORLD / 2;
+/** Side of a chunk: what is made, shown and forgotten together. */
+export const CHUNK = 256;
+
+/** Spacing of the field lattice, and nodes per chunk side (with the far edge). */
+const NODE = 4;
+const NN = CHUNK / NODE;
+const NS = NN + 1;
+/** Size of a region (one kind of wood), and the band over which neighbours mingle. */
+const REGION = 560;
+const BAND = 96;
+/** Grids things are picked on. */
+/** Raises every wood's grove threshold: groves are patches of close-standing trees, not the whole wood. */
+const GROVE_LIFT = 0.1;
+/** How likely a tree cell deep in a grove holds a tree. */
+const GROVE_TREES = 0.62;
+const TREE_CELL = 22;
+/** How far below a place (px) a tree's crown would still stand over it. */
+const TREE_SHADE = 96;
+/** How much further back from a glade the trees stand. */
+const GLADE_OPEN = 26;
+const PROP_CELL = 13;
+const POI_CELL = 704;
+const RAY_CELL = 230;
+/** Monster spots tried per chunk, and how far from the start none stand. */
+const SPOTS_PER_CHUNK = 2;
+const QUIET_START = 280;
+/** Caches: field chunks (the heavy ones), chunk layouts, rare places. */
+const FIELD_CACHE = 48;
+const LOOK_CACHE = 200;
+
+// ---------------------------------------------------------------- the lie of the land
+
+/**
+ * The land rises in terraces: its height is a field counted in levels, and
+ * where it crosses a whole level there's an edge. Seen from the south (as
+ * the game is), an edge facing south shows its rock face, this tall (px);
+ * one facing east or west shows a narrow strip of it; one facing north
+ * hides its face and shows only its lip.
+ */
+export const FACE_H = 26;
+const SIDE_W = 5;
+/** Levels the hilliest wood rises and falls over (it has `hills` 1), and the sizes of its hills and knolls (px). */
+const RELIEF = 9;
+const HILL_SCALE = 1500;
+const KNOLL_SCALE = 520;
+/** The start is on a plain: the land begins to rise between these distances (px) from the world's middle. */
+const PLAIN_R = 260;
+const HILLS_R = 760;
+/** Edges are crags, not lines: they wander this many px either way. */
+const CRAG = 3;
+/** Where the slope noise tops this, an edge eases into a slope that can be walked. */
+const SLOPE_AT = 0.62;
+/** A trail climbs an edge on stairs (this far into its trail field), with a walkable slope either side of them. */
+const STAIRS = 1.2;
+const STAIR_SLOPE = 6;
+/** How far from water (px) a cliff eases into a slope, so streams run down through it rather than over. */
+const WATER_EASE = 10;
+/** Feet keep this far (px) from the line of an edge. */
+const LIP = 2.5;
+/** Lookouts: one tried per cell this size, on high ground at the lip of a cliff that faces south. */
+const LOOK_CELL = 832;
+/** How far (px) north of the lip a lookout's middle stands, and its parapet south of its middle. */
+const LOOK_BACK = 12;
+export const LOOK_RAIL = 8;
+/** How far down the drop in front of a lookout no tree stands. */
+const LOOK_VIEW = 130;
+/** How far from the foot of a face turned to the viewer trees keep back. */
+const CLIFF_FOOT = 16;
+
+const LAYOUT_CACHE = 120;
+const POI_CACHE = 400;
+
+// ---------------------------------------------------------------- the woods
+
+export type BiomeId = 'oak' | 'birch' | 'pine' | 'sakura' | 'meadow' | 'autumn' | 'hollow';
+export type WoodKind = 'oak' | 'birch' | 'pine' | 'cherry' | 'maple' | 'willow';
+
+export interface Biome {
+  id: BiomeId;
+  /** How much the land rises and falls here: 0 flat, 1 the craggiest. */
+  hills: number;
+  /** How often a region is this wood. */
+  weight: number;
+  /** Noise level above which the trees close into a grove (higher: fewer). */
+  grove: number;
+  /** Chance a tree cell holds a tree. */
+  trees: number;
+  /** Which trees, by weight. */
+  kinds: [WoodKind, number][];
+  /** Added to the pond noise: more ponds, or fewer. */
+  ponds: number;
+  /** Chance a prop cell holds something, and what, by weight. */
+  props: number;
+  undergrowth: [PropKind, number][];
+  /** Monsters that live here, by weight. */
+  monsters: [ForestMonster, number][];
+  /** A region's name: one of the first words, one of the second. */
+  names: [string[], string[]];
+}
+
+export type ForestMonster = 'beetle' | 'barkling' | 'puffcap' | 'glowmoth' | 'frog';
+
+export type PropKind =
+  | 'bush'
+  | 'berry'
+  | 'fern'
+  | 'rock'
+  | 'stump'
+  | 'log'
+  | 'glowcap'
+  | 'redcap'
+  | 'tuft'
+  | 'flowers'
+  | 'reeds'
+  | 'boulder'
+  | 'bigshroom';
+
+export const BIOMES: Biome[] = [
+  {
+    id: 'oak',
+    hills: 0.55,
+    weight: 24,
+    grove: 0.6,
+    trees: 0.075,
+    kinds: [['oak', 80], ['birch', 10], ['pine', 10]],
+    ponds: 0,
+    props: 0.12,
+    undergrowth: [['fern', 28], ['bush', 16], ['berry', 6], ['tuft', 24], ['rock', 6], ['stump', 6], ['log', 4], ['redcap', 4], ['flowers', 6]],
+    monsters: [['beetle', 3], ['barkling', 2], ['puffcap', 1]],
+    names: [['Bramble', 'Acorn', 'Hart', 'Badger', 'Wren', 'Thistle', 'Old Oak', 'Hazel', 'Foxglove', 'Kingfisher'], ['Wood', 'Weald', 'Woods', 'Thicket', 'Copse']],
+  },
+  {
+    id: 'birch',
+    hills: 0.45,
+    weight: 16,
+    grove: 0.7,
+    trees: 0.09,
+    kinds: [['birch', 82], ['oak', 18]],
+    ponds: 0.01,
+    props: 0.12,
+    undergrowth: [['tuft', 36], ['flowers', 22], ['fern', 14], ['bush', 10], ['stump', 6], ['rock', 6]],
+    monsters: [['beetle', 2], ['glowmoth', 2], ['puffcap', 1]],
+    names: [['Silver', 'White', 'Pale', 'Moon', 'Whisper', 'Frost', 'Linen', 'Dove'], ['Birches', 'Grove', 'Glade', 'Stand']],
+  },
+  {
+    id: 'pine',
+    hills: 1.0,
+    weight: 17,
+    grove: 0.57,
+    trees: 0.1,
+    kinds: [['pine', 90], ['birch', 10]],
+    ponds: -0.03,
+    props: 0.1,
+    undergrowth: [['fern', 24], ['rock', 10], ['boulder', 5], ['stump', 10], ['log', 8], ['redcap', 6], ['tuft', 10]],
+    monsters: [['barkling', 3], ['beetle', 2]],
+    names: [['Raven', 'Wolf', 'Needle', 'Shadow', 'Cone', 'Black', 'Winter', 'Owl'], ['Pines', 'Pinewood', 'Hills', 'Firs']],
+  },
+  {
+    id: 'sakura',
+    hills: 0.7,
+    weight: 11,
+    grove: 0.72,
+    trees: 0.06,
+    kinds: [['cherry', 78], ['birch', 12], ['oak', 10]],
+    ponds: 0.03,
+    props: 0.12,
+    undergrowth: [['flowers', 26], ['tuft', 30], ['bush', 14], ['rock', 12], ['fern', 10]],
+    monsters: [['glowmoth', 3], ['frog', 1], ['puffcap', 1]],
+    names: [['Petal', 'Blossom', 'Rosy', 'Dawn', 'Spring', 'Blush', 'Lantern', 'Plum'], ['Glade', 'Grove', 'Garden', 'Bower']],
+  },
+  {
+    id: 'meadow',
+    hills: 0.3,
+    weight: 13,
+    grove: 0.84,
+    trees: 0.015,
+    kinds: [['oak', 50], ['cherry', 20], ['birch', 30]],
+    ponds: 0.02,
+    props: 0.26,
+    undergrowth: [['flowers', 46], ['tuft', 44], ['rock', 5], ['bush', 5]],
+    monsters: [['beetle', 2], ['glowmoth', 2], ['frog', 1]],
+    names: [['Clover', 'Honey', 'Bell', 'Buttercup', 'Lark', 'Sunny', 'Bumble', 'Daisy'], ['Meadow', 'Fields', 'Lea', 'Green']],
+  },
+  {
+    id: 'autumn',
+    hills: 0.85,
+    weight: 12,
+    grove: 0.62,
+    trees: 0.07,
+    kinds: [['maple', 74], ['oak', 16], ['birch', 10]],
+    ponds: 0,
+    props: 0.12,
+    undergrowth: [['bush', 16], ['berry', 6], ['tuft', 24], ['stump', 10], ['log', 8], ['fern', 14], ['redcap', 8], ['rock', 5]],
+    monsters: [['barkling', 2], ['beetle', 2], ['puffcap', 2]],
+    names: [['Amber', 'Ember', 'Rust', 'Copper', 'Harvest', 'Gold', 'Fox', 'Hearth'], ['Wood', 'Grove', 'Vale', 'Dale']],
+  },
+  {
+    id: 'hollow',
+    hills: 0.6,
+    weight: 7,
+    grove: 0.56,
+    trees: 0.08,
+    kinds: [['oak', 55], ['pine', 45]],
+    ponds: 0.03,
+    props: 0.16,
+    undergrowth: [['bigshroom', 12], ['glowcap', 30], ['fern', 24], ['log', 10], ['stump', 8], ['boulder', 5], ['redcap', 8]],
+    monsters: [['puffcap', 4], ['glowmoth', 2], ['barkling', 1]],
+    names: [['Moss', 'Glow', 'Toad', 'Spore', 'Dim', 'Fey', 'Hush', 'Lantern'], ['Hollow', 'Dell', 'Bottom', 'Mire']],
+  },
+];
+
+const BIOME_WEIGHT = BIOMES.reduce((s, b) => s + b.weight, 0);
+/** The start's region is always an oak wood: the forest as it is best known. */
+const START_BIOME = 0;
+
+// ---------------------------------------------------------------- places
+
+export type PoiKind = 'campfire' | 'shrine' | 'chest' | 'ruins' | 'stones' | 'elder' | 'fairy' | 'lookout' | WildKind;
+/** The wilder places, on a grid of their own: a sunlit glade, a misty bog, a grove of glowing mushrooms, a bramble patch, a hunter's old camp. */
+export type WildKind = 'glade' | 'bog' | 'glowcaps' | 'brambles' | 'camp';
+
+/** How much room each kind of place clears round itself. */
+const POI_R: Record<PoiKind, number> = { campfire: 30, shrine: 26, chest: 22, ruins: 64, stones: 46, elder: 58, fairy: 26, lookout: 24, glade: 64, bog: 66, glowcaps: 56, brambles: 46, camp: 50 };
+/**
+ * The wild places' grid: one tried per cell this size, kept this often, and
+ * which by weight (a glade needs the most room, so is tried most). Their
+ * own grid (and ids from WILD_ID up), so the older places stay where they
+ * always were.
+ */
+const WILD_CELL = 640;
+const WILD_CHANCE = 0.62;
+const WILD_WEIGHTS: [WildKind, number][] = [
+  ['glade', 40],
+  ['bog', 14],
+  ['glowcaps', 18],
+  ['brambles', 24],
+  ['camp', 20],
+];
+const WILD_ID = 2 ** 33;
+const POI_WEIGHTS: [PoiKind, number][] = [
+  ['campfire', 20],
+  ['shrine', 16],
+  ['chest', 16],
+  ['ruins', 14],
+  ['stones', 12],
+  ['elder', 8],
+  ['fairy', 10],
+];
+
+export interface Poi {
+  /** Unique within the seed: which places have been used up this visit. */
+  id: number;
+  kind: PoiKind;
+  x: number;
+  y: number;
+  /** The glade it keeps clear. */
+  r: number;
+  /** The biome it stands in. */
+  biome: BiomeId;
+}
+
+export interface FTree {
+  x: number;
+  y: number;
+  kind: WoodKind;
+  v: number;
+  flip: boolean;
+}
+
+export interface FProp {
+  x: number;
+  y: number;
+  kind: PropKind;
+  v: number;
+  flip: boolean;
+}
+
+export interface Blocker {
+  x: number;
+  y: number;
+  rx: number;
+  ry: number;
+  /** The tree or undergrowth it belongs to (its foot key, see forestEdits.ts), which the player may clear. */
+  of?: number;
+}
+
+export interface FSpot {
+  /** Unique within the seed, and stable: the online slot it's known by. */
+  id: number;
+  kind: ForestMonster;
+  x: number;
+  y: number;
+}
+
+export interface ChunkLayout {
+  cx: number;
+  cy: number;
+  trees: FTree[];
+  props: FProp[];
+  /** Places whose middle is in this chunk. */
+  pois: Poi[];
+  rays: { x: number; y: number; seed: number }[];
+  spots: FSpot[];
+  /** Everything standing in this chunk that feet can't cross (its own, and its neighbours' that reach in). */
+  blockers: Blocker[] | null;
+  /** Own blockers only, before the neighbours are merged in. */
+  own: Blocker[];
+}
+
+/** Field chunks (cx, cy, lattice) and layouts a worker made, for the main thread to take. */
+export interface FreshWork {
+  fields: [number, number, Float32Array][];
+  layouts: ChunkLayout[];
+}
+
+/** Trunk footprint and crown reach of each tree, in px from its foot (see Scenery's TREE_SHAPE). */
+export const WOOD_SHAPE: Record<WoodKind, { trunk: number; canopyR: number; canopyY: number }> = {
+  oak: { trunk: 5, canopyR: 34, canopyY: 68 },
+  birch: { trunk: 3, canopyR: 22, canopyY: 78 },
+  pine: { trunk: 4, canopyR: 24, canopyY: 56 },
+  cherry: { trunk: 5, canopyR: 38, canopyY: 64 },
+  maple: { trunk: 5, canopyR: 34, canopyY: 70 },
+  willow: { trunk: 5, canopyR: 38, canopyY: 66 },
+};
+
+/** Blockers of the undergrowth that stops feet. */
+const PROP_BLOCK: Partial<Record<PropKind, [number, number]>> = { rock: [6, 3], stump: [6, 3], log: [15, 4], boulder: [11, 5], bigshroom: [4, 3] };
+
+// ---------------------------------------------------------------- fields
+
+/** Field indices on the lattice. */
+const F_WX = 0;
+const F_WY = 1;
+const F_GROVE = 2;
+const F_STREAM = 3;
+const F_POND = 4;
+const F_TRAIL = 5;
+const F_FORD = 6;
+const F_TGX = 7;
+const F_TGY = 8;
+const F_SGX = 9;
+const F_SGY = 10;
+const F_RISE = 11;
+const F_RGX = 12;
+const F_RGY = 13;
+const F_SLOPE = 14;
+const NF = 15;
+
+/** What the fields say at one spot (see `sample`). */
+export interface Here {
+  /** Warp applied before the regions are looked up. */
+  wx: number;
+  wy: number;
+  /** Positive inside a grove, negative in the open: roughly px from its edge. */
+  grove: number;
+  /** Positive inside a stream (px from its bank), negative outside. */
+  stream: number;
+  /** Positive inside a pond, negative outside. */
+  pond: number;
+  /** Negative on a trail, else px from its edge. */
+  trail: number;
+  /** 0..1: how much a stream here is a shallow ford. */
+  ford: number;
+  /** The trail's cross direction (unit), for plank seams. */
+  tgx: number;
+  tgy: number;
+  /** The stream's cross direction (unit), for ripples. */
+  sgx: number;
+  sgy: number;
+  /** The land's height, in levels (see `terrain`), and its slope per px (smooth: the crags left out). */
+  rise: number;
+  rgx: number;
+  rgy: number;
+  /** 0..1: above SLOPE_AT, an edge here is a slope to walk. */
+  slope: number;
+}
+
+/** The lie of the land at a spot (see `ForestGen.terrain`). */
+export interface Terrain {
+  /** Which terrace: 0 is the plain round the start, each level up or down a cliff's height. */
+  level: number;
+  /** px across to the edge of the terrace above (uphill), and to this terrace's own edge (downhill); Infinity where the land is flat. */
+  up: number;
+  down: number;
+  /** Which way the edges here face: 1 south, toward the viewer (a full face shows), 0 east or west, -1 north (hidden). */
+  facing: number;
+  /** How wide (px, across the edge) the face of the terrace above shows here. */
+  faceW: number;
+  /** Is the spot on that face (or on the slope or the stairs where the face would be)? */
+  onFace: boolean;
+  /** The edge here can be walked: a slope, or a trail's stairs (`stairs`). */
+  slope: boolean;
+  stairs: boolean;
+}
+
+/** How wide (px, across it) the face under an edge facing `f` shows (see Terrain.facing). */
+export const faceWidth = (f: number): number => (f > 0 ? SIDE_W + (FACE_H - SIDE_W) * f ** 1.5 : SIDE_W * Math.max(0, 1 + f / 0.6));
+
+/** The region (and its neighbour) a spot is in: see `region`. */
+export interface Where {
+  /** The region's cell, and its biome. */
+  ci: number;
+  cj: number;
+  a: number;
+  /** The nearest other region's biome, and how far toward it the spot leans (0 in a region's heart, 0.5 on the border). */
+  b: number;
+  w: number;
+}
+
+/** A tree's or a piece of undergrowth's name: where its foot stands (x and y are under 2^20). */
+export const footKey = (x: number, y: number): number => Math.round(x) * 1048576 + Math.round(y);
+
+const smooth = (a: number, b: number, v: number): number => {
+  const t = v <= a ? 0 : v >= b ? 1 : (v - a) / (b - a);
+  return t * t * (3 - 2 * t);
+};
+
+/** A small LRU cache. */
+class Lru<V> {
+  private map = new Map<number, V>();
+  constructor(private max: number) {}
+  get(k: number): V | undefined {
+    const v = this.map.get(k);
+    if (v !== undefined) {
+      this.map.delete(k);
+      this.map.set(k, v);
+    }
+    return v;
+  }
+  set(k: number, v: V): void {
+    this.map.set(k, v);
+    if (this.map.size > this.max) this.map.delete(this.map.keys().next().value!);
+  }
+  has(k: number): boolean {
+    return this.map.has(k);
+  }
+}
+
+const key2 = (i: number, j: number): number => (i + 32768) * 65536 + (j + 32768);
+
+/**
+ * The Everwood's one seed: everyone, alone or online, walks the same forest
+ * (and the arena select's window looks into it). It has no end, so there is
+ * always somewhere new past where anyone has been.
+ */
+export const EVERWOOD_SEED = 2718;
+
+export class ForestGen {
+  private fields = new Lru<Float32Array>(FIELD_CACHE);
+  private layouts = new Lru<ChunkLayout>(LAYOUT_CACHE);
+  private poiCells = new Lru<Poi | null>(POI_CACHE);
+  private lookCells = new Lru<Poi | null>(LOOK_CACHE);
+  private wildCells = new Lru<Poi | null>(POI_CACHE);
+  /** Salts every noise with the seed. */
+  private readonly k: number;
+  private startCell: { i: number; j: number };
+  private start: { x: number; y: number } | null = null;
+  private startFire: Poi | null = null;
+  /** The field chunk last sampled, so a run of samples in one chunk skips the cache. */
+  private fresh: FreshWork | null = null;
+  private lastKey = -1;
+  private lastF: Float32Array | null = null;
+  private readonly here: Here = { wx: 0, wy: 0, grove: 0, stream: 0, pond: 0, trail: 0, ford: 0, tgx: 0, tgy: 1, sgx: 0, sgy: 1, rise: 0.5, rgx: 0, rgy: 0, slope: 0 };
+  private readonly ground: Terrain = { level: 0, up: Infinity, down: Infinity, facing: 0, faceW: 0, onFace: false, slope: false, stairs: false };
+  private readonly where: Where = { ci: 0, cj: 0, a: 0, b: 0, w: 0 };
+  /**
+   * Glades the White Stag has opened this visit: the trees and undergrowth
+   * inside one stand aside (see Forest.part), and what was there stops no
+   * feet; its place's own `blocks` do instead.
+   */
+  private glades: { x: number; y: number; r: number; blocks: Blocker[] }[] = [];
+
+  constructor(readonly seed: number) {
+    this.k = (seed % 60001) * 131;
+    // The start's region, looked up exactly (the lattice needs it to exist first).
+    const wx = this.warpX(FOREST_MID, FOREST_MID);
+    const wy = this.warpY(FOREST_MID, FOREST_MID);
+    this.startCell = { i: 0, j: 0 };
+    this.nearestCell(FOREST_MID + wx, FOREST_MID + wy);
+    this.startCell = { i: this.where.ci, j: this.where.cj };
+    // Its biome was cached before the start was known.
+    this.cellsAt.gx = NaN;
+  }
+
+  private n(x: number, y: number, scale: number, salt: number): number {
+    return valueNoise(x, y, scale, this.k + salt);
+  }
+
+  private h(x: number, y: number, salt: number): number {
+    return hash2(x, y, this.k + salt);
+  }
+
+  private warpX(x: number, y: number): number {
+    return (this.n(x, y, 230, 11) - 0.5) * 130 + (this.n(x, y, 70, 12) - 0.5) * 24;
+  }
+
+  private warpY(x: number, y: number): number {
+    return (this.n(x, y, 230, 13) - 0.5) * 130 + (this.n(x, y, 70, 14) - 0.5) * 24;
+  }
+
+  // ---------------------------------------------------------------- regions
+
+  private biomeOfCell(i: number, j: number): number {
+    if (i === this.startCell.i && j === this.startCell.j) return START_BIOME;
+    let r = this.h(i, j, 21) * BIOME_WEIGHT;
+    for (let b = 0; b < BIOMES.length; b++) {
+      r -= BIOMES[b].weight;
+      if (r < 0) return b;
+    }
+    return 0;
+  }
+
+  /** The 3x3 region cells round the last grid square asked about: their centres and biomes (asked of millions of pixels, mostly in the same square). */
+  private cellsAt = { gx: NaN, gy: NaN, px: new Float64Array(9), py: new Float64Array(9), biome: new Int8Array(9) };
+
+  /** The region cell nearest the warped spot (xw, yw), into `where`. */
+  private nearestCell(xw: number, yw: number): Where {
+    const gx = Math.floor(xw / REGION);
+    const gy = Math.floor(yw / REGION);
+    const c = this.cellsAt;
+    if (c.gx !== gx || c.gy !== gy) {
+      c.gx = gx;
+      c.gy = gy;
+      for (let n = 0; n < 9; n++) {
+        const i = gx + (n % 3) - 1;
+        const j = gy + Math.floor(n / 3) - 1;
+        c.px[n] = (i + 0.18 + this.h(i, j, 23) * 0.64) * REGION;
+        c.py[n] = (j + 0.18 + this.h(i, j, 25) * 0.64) * REGION;
+        c.biome[n] = this.biomeOfCell(i, j);
+      }
+    }
+    let d1 = 1e24;
+    let d2 = 1e24;
+    let n1 = 0;
+    let n2 = 0;
+    for (let n = 0; n < 9; n++) {
+      const dx = xw - c.px[n];
+      const dy = yw - c.py[n];
+      const d = dx * dx + dy * dy;
+      if (d < d1) {
+        d2 = d1;
+        n2 = n1;
+        d1 = d;
+        n1 = n;
+      } else if (d < d2) {
+        d2 = d;
+        n2 = n;
+      }
+    }
+    const w = this.where;
+    w.ci = gx + (n1 % 3) - 1;
+    w.cj = gy + Math.floor(n1 / 3) - 1;
+    w.a = c.biome[n1];
+    w.b = c.biome[n2];
+    w.w = w.a === w.b ? 0 : 0.5 * (1 - smooth(0, BAND, Math.sqrt(d2) - Math.sqrt(d1)));
+    return w;
+  }
+
+  /** The region at (x, y), with its warp already known (from `sample`). */
+  region(x: number, y: number, wx: number, wy: number): Where {
+    return this.nearestCell(x + wx, y + wy);
+  }
+
+  /** Which biome a single spot takes where two regions mingle: patches of each, not a line. */
+  biomeAt(x: number, y: number): number {
+    const s = this.sample(x, y);
+    const w = this.region(x, y, s.wx, s.wy);
+    if (w.w <= 0) return w.a;
+    const d = this.n(x, y, 11, 27) * 0.7 + this.h(x >> 1, y >> 1, 29) * 0.3;
+    return d < w.w ? w.b : w.a;
+  }
+
+  /** The region's name, for the banner when the hero walks into it. */
+  regionName(ci: number, cj: number): string {
+    const b = BIOMES[this.biomeOfCell(ci, cj)];
+    const [first, second] = b.names;
+    return `${first[Math.floor(this.h(ci, cj, 31) * first.length)]} ${second[Math.floor(this.h(ci, cj, 33) * second.length)]}`;
+  }
+
+  // ---------------------------------------------------------------- the land
+
+  /** The land's height at (x, y) in levels, smooth (warped by `wx`, `wy`; the crags are added on the lattice). */
+  private rise(x: number, y: number, wx: number, wy: number): number {
+    const w = this.nearestCell(x + wx, y + wy);
+    const hills = BIOMES[w.a].hills * (1 - w.w) + BIOMES[w.b].hills * w.w;
+    const k = hills * smooth(PLAIN_R, HILLS_R, Math.hypot(x - FOREST_MID, y - FOREST_MID));
+    if (k <= 0) return 0.5;
+    const v = this.n(x + wx, y + wy, HILL_SCALE, 81) * 0.78 + this.n(x + wx, y + wy, KNOLL_SCALE, 83) * 0.22;
+    return 0.5 + k * (v - 0.5) * RELIEF;
+  }
+
+  /**
+   * The lie of the land where `s` was sampled: which terrace, how far to
+   * the edges above and below, which way they face, and whether the spot is
+   * on a face, a slope or stairs. The result is reused: copy what must be kept.
+   */
+  terrain(s: Here): Terrain {
+    const t = this.ground;
+    const g = Math.hypot(s.rgx, s.rgy);
+    t.level = Math.floor(s.rise);
+    t.stairs = s.trail < STAIRS;
+    // Water never drops over a cliff: a stream or pond wears the edge down to a slope along its banks.
+    t.slope = t.stairs || s.trail < STAIR_SLOPE || s.slope > SLOPE_AT || Math.max(s.stream, s.pond) > -WATER_EASE;
+    if (g < 1e-7) {
+      t.up = t.down = Infinity;
+      t.facing = t.faceW = 0;
+      t.onFace = false;
+      return t;
+    }
+    const fu = s.rise - t.level;
+    t.up = (1 - fu) / g;
+    t.down = fu / g;
+    t.facing = -s.rgy / g;
+    t.faceW = faceWidth(t.facing);
+    t.onFace = t.up < t.faceW;
+    return t;
+  }
+
+  /** Is (x, y) on a cliff or within `pad` px of one (its face, its lip, or a slope where it eases)? */
+  edgeAt(x: number, y: number, pad = 0): boolean {
+    return this.nearEdge(this.sample(x, y), pad);
+  }
+
+  private nearEdge(s: Here, pad: number): boolean {
+    const t = this.terrain(s);
+    return t.up < Math.max(t.faceW, LIP) + pad || t.down < LIP + pad;
+  }
+
+  /** Does a cliff stop feet at (x, y)? Its face and its lip do, but not its slopes nor a trail's stairs. */
+  cliffAt(x: number, y: number): boolean {
+    return this.stops(this.sample(x, y));
+  }
+
+  private stops(s: Here): boolean {
+    if (!s.rgx && !s.rgy) return false;
+    const t = this.terrain(s);
+    return !t.slope && (t.onFace || t.up < LIP || t.down < LIP);
+  }
+
+  /** The terrace (x, y) is on: 0 the start's plain, each level a cliff up or down (for maps). */
+  levelAt(x: number, y: number): number {
+    return Math.floor(this.sample(x, y).rise);
+  }
+
+  /** The land's height at (x, y) in levels, smooth between the terraces' edges (for maps and shading). */
+  heightAt(x: number, y: number): number {
+    return this.sample(x, y).rise;
+  }
+
+  /** Does the land rise or fall a level anywhere in this box (with its lattice made)? Most of the forest is flat. */
+  reliefIn(x0: number, y0: number, x1: number, y1: number): boolean {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let cy = Math.floor(y0 / CHUNK); cy <= Math.floor(y1 / CHUNK); cy++) {
+      for (let cx = Math.floor(x0 / CHUNK); cx <= Math.floor(x1 / CHUNK); cx++) {
+        const f = this.fieldChunk(cx, cy);
+        const i0 = Math.max(0, Math.floor((x0 - cx * CHUNK) / NODE));
+        const i1 = Math.min(NN, Math.ceil((x1 - cx * CHUNK) / NODE));
+        const j0 = Math.max(0, Math.floor((y0 - cy * CHUNK) / NODE));
+        const j1 = Math.min(NN, Math.ceil((y1 - cy * CHUNK) / NODE));
+        for (let j = j0; j <= j1; j++) {
+          for (let i = i0; i <= i1; i++) {
+            const v = f[(j * NS + i) * NF + F_RISE];
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+          }
+        }
+      }
+    }
+    return Math.floor(lo) !== Math.floor(hi);
+  }
+
+  // ---------------------------------------------------------------- the lattice
+
+  /** One lattice node's fields, exactly (the raw stream and trail noise come from the caller, with their slopes). */
+  private node(x: number, y: number, out: Float32Array, o: number, sv: number, sgx: number, sgy: number, tv: number, tgx: number, tgy: number, wx: number, wy: number, hv: number, rgx: number, rgy: number, pois: boolean): void {
+    const where = this.nearestCell(x + wx, y + wy);
+    const A = BIOMES[where.a];
+    const B = BIOMES[where.b];
+    const w = where.w;
+    const mixB = (f: (b: Biome) => number) => f(A) * (1 - w) + f(B) * w;
+
+    // Streams: where the noise crosses its middle, as wide as a second noise says, only in the wetter lands.
+    const sg = Math.max(Math.hypot(sgx, sgy), 0.00035);
+    const presence = smooth(0.36, 0.52, this.n(x, y, 1100, 41));
+    const hw = presence * (3.4 + 3.6 * this.n(x, y, 260, 43));
+    const stream = hw - Math.abs(sv - 0.5) / sg - (1 - presence) * 30;
+    // Trails likewise, everywhere.
+    const tg = Math.max(Math.hypot(tgx, tgy), 0.00035);
+    const trail = Math.abs(tv - 0.5) / tg - (3 + 1.6 * this.n(x, y, 140, 45));
+    // Ponds: the peaks of their own noise.
+    const pv = this.n(x, y, 180, 47) * 0.7 + this.n(x, y, 54, 49) * 0.3;
+    const pond = (pv - 0.8 - mixB((b) => b.ponds)) * 150;
+    const ford = smooth(0.68, 0.74, this.n(x, y, 85, 51));
+
+    // Groves, drawn back from the trails, the water and the places.
+    const rv = this.n(x, y, 165, 53) * 0.84 + this.n(x, y, 56, 55) * 0.16;
+    let grove = (rv - mixB((b) => b.grove) - GROVE_LIFT) * 170 + (this.n(x, y, 19, 59) - 0.5) * 14;
+    grove -= Math.max(0, 22 - trail) * 2.2;
+    grove -= Math.max(0, 20 + Math.max(stream, pond)) * 2;
+    if (pois) {
+      for (const p of this.poisNear(x, y)) {
+        const d = Math.hypot(x - p.x, (y - p.y) * 1.2);
+        grove -= Math.max(0, p.r + 36 - d) * 2.2;
+      }
+    }
+    // The land: crags wander the edges a few px either way (scaled by the slope, so it's px on any hill);
+    // groves keep back from the cliffs, so their crowns don't hide the rock.
+    const rg = Math.hypot(rgx, rgy);
+    const rise = hv + (this.n(x, y, 13, 85) - 0.5) * 2 * CRAG * rg;
+    if (rg > 1e-7) {
+      const fu = rise - Math.floor(rise);
+      grove -= Math.max(0, faceWidth(-rgy / rg) + 12 - (1 - fu) / rg) * 2.4 + Math.max(0, 12 - fu / rg) * 2.4;
+    }
+
+    out[o + F_WX] = wx;
+    out[o + F_WY] = wy;
+    out[o + F_GROVE] = grove;
+    out[o + F_STREAM] = stream;
+    out[o + F_POND] = pond;
+    out[o + F_TRAIL] = trail;
+    out[o + F_FORD] = ford;
+    out[o + F_TGX] = tgx / tg;
+    out[o + F_TGY] = tgy / tg;
+    out[o + F_SGX] = sgx / sg;
+    out[o + F_SGY] = sgy / sg;
+    out[o + F_RISE] = rise;
+    out[o + F_RGX] = rgx;
+    out[o + F_RGY] = rgy;
+    out[o + F_SLOPE] = this.n(x + wx, y + wy, 150, 87);
+  }
+
+  private streamNoise(xw: number, yw: number): number {
+    return this.n(xw, yw, 470, 61) * 0.8 + this.n(xw, yw, 150, 63) * 0.2;
+  }
+
+  private trailNoise(xw: number, yw: number): number {
+    return this.n(xw, yw, 330, 65) * 0.84 + this.n(xw, yw, 95, 67) * 0.16;
+  }
+
+  /** A chunk's lattice: every node's fields, the slopes taken from the nodes either side. */
+  private fieldChunk(cx: number, cy: number): Float32Array {
+    const key = key2(cx, cy);
+    const had = this.fields.get(key);
+    if (had) return had;
+    const M = NS + 2;
+    const sv = new Float32Array(M * M);
+    const tv = new Float32Array(M * M);
+    const wxs = new Float32Array(M * M);
+    const wys = new Float32Array(M * M);
+    const rv = new Float32Array(M * M);
+    const x0 = cx * CHUNK;
+    const y0 = cy * CHUNK;
+    for (let j = 0; j < M; j++) {
+      for (let i = 0; i < M; i++) {
+        const x = x0 + (i - 1) * NODE;
+        const y = y0 + (j - 1) * NODE;
+        const wx = this.warpX(x, y);
+        const wy = this.warpY(x, y);
+        const r = j * M + i;
+        wxs[r] = wx;
+        wys[r] = wy;
+        sv[r] = this.streamNoise(x + wx, y + wy);
+        tv[r] = this.trailNoise(x + wx, y + wy);
+        rv[r] = this.rise(x, y, wx, wy);
+      }
+    }
+    const f = new Float32Array(NS * NS * NF);
+    for (let j = 0; j < NS; j++) {
+      for (let i = 0; i < NS; i++) {
+        const r = (j + 1) * M + i + 1;
+        const sgx = (sv[r + 1] - sv[r - 1]) / (2 * NODE);
+        const sgy = (sv[r + M] - sv[r - M]) / (2 * NODE);
+        const tgx = (tv[r + 1] - tv[r - 1]) / (2 * NODE);
+        const tgy = (tv[r + M] - tv[r - M]) / (2 * NODE);
+        const rgx = (rv[r + 1] - rv[r - 1]) / (2 * NODE);
+        const rgy = (rv[r + M] - rv[r - M]) / (2 * NODE);
+        this.node(x0 + i * NODE, y0 + j * NODE, f, (j * NS + i) * NF, sv[r], sgx, sgy, tv[r], tgx, tgy, wxs[r], wys[r], rv[r], rgx, rgy, true);
+      }
+    }
+    this.fields.set(key, f);
+    this.fresh?.fields.push([cx, cy, f]);
+    return f;
+  }
+
+  /**
+   * Keep a note of every field chunk and layout made from here on (a worker
+   * does, to hand them to the main thread, which then needn't make them too).
+   */
+  noteFresh(): void {
+    this.fresh = { fields: [], layouts: [] };
+  }
+
+  /** What was made since the last call (see `noteFresh`). */
+  takeFresh(): FreshWork {
+    const f = this.fresh ?? { fields: [], layouts: [] };
+    if (this.fresh) this.fresh = { fields: [], layouts: [] };
+    return f;
+  }
+
+  /** Take what a worker made, where this side hasn't made it itself. */
+  adopt(w: FreshWork): void {
+    for (const [cx, cy, f] of w.fields) if (!this.fields.has(key2(cx, cy))) this.fields.set(key2(cx, cy), f);
+    for (const l of w.layouts) if (!this.layouts.has(key2(l.cx, l.cy))) this.layouts.set(key2(l.cx, l.cy), { ...l, blockers: null });
+  }
+
+  /** Is this chunk's lattice made yet? (The world makes them ahead, a little each frame.) */
+  hasFields(cx: number, cy: number): boolean {
+    return this.fields.has(key2(cx, cy));
+  }
+
+  /** Make a chunk's lattice now, if it isn't. */
+  prepare(cx: number, cy: number): void {
+    this.fieldChunk(cx, cy);
+  }
+
+  /** The fields at (x, y), blended from the lattice. The result is reused: copy what must be kept. */
+  sample(x: number, y: number): Here {
+    const cx = Math.floor(x / CHUNK);
+    const cy = Math.floor(y / CHUNK);
+    const key = key2(cx, cy);
+    let f = this.lastF;
+    if (key !== this.lastKey || !f) {
+      f = this.fieldChunk(cx, cy);
+      this.lastKey = key;
+      this.lastF = f;
+    }
+    const lx = (x - cx * CHUNK) / NODE;
+    const ly = (y - cy * CHUNK) / NODE;
+    const i = Math.min(NN - 1, Math.floor(lx));
+    const j = Math.min(NN - 1, Math.floor(ly));
+    const u = lx - i;
+    const v = ly - j;
+    const a = (j * NS + i) * NF;
+    const b = a + NF;
+    const c = a + NS * NF;
+    const d = c + NF;
+    const k00 = (1 - u) * (1 - v);
+    const k10 = u * (1 - v);
+    const k01 = (1 - u) * v;
+    const k11 = u * v;
+    const at = (q: number) => f![a + q] * k00 + f![b + q] * k10 + f![c + q] * k01 + f![d + q] * k11;
+    const h = this.here;
+    h.wx = at(F_WX);
+    h.wy = at(F_WY);
+    h.grove = at(F_GROVE);
+    h.stream = at(F_STREAM);
+    h.pond = at(F_POND);
+    h.trail = at(F_TRAIL);
+    h.ford = at(F_FORD);
+    h.tgx = at(F_TGX);
+    h.tgy = at(F_TGY);
+    h.sgx = at(F_SGX);
+    h.sgy = at(F_SGY);
+    h.rise = at(F_RISE);
+    h.rgx = at(F_RGX);
+    h.rgy = at(F_RGY);
+    h.slope = at(F_SLOPE);
+    return h;
+  }
+
+  /** The fields at one spot, straight from the noise (for the start and the places, which the lattice itself waits on). */
+  private exact(x: number, y: number): Here {
+    const e = 2;
+    const wx = this.warpX(x, y);
+    const wy = this.warpY(x, y);
+    const at = (fn: (a: number, b: number) => number, dx: number, dy: number) => fn.call(this, x + dx + this.warpX(x + dx, y + dy), y + dy + this.warpY(x + dx, y + dy));
+    const sv = this.streamNoise(x + wx, y + wy);
+    const tv = this.trailNoise(x + wx, y + wy);
+    const sgx = (at(this.streamNoise, e, 0) - at(this.streamNoise, -e, 0)) / (2 * e);
+    const sgy = (at(this.streamNoise, 0, e) - at(this.streamNoise, 0, -e)) / (2 * e);
+    const tgx = (at(this.trailNoise, e, 0) - at(this.trailNoise, -e, 0)) / (2 * e);
+    const tgy = (at(this.trailNoise, 0, e) - at(this.trailNoise, 0, -e)) / (2 * e);
+    const rr = (px: number, py: number) => this.rise(px, py, this.warpX(px, py), this.warpY(px, py));
+    const rgx = (rr(x + e, y) - rr(x - e, y)) / (2 * e);
+    const rgy = (rr(x, y + e) - rr(x, y - e)) / (2 * e);
+    const f = new Float32Array(NF);
+    this.node(x, y, f, 0, sv, sgx, sgy, tv, tgx, tgy, wx, wy, this.rise(x, y, wx, wy), rgx, rgy, false);
+    return {
+      wx: f[F_WX],
+      wy: f[F_WY],
+      grove: f[F_GROVE],
+      stream: f[F_STREAM],
+      pond: f[F_POND],
+      trail: f[F_TRAIL],
+      ford: f[F_FORD],
+      tgx: f[F_TGX],
+      tgy: f[F_TGY],
+      sgx: f[F_SGX],
+      sgy: f[F_SGY],
+      rise: f[F_RISE],
+      rgx: f[F_RGX],
+      rgy: f[F_RGY],
+      slope: f[F_SLOPE],
+    };
+  }
+
+  // ---------------------------------------------------------------- the start
+
+  /**
+   * Where the heroes start: on a trail near the middle of the world, in the
+   * open, well away from water. A campfire burns beside it.
+   */
+  spawn(): { x: number; y: number } {
+    if (this.start) return this.start;
+    let best: { x: number; y: number } | null = null;
+    for (let r = 0; r < 1400 && !best; r += 10) {
+      const steps = Math.max(1, Math.round((r * Math.PI * 2) / 14));
+      for (let s = 0; s < steps; s++) {
+        const a = (s / steps) * Math.PI * 2;
+        const x = Math.round(FOREST_MID + Math.cos(a) * r);
+        const y = Math.round(FOREST_MID + Math.sin(a) * r);
+        const e = this.exact(x, y);
+        if (e.trail > -1 || e.trail < -3 || e.grove > -40 || Math.max(e.stream, e.pond) > -44 || this.nearEdge(e, 40)) continue;
+        // Room for the campfire on the open side.
+        const fx = x + e.tgx * 34;
+        const fy = y + e.tgy * 34;
+        const f = this.exact(fx, fy);
+        if (f.trail < 10 || Math.max(f.stream, f.pond) > -30 || f.grove > -30 || this.nearEdge(f, 30)) continue;
+        best = { x, y };
+        this.startFire = { id: -1, kind: 'campfire', x: Math.round(fx), y: Math.round(fy), r: POI_R.campfire, biome: BIOMES[START_BIOME].id };
+        break;
+      }
+    }
+    this.start = best ?? { x: FOREST_MID, y: FOREST_MID };
+    return this.start;
+  }
+
+  // ---------------------------------------------------------------- places
+
+  /** The place in POI cell (i, j), if it has one. */
+  private poiIn(i: number, j: number): Poi | null {
+    const key = key2(i, j);
+    const had = this.poiCells.get(key);
+    if (had !== undefined) return had;
+    let poi: Poi | null = null;
+    this.spawn();
+    const fire = this.startFire;
+    if (fire && Math.floor(fire.x / POI_CELL) === i && Math.floor(fire.y / POI_CELL) === j) {
+      poi = fire;
+    } else if (this.h(i, j, 71) < 0.74) {
+      let r = this.h(i, j, 73) * POI_WEIGHTS.reduce((s, p) => s + p[1], 0);
+      let kind: PoiKind = 'campfire';
+      for (const [k, wt] of POI_WEIGHTS) {
+        r -= wt;
+        if (r < 0) {
+          kind = k;
+          break;
+        }
+      }
+      const rad = POI_R[kind];
+      for (let t = 0; t < 4 && !poi; t++) {
+        const x = Math.round((i + 0.18 + this.h(i, j, 75 + t) * 0.64) * POI_CELL);
+        const y = Math.round((j + 0.18 + this.h(i, j, 79 + t) * 0.64) * POI_CELL);
+        // Not too near the start: its own campfire is enough there.
+        if (fire && Math.hypot(x - fire.x, y - fire.y) < 300) continue;
+        const e = this.exact(x, y);
+        if (Math.max(e.stream, e.pond) > -(rad + 12) || e.trail < 6 || this.nearEdge(e, rad + 14)) continue;
+        const w = this.nearestCell(x + e.wx, y + e.wy);
+        const biome = BIOMES[w.a].id;
+        // An elder tree wants a wood about it, not a meadow.
+        const k: PoiKind = kind === 'elder' && biome === 'meadow' ? 'stones' : kind;
+        poi = { id: key, kind: k, x, y, r: POI_R[k], biome };
+      }
+    }
+    this.poiCells.set(key, poi);
+    return poi;
+  }
+
+  /** Places whose glade might reach (x, y). */
+  poisNear(x: number, y: number): Poi[] {
+    const out: Poi[] = [];
+    this.near(x, y, POI_CELL, (i, j) => this.poiIn(i, j), out);
+    this.near(x, y, LOOK_CELL, (i, j) => this.lookoutIn(i, j), out);
+    this.near(x, y, WILD_CELL, (i, j) => this.wildIn(i, j), out);
+    return out;
+  }
+
+  private near(x: number, y: number, cell: number, at: (i: number, j: number) => Poi | null, out: Poi[]): void {
+    for (let j = Math.floor((y - 130) / cell); j <= Math.floor((y + 130) / cell); j++) {
+      for (let i = Math.floor((x - 130) / cell); i <= Math.floor((x + 130) / cell); i++) {
+        const p = at(i, j);
+        if (p && Math.abs(p.x - x) < p.r + 60 && Math.abs(p.y - y) < p.r + 60) out.push(p);
+      }
+    }
+  }
+
+  /** Places in a box, for a ground tile's floor and glow. */
+  poisIn(x0: number, y0: number, x1: number, y1: number): Poi[] {
+    const out: Poi[] = [];
+    for (const [cell, at] of [
+      [POI_CELL, (i: number, j: number) => this.poiIn(i, j)],
+      [LOOK_CELL, (i: number, j: number) => this.lookoutIn(i, j)],
+      [WILD_CELL, (i: number, j: number) => this.wildIn(i, j)],
+    ] as const) {
+      for (let j = Math.floor((y0 - 80) / cell); j <= Math.floor((y1 + 80) / cell); j++) {
+        for (let i = Math.floor((x0 - 80) / cell); i <= Math.floor((x1 + 80) / cell); i++) {
+          const p = at(i, j);
+          if (p && p.x + p.r + 20 > x0 && p.x - p.r - 20 < x1 && p.y + p.r + 20 > y0 && p.y - p.r - 20 < y1) out.push(p);
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * The lookout in lookout cell (i, j), if it has one: a spot on high ground
+   * at the lip of a cliff that faces south, where the hero can stand and
+   * look out over the treetops below. Found by walking from a few spots in
+   * the cell down the slope to the nearest such lip.
+   */
+  private lookoutIn(i: number, j: number): Poi | null {
+    const key = key2(i, j);
+    const had = this.lookCells.get(key);
+    if (had !== undefined) return had;
+    let poi: Poi | null = null;
+    for (let t = 0; t < 8 && !poi && this.h(i, j, 171) < 0.7; t++) {
+      const x0 = (i + 0.15 + this.h(i, j, 173 + t) * 0.7) * LOOK_CELL;
+      const y0 = (j + 0.15 + this.h(i, j, 179 + t) * 0.7) * LOOK_CELL;
+      const e0 = this.exact(x0, y0);
+      const g0 = Math.hypot(e0.rgx, e0.rgy);
+      // Somewhere on a hillside, its slope falling to the south.
+      if (g0 < 1e-5 || -e0.rgy / g0 < 0.55) continue;
+      const down = (e0.rise - Math.floor(e0.rise)) / g0;
+      if (down > 220) continue;
+      // To the lip, then back from it a step.
+      const x = Math.round(x0 - (e0.rgx / g0) * (down - LOOK_BACK));
+      const y = Math.round(y0 - (e0.rgy / g0) * (down - LOOK_BACK));
+      const e = this.exact(x, y);
+      const g = Math.hypot(e.rgx, e.rgy);
+      if (g < 1e-5 || Math.floor(e.rise) !== Math.floor(e0.rise) || -e.rgy / g < 0.6) continue;
+      const lip = (e.rise - Math.floor(e.rise)) / g;
+      if (lip < 7 || lip > 18 || (1 - (e.rise - Math.floor(e.rise))) / g < 40) continue;
+      // Open, dry ground with nothing else about, and no trail climbing past.
+      if (Math.max(e.stream, e.pond) > -30 || e.trail < 12 || e.slope > SLOPE_AT - 0.04) continue;
+      const busy: Poi[] = [];
+      this.near(x, y, POI_CELL, (a, b) => this.poiIn(a, b), busy);
+      if (busy.some((p) => Math.hypot(p.x - x, p.y - y) < p.r + 70)) continue;
+      const w = this.nearestCell(x + e.wx, y + e.wy);
+      // Its id stays clear of the other places' (theirs are positive, the start's camp is -1).
+      poi = { id: -2 - key, kind: 'lookout', x, y, r: POI_R.lookout, biome: BIOMES[w.a].id };
+    }
+    this.lookCells.set(key, poi);
+    return poi;
+  }
+
+  /**
+   * The wild place in wild cell (i, j), if it has one: on dry, level ground
+   * off the trails, clear of the older places. A wood can change which:
+   * the hollows grow glowcaps where others have a glade, a meadow is all
+   * glade, and a pine wood is too dry for brambles.
+   */
+  private wildIn(i: number, j: number): Poi | null {
+    const key = key2(i, j);
+    const had = this.wildCells.get(key);
+    if (had !== undefined) return had;
+    let poi: Poi | null = null;
+    const start = this.spawn();
+    if (this.h(i, j, 191) < WILD_CHANCE) {
+      const want = this.pick(WILD_WEIGHTS, this.h(i * 7 + 3, j * 13 + 5, 4111));
+      for (let t = 0; t < 8 && !poi; t++) {
+        const x = Math.round((i + 0.16 + this.h(i, j, 4200 + t * 7) * 0.68) * WILD_CELL);
+        const y = Math.round((j + 0.16 + this.h(i, j, 4300 + t * 7) * 0.68) * WILD_CELL);
+        if (Math.hypot(x - start.x, y - start.y) < 360) continue;
+        const e = this.exact(x, y);
+        const biome = BIOMES[this.nearestCell(x + e.wx, y + e.wy).a].id;
+        let kind: WildKind = want;
+        if (biome === 'hollow' && kind === 'glade') kind = 'glowcaps';
+        else if (biome === 'meadow' && kind === 'glowcaps') kind = 'glade';
+        else if (biome === 'pine' && kind === 'brambles') kind = 'camp';
+        const rad = POI_R[kind];
+        // A bog keeps to the wet ground by a stream or pond; the rest to dry.
+        const water = Math.max(e.stream, e.pond);
+        if ((kind === 'bog' ? water > -(rad * 0.6) || water < -110 : water > -(rad + 10)) || e.trail < 8 || this.nearEdge(e, rad + 8)) continue;
+        const busy: Poi[] = [];
+        this.near(x, y, POI_CELL, (a, b) => this.poiIn(a, b), busy);
+        this.near(x, y, LOOK_CELL, (a, b) => this.lookoutIn(a, b), busy);
+        if (busy.some((p) => Math.hypot(p.x - x, p.y - y) < p.r + rad + 24)) continue;
+        poi = { id: WILD_ID + key, kind, x, y, r: rad, biome };
+      }
+    }
+    this.wildCells.set(key, poi);
+    return poi;
+  }
+
+  // ---------------------------------------------------------------- trees
+
+  private pick<T>(list: [T, number][], r: number): T {
+    let total = 0;
+    for (const [, w] of list) total += w;
+    let t = r * total;
+    for (const [v, w] of list) {
+      t -= w;
+      if (t < 0) return v;
+    }
+    return list[0][0];
+  }
+
+  /** The tree in tree cell (i, j), if any. */
+  treeAt(i: number, j: number): FTree | null {
+    const x = Math.round((i + 0.2 + this.h(i, j, 101) * 0.6) * TREE_CELL);
+    const y = Math.round((j + 0.2 + this.h(i, j, 103) * 0.6) * TREE_CELL);
+    const s = this.sample(x, y);
+    const water = Math.max(s.stream, s.pond);
+    if (water > -8 || s.trail < 8) return null;
+    // Not on a cliff's face nor right at its lip; but they crowd the tops of the cliffs, crowns over the drop.
+    const land = this.terrain(s);
+    if (land.onFace || land.up < 4 || land.down < 5) return null;
+    // A step back from the foot of a face turned to the viewer, so crowns don't hide the rock.
+    if (land.facing > 0.3 && land.up - land.faceW < CLIFF_FOOT) return null;
+    const brink = land.facing > 0.3 && land.down < 34;
+    const start = this.spawn();
+    if (Math.hypot(x - start.x, y - start.y) < 46 || (y > start.y && y - start.y < TREE_SHADE && Math.abs(x - start.x) < 60)) return null;
+    for (const p of this.poisNear(x, y)) {
+      // A glade is open to the sky: the trees stand further back from it.
+      const open = p.kind === 'glade' ? GLADE_OPEN : 0;
+      if (Math.hypot(x - p.x, (y - p.y) * 1.2) < p.r + 6 + open) return null;
+      // Nor just below one, where its crown would hide the place.
+      if (y > p.y && y - p.y < TREE_SHADE + open && Math.abs(x - p.x) < p.r + 24) return null;
+    }
+    // A lookout keeps its view: a widening wedge down the drop in front of it.
+    for (let lj = Math.floor((y - LOOK_VIEW) / LOOK_CELL); lj <= Math.floor((y + 10) / LOOK_CELL); lj++) {
+      for (let li = Math.floor((x - 140) / LOOK_CELL); li <= Math.floor((x + 140) / LOOK_CELL); li++) {
+        const p = this.lookoutIn(li, lj);
+        if (p && y > p.y - 10 && y - p.y < LOOK_VIEW && Math.abs(x - p.x) < 34 + (y - p.y) * 0.6) return null;
+      }
+    }
+    const biome = BIOMES[this.biomeAt(x, y)];
+    let chance = biome.trees * (0.5 + 0.95 * this.n(x, y, 120, 105));
+    // Trees stand close in a grove, thickest at its heart.
+    if (s.grove > -20) chance = Math.max(chance, GROVE_TREES * smooth(-20, 40, s.grove) + 0.12);
+    if (brink) chance = Math.max(chance, 0.16);
+    // Willows lean over the water.
+    const bank = water > -26 && biome.id !== 'pine';
+    if (bank) chance = Math.max(chance, 0.18);
+    if (this.h(i, j, 107) >= chance) return null;
+    const kind: WoodKind = bank && this.h(i, j, 109) < 0.6 ? 'willow' : this.pick(biome.kinds, this.h(i, j, 111));
+    return { x, y, kind, v: Math.floor(this.h(i, j, 113) * 3), flip: this.h(i, j, 115) < 0.5 };
+  }
+
+  // ---------------------------------------------------------------- chunks
+
+  /** Everything that stands in chunk (cx, cy). */
+  layout(cx: number, cy: number): ChunkLayout {
+    const key = key2(cx, cy);
+    const had = this.layouts.get(key);
+    if (had) return had;
+    const x0 = cx * CHUNK;
+    const y0 = cy * CHUNK;
+    const x1 = x0 + CHUNK;
+    const y1 = y0 + CHUNK;
+
+    // Trees whose foot is in the chunk; the cells either side are kept too, for the undergrowth to keep clear of.
+    const trees: FTree[] = [];
+    const near = new Map<number, FTree | null>();
+    const treeCell = (i: number, j: number) => {
+      const k = key2(i, j);
+      if (!near.has(k)) near.set(k, this.treeAt(i, j));
+      return near.get(k)!;
+    };
+    for (let j = Math.floor(y0 / TREE_CELL) - 1; j <= Math.floor(y1 / TREE_CELL) + 1; j++) {
+      for (let i = Math.floor(x0 / TREE_CELL) - 1; i <= Math.floor(x1 / TREE_CELL) + 1; i++) {
+        const t = treeCell(i, j);
+        if (t && t.x >= x0 && t.x < x1 && t.y >= y0 && t.y < y1) trees.push(t);
+      }
+    }
+
+    // Undergrowth.
+    const props: FProp[] = [];
+    for (let j = Math.floor(y0 / PROP_CELL); j < Math.ceil(y1 / PROP_CELL); j++) {
+      for (let i = Math.floor(x0 / PROP_CELL); i < Math.ceil(x1 / PROP_CELL); i++) {
+        const x = Math.round((i + 0.15 + this.h(i, j, 121) * 0.7) * PROP_CELL);
+        const y = Math.round((j + 0.15 + this.h(i, j, 123) * 0.7) * PROP_CELL);
+        if (x < x0 || x >= x1 || y < y0 || y >= y1) continue;
+        const p = this.propAt(i, j, x, y, treeCell);
+        if (p) props.push(p);
+      }
+    }
+
+    // Places whose middle is here.
+    const pois: Poi[] = [];
+    for (const [cell, at] of [
+      [POI_CELL, (i: number, j: number) => this.poiIn(i, j)],
+      [LOOK_CELL, (i: number, j: number) => this.lookoutIn(i, j)],
+      [WILD_CELL, (i: number, j: number) => this.wildIn(i, j)],
+    ] as const) {
+      for (let j = Math.floor(y0 / cell); j <= Math.floor((y1 - 1) / cell); j++) {
+        for (let i = Math.floor(x0 / cell); i <= Math.floor((x1 - 1) / cell); i++) {
+          const p = at(i, j);
+          if (p && p.x >= x0 && p.x < x1 && p.y >= y0 && p.y < y1) pois.push(p);
+        }
+      }
+    }
+
+    // Shafts of light into the glades.
+    const rays: ChunkLayout['rays'] = [];
+    for (let j = Math.floor(y0 / RAY_CELL); j <= Math.floor((y1 - 1) / RAY_CELL); j++) {
+      for (let i = Math.floor(x0 / RAY_CELL); i <= Math.floor((x1 - 1) / RAY_CELL); i++) {
+        if (this.h(i, j, 131) > 0.34) continue;
+        const x = Math.round((i + 0.2 + this.h(i, j, 133) * 0.6) * RAY_CELL);
+        const y = Math.round((j + 0.2 + this.h(i, j, 135) * 0.6) * RAY_CELL);
+        if (x < x0 || x >= x1 || y < y0 || y >= y1) continue;
+        const s = this.sample(x, y);
+        if (s.grove > -14 || Math.max(s.stream, s.pond) > -2 || this.nearEdge(s, 4)) continue;
+        rays.push({ x, y, seed: Math.floor(this.h(i, j, 137) * 100) });
+      }
+    }
+
+    // A creature or two.
+    const spots: FSpot[] = [];
+    const start = this.spawn();
+    for (let k = 0; k < SPOTS_PER_CHUNK; k++) {
+      if (this.h(cx, cy, 141 + k) > 0.33) continue;
+      const x = Math.round(x0 + 24 + this.h(cx, cy, 145 + k) * (CHUNK - 48));
+      const y = Math.round(y0 + 24 + this.h(cx, cy, 149 + k) * (CHUNK - 48));
+      if (Math.hypot(x - start.x, y - start.y) < QUIET_START) continue;
+      const s = this.sample(x, y);
+      const water = Math.max(s.stream, s.pond);
+      if (s.grove > -14 || water > -6 || this.nearEdge(s, 10)) continue;
+      if (this.poisNear(x, y).some((p) => Math.hypot(x - p.x, y - p.y) < p.r + 10)) continue;
+      const biome = BIOMES[this.biomeAt(x, y)];
+      const kind: ForestMonster = water > -40 && this.h(cx, cy, 153 + k) < 0.6 ? 'frog' : this.pick(biome.monsters, this.h(cx, cy, 157 + k));
+      spots.push({ id: (((cx & 0xfff) * 4096 + (cy & 0xfff)) * 4 + k), kind, x, y });
+    }
+
+    // What stops feet.
+    const own: Blocker[] = [];
+    for (const t of trees) own.push({ x: t.x, y: t.y - 1, rx: WOOD_SHAPE[t.kind].trunk + 1, ry: 3, of: footKey(t.x, t.y) });
+    for (const p of props) {
+      const b = PROP_BLOCK[p.kind];
+      if (b) own.push({ x: p.kind === 'log' ? p.x + (p.flip ? -1 : 1) : p.x, y: p.y - 2, rx: b[0], ry: b[1], of: footKey(p.x, p.y) });
+    }
+    for (const p of pois) own.push(...poiBlockers(p, this));
+
+    const out: ChunkLayout = { cx, cy, trees, props, pois, rays, spots, blockers: null, own };
+    this.layouts.set(key, out);
+    this.fresh?.layouts.push(out);
+    return out;
+  }
+
+  /** The undergrowth in prop cell (i, j), at (x, y), if any. */
+  private propAt(i: number, j: number, x: number, y: number, treeCell: (i: number, j: number) => FTree | null): FProp | null {
+    const s = this.sample(x, y);
+    if (s.trail < 3) return null;
+    const land = this.terrain(s);
+    if (land.onFace || land.up < 3 || land.down < 3) return null;
+    // Rock fallen from a cliff lies at its foot, ferns in its shade.
+    const foot = land.facing > 0.3 && land.up - land.faceW < 9;
+    const water = Math.max(s.stream, s.pond);
+    const r = this.h(i, j, 161);
+    const v = Math.floor(this.h(i, j, 163) * 4);
+    const flip = this.h(i, j, 165) < 0.5;
+    // Reeds along the banks.
+    if (water > -6 && water < -1.2) return r < 0.55 ? { x, y, kind: 'reeds', v, flip } : null;
+    if (water > -8) return null;
+    for (const p of this.poisNear(x, y)) if (Math.hypot(x - p.x, (y - p.y) * 1.2) < p.r) return null;
+    const start = this.spawn();
+    if (Math.hypot(x - start.x, y - start.y) < 20) return null;
+    const ti = Math.floor(x / TREE_CELL);
+    const tj = Math.floor(y / TREE_CELL);
+    for (let b = -1; b <= 1; b++) {
+      for (let a = -1; a <= 1; a++) {
+        const t = treeCell(ti + a, tj + b);
+        if (t && Math.abs(t.x - x) < 10 && Math.abs(t.y - y) < 7) return null;
+      }
+    }
+    if (foot && r < 0.5) return { x, y, kind: r < 0.14 ? 'boulder' : r < 0.32 ? 'rock' : 'fern', v, flip };
+    const biome = BIOMES[this.biomeAt(x, y)];
+    // A grove is crowded with ferns and bushes between its trunks.
+    if (s.grove > -22) {
+      if (r > 0.34) return null;
+      return { x, y, kind: r < 0.17 ? 'fern' : biome.id === 'hollow' ? 'glowcap' : 'bush', v, flip };
+    }
+    const chance = biome.props * (0.6 + this.n(x, y, 60, 167) * 0.8);
+    if (r >= chance) return null;
+    return { x, y, kind: this.pick(biome.undergrowth, this.h(i, j, 169)), v, flip };
+  }
+
+  /** Everything that stops feet in a chunk, its neighbours' included where they reach in. */
+  blockers(cx: number, cy: number): Blocker[] {
+    const l = this.layout(cx, cy);
+    if (l.blockers) return l.blockers;
+    const x0 = cx * CHUNK;
+    const y0 = cy * CHUNK;
+    const list: Blocker[] = [];
+    for (let j = -1; j <= 1; j++) {
+      for (let i = -1; i <= 1; i++) {
+        const src = i === 0 && j === 0 ? l.own : this.layout(cx + i, cy + j).own;
+        for (const b of src) if (b.x + b.rx > x0 - 1 && b.x - b.rx < x0 + CHUNK + 1 && b.y + b.ry > y0 - 1 && b.y - b.ry < y0 + CHUNK + 1) list.push(b);
+      }
+    }
+    l.blockers = list;
+    return list;
+  }
+
+  /** Can feet stand at (x, y)? */
+  walkable(x: number, y: number): boolean {
+    if (x < 16 || y < 16 || x > FOREST_WORLD - 16 || y > FOREST_WORLD - 16) return false;
+    const s = this.sample(x, y);
+    if (this.stops(s)) return false;
+    const water = Math.max(s.stream, s.pond);
+    // On a bridge the player built, only the bridge itself (its rails) and what else they built can stop feet.
+    if (this.bridged?.(x, y)) return !this.built?.(x, y);
+    // Water stops feet, but for a bridge, or a ford's shallows.
+    if (water > 0.5 && s.trail > 0.5 && !(s.ford > 0.5 && s.stream >= s.pond)) return false;
+    const hit = (b: Blocker) => ((x - b.x) / b.rx) ** 2 + ((y - b.y) / b.ry) ** 2 < 1;
+    const cleared = this.cleared;
+    for (const b of this.blockers(Math.floor(x / CHUNK), Math.floor(y / CHUNK))) {
+      if (hit(b) && !(this.glades.length && this.inGlade(b.x, b.y)) && !(cleared && b.of !== undefined && cleared.has(b.of))) return false;
+    }
+    if (this.built?.(x, y)) return false;
+    for (const g of this.glades) for (const b of g.blocks) if (hit(b)) return false;
+    return true;
+  }
+
+  /**
+   * What the player has changed (see forestEdits.ts): the trees and
+   * undergrowth they cleared, by foot key, and what they built that stops
+   * feet. The ground's painters only need the first.
+   */
+  cleared: Set<number> | null = null;
+  built: ((x: number, y: number) => boolean) | null = null;
+  /** Is (x, y) on the deck of a bridge the player built (see bridge.ts)? Feet cross water there. */
+  bridged: ((x: number, y: number) => boolean) | null = null;
+
+  /** Has the player cleared the tree or undergrowth standing at (x, y)? */
+  isCleared(x: number, y: number): boolean {
+    return !!this.cleared && this.cleared.has(footKey(x, y));
+  }
+
+  /** Open a glade at (x, y), radius `r`, with its place's own `blocks`. */
+  addGlade(x: number, y: number, r: number, blocks: Blocker[]): void {
+    this.glades.push({ x, y, r, blocks });
+  }
+
+  /** Is (x, y) inside a glade the stag opened? */
+  inGlade(x: number, y: number): boolean {
+    for (const g of this.glades) if ((x - g.x) ** 2 + (y - g.y) ** 2 < g.r * g.r) return true;
+    return false;
+  }
+
+  /** Has chunk (cx, cy)'s layout been made? */
+  hasLayout(cx: number, cy: number): boolean {
+    return this.layouts.has(key2(cx, cy));
+  }
+
+  /** Where a monster spot's id says it is (the host names monsters by it). */
+  spotById(id: number): FSpot | null {
+    // Chunk coordinates are within 0..4095 in this world (see `layout`).
+    const cell = Math.floor(id / 4);
+    return this.layout(Math.floor(cell / 4096), cell % 4096).spots.find((s) => s.id === id) ?? null;
+  }
+}
+
+// ---------------------------------------------------------------- the places' pieces
+
+/** Ruins: pillars round a broken floor, a wall or two, from the place's own hash. */
+export function ruinPieces(p: Poi): { kind: 'pillar' | 'wall_h' | 'wall_v'; x: number; y: number; v: number }[] {
+  const out: { kind: 'pillar' | 'wall_h' | 'wall_v'; x: number; y: number; v: number }[] = [];
+  const h = (k: number) => hash2(p.x, p.y, 900 + k);
+  const n = 5 + Math.floor(h(1) * 3);
+  const turn = h(2) * Math.PI * 2;
+  for (let k = 0; k < n; k++) {
+    // Some of the ring has fallen: skip a pillar now and then.
+    if (h(10 + k) < 0.22) continue;
+    const a = turn + (k / n) * Math.PI * 2;
+    out.push({ kind: 'pillar', x: Math.round(p.x + Math.cos(a) * 44), y: Math.round(p.y + Math.sin(a) * 30), v: Math.floor(h(20 + k) * 3) });
+  }
+  // A run of fallen wall to the north (two or three stones of it), and now and then one down a side.
+  const hx = Math.round(p.x - 26 + h(3) * 30);
+  const hy = Math.round(p.y - 36 - h(4) * 8);
+  const hn = 2 + Math.floor(h(5) * 2);
+  for (let k = 0; k < hn; k++) out.push({ kind: 'wall_h', x: hx + k * 22, y: hy, v: Math.floor(h(30 + k) * 3) });
+  if (h(6) < 0.6) {
+    const vx = Math.round(p.x + (h(7) < 0.5 ? -58 : 58));
+    const vy = Math.round(p.y - 4 + h(8) * 10);
+    for (let k = 0; k < 2; k++) out.push({ kind: 'wall_v', x: vx, y: vy + k * 20, v: Math.floor(h(40 + k) * 3) });
+  }
+  return out;
+}
+
+/** Standing stones: a ring of them round the place's middle. */
+export function stonePieces(p: Poi): { x: number; y: number; v: number }[] {
+  const n = 5 + Math.floor(hash2(p.x, p.y, 931) * 3);
+  const turn = hash2(p.x, p.y, 933) * Math.PI;
+  return Array.from({ length: n }, (_, k) => {
+    const a = turn + (k / n) * Math.PI * 2;
+    return { x: Math.round(p.x + Math.cos(a) * 34), y: Math.round(p.y + Math.sin(a) * 22), v: Math.floor(hash2(p.x + k, p.y, 935) * 3) };
+  });
+}
+
+/** The stumps sat round a campfire, from its middle. */
+export const CAMP_SEATS = [
+  { x: -21, y: 5, v: 0 },
+  { x: 20, y: -4, v: 1 },
+];
+
+/** A pool, a bush or a piece standing in a wild place: its middle, and its size (a pool's half-width and half-height). */
+export interface WildBit {
+  x: number;
+  y: number;
+  rx: number;
+  ry: number;
+  v: number;
+}
+
+/** What stands in each wild place (worked out once: the bog's and the brambles' keep off any trail that runs through). */
+export interface WildPieces {
+  /** The bog's pools; the glowcaps' ring of giant mushrooms; the bramble bushes; the camp's lean-to, rack, chest and seat. */
+  main: WildBit[];
+  /** Reeds round the pools; flowers in the glade; little glowcaps; the camp's firewood. */
+  small: WildBit[];
+  /** Where the bog's will-o'-wisps, the glade's butterflies and the glowcaps' spores hang. */
+  air: WildBit[];
+}
+
+const wildMemo = new Map<string, WildPieces>();
+
+export function wildPieces(p: Poi, gen: ForestGen): WildPieces {
+  const memo = `${gen.seed}:${p.id}`;
+  const had = wildMemo.get(memo);
+  if (had) return had;
+  const h = (k: number) => hash2(p.x, p.y, 1200 + k);
+  const out: WildPieces = { main: [], small: [], air: [] };
+  const clear = (x: number, y: number, room: number) => gen.sample(x, y).trail > room;
+  switch (p.kind) {
+    case 'glade': {
+      // Wildflowers about the rim, butterflies over the middle.
+      for (let k = 0; k < 9; k++) {
+        const a = h(1) * 7 + k * 0.7 + h(10 + k) * 0.4;
+        const d = 30 + h(20 + k) * 22;
+        const x = Math.round(p.x + Math.cos(a) * d);
+        const y = Math.round(p.y + Math.sin(a) * d * 0.8);
+        if (clear(x, y, 4)) out.small.push({ x, y, rx: 0, ry: 0, v: Math.floor(h(30 + k) * 8) });
+      }
+      for (let k = 0; k < 5; k++) out.air.push({ x: Math.round(p.x + (h(40 + k) - 0.5) * 70), y: Math.round(p.y + (h(50 + k) - 0.5) * 46), rx: 0, ry: 0, v: k });
+      break;
+    }
+    case 'bog': {
+      // Dark pools between hummocks, never across a trail.
+      const n = 4 + Math.floor(h(1) * 3);
+      for (let k = 0; k < n * 3 && out.main.length < n; k++) {
+        const a = h(60 + k) * Math.PI * 2;
+        const d = (k ? 18 : 0) + h(70 + k) * 30;
+        const x = Math.round(p.x + Math.cos(a) * d);
+        const y = Math.round(p.y + Math.sin(a) * d * 0.75);
+        const rx = 9 + Math.floor(h(80 + k) * 8);
+        const ry = Math.round(rx * (0.55 + h(90 + k) * 0.15));
+        if (!clear(x, y, rx + 8)) continue;
+        if (out.main.some((o) => Math.hypot((o.x - x) / (o.rx + rx + 7), (o.y - y) / (o.ry + ry + 6)) < 1)) continue;
+        out.main.push({ x, y, rx, ry, v: k });
+      }
+      // Reeds at the pools' edges.
+      for (const o of out.main) {
+        for (let k = 0; k < 3; k++) {
+          const a = h(100 + o.v * 5 + k) * Math.PI * 2;
+          const x = Math.round(o.x + Math.cos(a) * (o.rx + 2));
+          const y = Math.round(o.y + Math.sin(a) * (o.ry + 2));
+          if (clear(x, y, 3) && a > 0.3 && a < Math.PI - 0.3) out.small.push({ x, y, rx: 0, ry: 0, v: Math.floor(h(120 + o.v * 5 + k) * 2) });
+        }
+      }
+      // Sedge in tussocks across the peat (v from 2: tufts, below: reeds).
+      for (let k = 0; k < 10; k++) {
+        const x = Math.round(p.x + (h(300 + k) - 0.5) * 100);
+        const y = Math.round(p.y + (h(320 + k) - 0.5) * 70);
+        if (Math.hypot(x - p.x, (y - p.y) * 1.25) > 54 || !clear(x, y, 3)) continue;
+        if (out.main.some((o) => Math.hypot((o.x - x) / (o.rx + 3), (o.y - y) / (o.ry + 3)) < 1)) continue;
+        out.small.push({ x, y, rx: 0, ry: 0, v: 2 + Math.floor(h(340 + k) * 3) });
+      }
+      for (let k = 0; k < 3; k++) out.air.push({ x: Math.round(p.x + (h(130 + k) - 0.5) * 80), y: Math.round(p.y + (h(140 + k) - 0.5) * 50), rx: 0, ry: 0, v: k });
+      break;
+    }
+    case 'glowcaps': {
+      // A ring of giant mushrooms round the great one, little caps between.
+      const n = 6 + Math.floor(h(1) * 3);
+      const turn = h(2) * Math.PI * 2;
+      for (let k = 0; k < n; k++) {
+        if (h(150 + k) < 0.18) continue;
+        const a = turn + (k / n) * Math.PI * 2 + (h(160 + k) - 0.5) * 0.3;
+        const x = Math.round(p.x + Math.cos(a) * (38 + h(170 + k) * 6));
+        const y = Math.round(p.y + Math.sin(a) * (27 + h(180 + k) * 4));
+        if (clear(x, y, 6)) out.main.push({ x, y, rx: 5, ry: 3, v: k % 2 });
+      }
+      for (let k = 0; k < 10; k++) {
+        const a = h(190 + k) * Math.PI * 2;
+        const d = 14 + h(200 + k) * 30;
+        const x = Math.round(p.x + Math.cos(a) * d);
+        const y = Math.round(p.y + Math.sin(a) * d * 0.72);
+        if (clear(x, y, 4) && Math.hypot(x - p.x, (y - p.y) * 1.3) > 14) out.small.push({ x, y, rx: 0, ry: 0, v: 0 });
+      }
+      for (let k = 0; k < 7; k++) out.air.push({ x: Math.round(p.x + (h(210 + k) - 0.5) * 60), y: Math.round(p.y + (h(220 + k) - 0.5) * 34), rx: 0, ry: 0, v: k });
+      break;
+    }
+    case 'brambles': {
+      // Berry bushes in a loose thicket, the odd gap to walk in by.
+      const n = 6 + Math.floor(h(1) * 3);
+      for (let k = 0; k < n * 3 && out.main.length < n; k++) {
+        const a = h(230 + k) * Math.PI * 2;
+        const d = 6 + h(240 + k) * 32;
+        const x = Math.round(p.x + Math.cos(a) * d);
+        const y = Math.round(p.y + Math.sin(a) * d * 0.7);
+        if (!clear(x, y, 9) || out.main.some((o) => Math.hypot(o.x - x, (o.y - y) * 1.4) < 20)) continue;
+        out.main.push({ x, y, rx: 7, ry: 3, v: k });
+      }
+      break;
+    }
+    case 'camp': {
+      // The lean-to on the north, the drying rack beside it, the chest it keeps and a stump to sit on; the firepit lies before it.
+      const side = h(1) < 0.5 ? -1 : 1;
+      out.main.push({ x: p.x - side * 12, y: p.y - 12, rx: 17, ry: 6, v: 0 });
+      out.main.push({ x: p.x + side * 30, y: p.y - 6, rx: 10, ry: 3, v: side < 0 ? 1 : 0 });
+      out.main.push({ x: p.x - side * 36, y: p.y + 8, rx: 8, ry: 3, v: 0 });
+      out.main.push({ x: p.x + side * 15, y: p.y + 17, rx: 6, ry: 3, v: Math.floor(h(2) * 2) });
+      // Firewood by the rack.
+      out.small.push({ x: p.x + side * 32, y: p.y + 14, rx: 0, ry: 0, v: 0 });
+      break;
+    }
+  }
+  if (wildMemo.size > 400) wildMemo.clear();
+  wildMemo.set(memo, out);
+  return out;
+}
+
+/** The camp's firepit, from the camp's middle. */
+export const FIREPIT = { x: 0, y: 12, r: 6 };
+
+/** Where a place stops feet. */
+function poiBlockers(p: Poi, gen: ForestGen): Blocker[] {
+  switch (p.kind) {
+    case 'campfire':
+      return [{ x: p.x, y: p.y - 1, rx: 8, ry: 4 }, ...CAMP_SEATS.map((s) => ({ x: p.x + s.x, y: p.y + s.y - 1, rx: 6, ry: 3 }))];
+    case 'shrine':
+      return [{ x: p.x, y: p.y - 2, rx: 10, ry: 4 }];
+    case 'chest':
+      return [{ x: p.x, y: p.y - 2, rx: 8, ry: 3 }];
+    case 'elder':
+      return [{ x: p.x, y: p.y - 2, rx: 15, ry: 6 }];
+    case 'lookout':
+      // Its parapet, along the lip.
+      return [{ x: p.x, y: p.y + LOOK_RAIL - 1, rx: 16, ry: 3 }];
+    case 'stones':
+      return stonePieces(p).map((s) => ({ x: s.x, y: s.y - 1, rx: 5, ry: 3 }));
+    case 'bog':
+      // The pools, a little inside their banks.
+      return wildPieces(p, gen).main.map((o) => ({ x: o.x, y: o.y, rx: o.rx - 1.5, ry: o.ry - 1 }));
+    case 'glowcaps':
+      return [{ x: p.x, y: p.y - 2, rx: 9, ry: 4 }, ...wildPieces(p, gen).main.map((o) => ({ x: o.x, y: o.y - 1, rx: o.rx, ry: o.ry }))];
+    case 'brambles':
+      return wildPieces(p, gen).main.map((o) => ({ x: o.x, y: o.y - 1, rx: o.rx, ry: o.ry }));
+    case 'camp':
+      // The lean-to reaches back from its open front.
+      return wildPieces(p, gen).main.map((o, k) => ({ x: o.x, y: o.y - (k ? 1 : 5), rx: o.rx, ry: o.ry }));
+    case 'ruins':
+      return ruinPieces(p)
+        .filter((r) => gen.sample(r.x, r.y).trail > 2)
+        .map((r) => (r.kind === 'pillar' ? { x: r.x, y: r.y - 2, rx: 8, ry: 4 } : r.kind === 'wall_h' ? { x: r.x, y: r.y - 4, rx: 13, ry: 5 } : { x: r.x, y: r.y - 9, rx: 6, ry: 11 }));
+    default:
+      return [];
+  }
+}
+
+// ---------------------------------------------------------------- the forest being walked
+
+let current: ForestGen | null = null;
+
+/** The forest the world is in now (walkability asks it), or null elsewhere. */
+export function useForest(gen: ForestGen | null): void {
+  current = gen;
+}
+
+export const currentForest = (): ForestGen | null => current;
+
+export const forestWalkable = (x: number, y: number): boolean => (current ? current.walkable(x, y) : false);

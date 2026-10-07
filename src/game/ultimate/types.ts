@@ -1,0 +1,58 @@
+import type { Hero } from '../characters';
+import type { WorldScene } from '../../scenes/WorldScene';
+import type { Pal } from './ink';
+
+/** Everything a Special needs at the moment it is unleashed. */
+export interface Cast {
+  world: WorldScene;
+  hero: Hero;
+  /** The hero's feet as it was cast. */
+  x: number;
+  y: number;
+  /** Unit direction it was aimed. */
+  dx: number;
+  dy: number;
+  /** The spot on the ground it was aimed at (for Specials that land somewhere). */
+  tx: number;
+  ty: number;
+  pal: Pal;
+  /** The worn look's id, for Specials that change in more than colour with a skin (the storm's lightning). */
+  look: string;
+}
+
+/** Paints a 16x16 icon for the Special's button, in the look's colours. */
+export type IconPainter = (put: (x: number, y: number, c: number) => void, p: Pal) => void;
+
+export interface UltDef {
+  name: string;
+  /** Energy it takes (out of 100). */
+  cost: number;
+  /** How long the hero gathers power, posing, before it is unleashed. */
+  windup: number;
+  /** How long the hero stays in the pose after that (a dash), in ms. */
+  hold?: number;
+  /** Aimed a way ('dir'), at a spot within `range` ('spot'), or cast where the hero stands ('self'). */
+  aim: 'dir' | 'spot' | 'self';
+  range?: number;
+  /**
+   * How long it lasts, in ms, for the HUD's timer, when that isn't the life of
+   * the effect it sets going (the mech's siege is the hero itself).
+   */
+  lasts?: number;
+  pal: Pal;
+  cast(c: Cast): void;
+  icon: IconPainter;
+  /**
+   * Some Specials need something to act on (the Sky Quake, a foe in the air):
+   * returns why it can't be cast now, or null to let it through (it may act
+   * already, holding its targets while the hero gathers power).
+   */
+  gate?(world: WorldScene, hero: Hero): string | null;
+}
+
+/** A skin's take on its type's Special: the same power, under the same name, in its own colours. */
+export interface UltSkin {
+  pal: Pal;
+  /** The type it belongs to, when that isn't the class's base type. */
+  type?: string;
+}

@@ -1,0 +1,361 @@
+import Phaser from 'phaser';
+import type { Dir } from '../art/wizard';
+import { CHEST_Y, FACING_DEG, HIT_FRAME, SPIN_FRAMES, WARRIOR_H, WARRIOR_ORIGIN_X, WARRIOR_ORIGIN_Y, WARRIOR_W } from '../art/warrior';
+import { snap } from './display';
+import { dirOf, sunShadow, SUN_SHADOW_ALPHA } from './Wizard';
+import { beamHud, comboHud } from './controls';
+import { sound } from '../audio';
+import { Vitals } from './combat';
+import { GOLD_FX, HitSpark, JADE_FX, JADE_STEEL_FX, STEEL_FX, Shockwave, SlashArc, Tempest, ThrustStreak, type Effect, type Scheme } from './Slash';
+import type { Aim, Hero } from './characters';
+import type { WorldScene } from '../scenes/WorldScene';
+import { HERO_STATS } from './stats';
+import { DRAGON_EMBERS } from '../art/dragonslayer';
+import { stand } from './rest';
+
+export const MAX_HP = HERO_STATS['warrior.knight'].hp;
+const SPEED = HERO_STATS['warrior.knight'].speed; // world px / second
+/** A swing chains into the next hit of the combo if it starts within this long of the previous one. */
+const COMBO_WINDOW = 2000;
+const SPECIAL_COOLDOWN = 5000;
+const SPIN_TIME = 1400;
+const SPIN_SPEED = 0.95; // degrees per ms, about 2.6 turns a second
+const SPIN_HIT_EVERY = 160;
+/** How many embers a skin with them throws off a slash, a thrust and the whirlwind's slam. */
+const EMBERS_SWING = 4;
+const EMBERS_THRUST = 6;
+const EMBERS_SLAM = 18;
+
+const SWINGS = ['slash1', 'slash2', 'thrust'] as const;
+type Swing = (typeof SWINGS)[number];
+
+// Walk frames where a foot lands.
+const FOOTFALLS = new Set([1, 4]);
+
+type State = 'free' | 'swing' | 'rise' | 'spin' | 'settle';
+
+/** A look for the warrior: its texture key and the colours of its blade's light. */
+export interface WarriorSkin {
+  key: string;
+  /** Forehand and backhand slashes. */
+  swing: Scheme;
+  /** The thrust, the whirlwind and its shockwave. */
+  heavy: Scheme;
+  /** The faint light around him at night. */
+  aura: number;
+  /** Flecks thrown off the blade as each blow lands and the whirlwind slams down (tints), if any. */
+  embers?: number[];
+}
+
+export const KNIGHT_SKIN: WarriorSkin = { key: 'warrior', swing: STEEL_FX, heavy: GOLD_FX, aura: 0xffd2a0 };
+export const JADE_SKIN: WarriorSkin = { key: 'warrior_jade', swing: JADE_STEEL_FX, heavy: JADE_FX, aura: 0xc8ffe0 };
+/** The Spartan: bronze-lit cuts, and crimson for the thrust and the whirlwind. */
+export const SPARTAN_SKIN: WarriorSkin = {
+  key: 'warrior_spartan',
+  swing: { core: 0xffffff, hot: 0xfff0d8, mid: 0xf0c080, deep: 0xb86a2a },
+  heavy: { core: 0xfff0e8, hot: 0xff9a80, mid: 0xf03a3a, deep: 0x8a0a1a, light: 0xff6a50 },
+  aura: 0xffc8a0,
+};
+/** The Headless Knight: ghost-green cuts, and pumpkin fire fading to violet for the thrust and the whirlwind. */
+export const HEADLESS_SKIN: WarriorSkin = {
+  key: 'warrior_headless',
+  swing: { core: 0xffffff, hot: 0xeaffd8, mid: 0x9ef08a, deep: 0x2e8a5a },
+  heavy: { core: 0xfff4d0, hot: 0xffb040, mid: 0xff6a14, deep: 0x5a1a7a, light: 0xff8a2a },
+  aura: 0xffa050,
+};
+
+/** The Dragonslayer: ember-red cuts trailing ash, and dragonfire for the thrust, the whirlwind and its shockwave. */
+export const DRAGON_SKIN: WarriorSkin = {
+  key: 'warrior_dragon',
+  swing: { core: 0xfff4e0, hot: 0xffb070, mid: 0xe8401a, deep: 0x4a1410 },
+  heavy: { core: 0xfff0d0, hot: 0xffa040, mid: 0xff5a14, deep: 0x5a0e08, light: 0xff7a2a },
+  aura: 0xff9a60,
+  embers: DRAGON_EMBERS,
+};
+
+/**
+ * The warrior: a three-hit sword combo on the attack button (slash, backhand,
+ * lunging thrust) and a whirlwind of fire on the special button.
+ */
+export class Warrior implements Hero {
+  x: number;
+  y: number;
+  /** 0 = night, 1 = day. */
+  daylight = 0;
+  readonly vitals = new Vitals(MAX_HP);
+  /** 0..1, fades the whole figure (see Hero). */
+  alpha = 1;
+  private dir: Dir = 'down';
+  private world: WorldScene;
+  private skin: WarriorSkin;
+  private body: Phaser.GameObjects.Sprite;
+  private glowLayer: Phaser.GameObjects.Sprite;
+  private shadow: Phaser.GameObjects.Image;
+  private castShadow: Phaser.GameObjects.Sprite;
+  /** A faint warm light so he can be made out at night away from the fires. */
+  private aura: Phaser.GameObjects.Light;
+  private state: State = 'free';
+  private lastMove = new Phaser.Math.Vector2(0, 1);
+  /** Towards the mouse on a computer (see Hero). */
+  private aim: Aim | null = null;
+  private clock = 0;
+  private cooldown = 0;
+  private specialCd = 0;
+
+  // Combo.
+  private swing: Swing = 'slash1';
+  private step = 0;
+  private lastSwingAt = -Infinity;
+  private struck = false;
+  private buffered = false;
+  private prevAttack = false;
+  private dash = { vx: 0, vy: 0, t: 0 };
+
+  // Whirlwind.
+  private tempest: Tempest | null = null;
+  private spinT = 0;
+  private phi = 0;
+  private nextTurn = 0;
+  private hitTimer = 0;
+
+  private fx: Effect[] = [];
+
+  /** The body sprite (see Hero). */
+  get sprite(): Phaser.GameObjects.Sprite {
+    return this.body;
+  }
+
+  constructor(world: WorldScene, x: number, y: number, skin: WarriorSkin = KNIGHT_SKIN) {
+    this.world = world;
+    this.skin = skin;
+    const key = skin.key;
+    this.x = x;
+    this.y = y;
+    const ox = WARRIOR_ORIGIN_X / WARRIOR_W;
+    const oy = WARRIOR_ORIGIN_Y / WARRIOR_H;
+    this.shadow = world.add.image(x, y, 'shadow').setDepth(1);
+    this.castShadow = sunShadow(world.add.sprite(x, y, `${key}_s`, 'idle_down_0').setOrigin(ox, oy));
+    this.body = world.add.sprite(x, y, key, 'idle_down_0').setOrigin(ox, oy).setPipeline('Lit');
+    this.glowLayer = world.add.sprite(x, y, `${key}_e`, 'idle_down_0').setOrigin(ox, oy).setBlendMode(Phaser.BlendModes.ADD);
+    this.aura = world.lights.addLight(x, y, 56, skin.aura, 0);
+    this.body.play(`${key}_idle_down`);
+
+    this.body.on(Phaser.Animations.Events.ANIMATION_COMPLETE, (anim: Phaser.Animations.Animation) => {
+      const k = anim.key;
+      if (this.state === 'swing' && SWINGS.some((s) => k.startsWith(`${key}_${s}_`))) {
+        this.state = 'free';
+        this.cooldown = this.swing === 'thrust' ? 160 : 30;
+        this.body.play(`${this.skin.key}_idle_${this.dir}`);
+      } else if (this.state === 'rise' && k.startsWith(`${key}_rise_`)) {
+        this.startSpin();
+      } else if (this.state === 'settle' && k.startsWith(`${key}_settle_`)) {
+        this.state = 'free';
+        this.body.play(`${this.skin.key}_idle_${this.dir}`);
+      }
+    });
+    this.body.on(Phaser.Animations.Events.ANIMATION_UPDATE, (anim: Phaser.Animations.Animation, frame: Phaser.Animations.AnimationFrame) => {
+      if (anim.key.startsWith(`${key}_walk_`) && FOOTFALLS.has(frame.index - 1)) sound.step();
+    });
+  }
+
+  update(dt: number, mx: number, my: number, attack: boolean, special: boolean, bounds: Phaser.Geom.Rectangle, aim: Aim | null = null): void {
+    this.aim = aim;
+    this.clock += dt;
+    const len = Math.hypot(mx, my);
+    const moving = len > 0.18;
+    if (moving) this.lastMove.set(mx / len, my / len);
+    this.cooldown = Math.max(0, this.cooldown - dt);
+    this.specialCd = Math.max(0, this.specialCd - dt);
+
+    // A tap during a swing queues the next one, so quick taps chain cleanly.
+    const pressed = attack && !this.prevAttack;
+    this.prevAttack = attack;
+    if (pressed && this.state === 'swing') this.buffered = true;
+
+    if (this.state === 'free' && this.cooldown === 0) {
+      if (special && this.specialCd === 0) this.startRise();
+      else if (attack || this.buffered) this.startSwing();
+    }
+
+    // Walking, a slow shuffle mid-swing, steering the whirlwind.
+    const speed = { free: SPEED * Math.min(1, len), swing: SPEED * 0.3, rise: SPEED * 0.15, spin: SPEED * 0.7, settle: SPEED * 0.2 }[this.state];
+    let vx = moving ? (mx / len) * speed : 0;
+    let vy = moving ? (my / len) * speed : 0;
+    if (this.dash.t > 0) {
+      vx += this.dash.vx;
+      vy += this.dash.vy;
+      this.dash.t -= dt;
+    }
+    this.x = Phaser.Math.Clamp(this.x + vx * (dt / 1000), bounds.left, bounds.right);
+    this.y = Phaser.Math.Clamp(this.y + vy * (dt / 1000), bounds.top, bounds.bottom);
+
+    if (this.state === 'free') {
+      // Fighting faces the aim, even walking backwards; otherwise the way of the walk.
+      if (this.aim?.look) this.dir = dirOf(this.aim.x, this.aim.y);
+      else if (moving) this.dir = dirOf(mx, my);
+      const key = moving ? `${this.skin.key}_walk_${this.dir}` : stand(this.body, `${this.skin.key}_idle_${this.dir}`);
+      if (this.body.anims.currentAnim?.key !== key) this.body.play(key, true);
+    } else if (this.state === 'swing') {
+      const f = this.body.anims.currentFrame;
+      if (!this.struck && f && f.index - 1 >= HIT_FRAME[this.swing]) {
+        this.struck = true;
+        this.land();
+      }
+    } else if (this.state === 'spin') {
+      this.updateSpin(dt);
+    }
+
+    this.sync();
+    if (this.tempest) this.tempest.update(dt, snap(this.x), snap(this.y) - CHEST_Y, this.phi, snap(this.y), this.daylight);
+    for (const e of this.fx) e.update(dt);
+    this.fx = this.fx.filter((e) => !e.dead);
+    this.updateHud();
+  }
+
+  private startSwing(): void {
+    const chain = this.step > 0 && this.step < 3 && this.clock - this.lastSwingAt <= COMBO_WINDOW;
+    this.step = chain ? this.step + 1 : 1;
+    this.lastSwingAt = this.clock;
+    this.swing = SWINGS[this.step - 1];
+    this.buffered = false;
+    this.struck = false;
+    this.state = 'swing';
+    this.dir = this.aimDir();
+    this.body.play(`${this.skin.key}_${this.swing}_${this.dir}`);
+    sound.swing(this.step, this.world.pan(this.x));
+    if (this.swing !== 'thrust') {
+      const u = this.facing();
+      this.dash = { vx: u.x * 40, vy: u.y * 40, t: 110 };
+    }
+  }
+
+  /** The blow connects: draw the swing and strike whatever it reaches. */
+  private land(): void {
+    const cx = snap(this.x);
+    const cy = snap(this.y) - CHEST_Y;
+    const depth = snap(this.y);
+    const u = this.facing();
+    if (this.swing === 'thrust') {
+      this.fx.push(new ThrustStreak(this.world, cx, cy, u.x, u.y, 30, this.skin.heavy, depth));
+      if (this.skin.embers) this.world.debris(this.skin.embers, cx + u.x * 26, cy + u.y * 26, EMBERS_THRUST, depth + 2, 'spores');
+      this.dash = { vx: u.x * 120, vy: u.y * 120, t: 100 };
+      const hits = this.world.melee({ kind: 'line', x0: cx, y0: cy, x1: cx + u.x * 34, y1: cy + u.y * 34, radius: 7 }, { damage: 18, heavy: true, knock: 160 });
+      this.impact(hits, this.skin.heavy, true);
+      return;
+    }
+    // Forehand and backhand sweep opposite ways; mirrored frames swap the sword hand.
+    const deg = FACING_DEG[this.dir];
+    const hand = this.dir === 'right' ? -1 : 1;
+    const sweep = this.swing === 'slash1' ? hand : -hand;
+    this.fx.push(new SlashArc(this.world, cx, cy, deg + sweep * 100, deg - sweep * 100, 17, this.skin.swing, depth));
+    if (this.skin.embers) {
+      // Embers and ash shaken off the blade, rising from the end of its sweep.
+      const end = ((deg - sweep * 70) * Math.PI) / 180;
+      this.world.debris(this.skin.embers, cx + Math.cos(end) * 15, cy + Math.sin(end) * 15, EMBERS_SWING, depth + 2, 'spores');
+    }
+    const hits = this.world.melee({ kind: 'arc', x: cx, y: cy, radius: 22, angle: (deg * Math.PI) / 180, spread: (115 * Math.PI) / 180 }, { damage: 11 });
+    this.impact(hits, this.skin.swing, false);
+  }
+
+  private impact(hits: { x: number; y: number }[], scheme: Scheme, heavy: boolean): void {
+    for (const h of hits) {
+      this.fx.push(new HitSpark(this.world, h.x, h.y, scheme, h.y + 13, heavy));
+      sound.clash(this.world.pan(h.x), heavy);
+    }
+    if (hits.length) this.world.cameras.main.shake(heavy ? 110 : 70, heavy ? 0.0005 : 0.0003);
+  }
+
+  private startRise(): void {
+    this.state = 'rise';
+    this.step = 0;
+    this.dir = this.aimDir();
+    this.body.play(`${this.skin.key}_rise_${this.dir}`);
+    sound.rise();
+  }
+
+  private startSpin(): void {
+    this.state = 'spin';
+    this.spinT = 0;
+    this.phi = FACING_DEG[this.dir];
+    this.nextTurn = this.phi;
+    this.hitTimer = 60;
+    this.body.anims.stop();
+    this.tempest = new Tempest(this.world, this.skin.heavy);
+    beamHud.firing = true;
+  }
+
+  private updateSpin(dt: number): void {
+    this.spinT += dt;
+    this.phi += SPIN_SPEED * dt;
+    if (this.phi >= this.nextTurn) {
+      this.nextTurn += 360;
+      sound.whirl(this.world.pan(this.x));
+    }
+    const k = Math.round((((this.phi % 360) + 360) % 360) / (360 / SPIN_FRAMES)) % SPIN_FRAMES;
+    this.body.setFrame(`spin_${k}`);
+
+    this.hitTimer -= dt;
+    if (this.hitTimer <= 0) {
+      this.hitTimer += SPIN_HIT_EVERY;
+      const hits = this.world.melee({ kind: 'circle', x: snap(this.x), y: snap(this.y) - CHEST_Y, radius: 20 }, { damage: 5, knock: 40 });
+      this.impact(hits, this.skin.heavy, false);
+    }
+    if (this.spinT >= SPIN_TIME) this.endSpin();
+  }
+
+  /** The last turn slams out as a shockwave. */
+  private endSpin(): void {
+    this.tempest?.destroy();
+    this.tempest = null;
+    beamHud.firing = false;
+    const x = snap(this.x);
+    const y = snap(this.y);
+    this.fx.push(new Shockwave(this.world, x, y - 1, 40, this.skin.heavy));
+    if (this.skin.embers) {
+      // The slam throws up a burst of embers, and ash drifts up after it.
+      this.world.debris(this.skin.embers, x, y - 6, EMBERS_SLAM, y + 20, 'burst');
+      this.world.debris(this.skin.embers, x, y - 10, EMBERS_SLAM / 2, y + 20, 'spores');
+    }
+    const hits = this.world.melee({ kind: 'circle', x, y: y - CHEST_Y, radius: 36 }, { damage: 16, heavy: true, knock: 170 });
+    this.impact(hits, this.skin.heavy, true);
+    sound.slam(this.world.pan(x));
+    this.world.cameras.main.shake(220, 0.0006);
+    const a = (this.phi * Math.PI) / 180;
+    this.dir = dirOf(Math.cos(a), Math.sin(a));
+    this.state = 'settle';
+    this.specialCd = SPECIAL_COOLDOWN;
+    this.body.play(`${this.skin.key}_settle_${this.dir}`);
+  }
+
+  /** Which way an ability goes: at the mouse on a computer, else the way he last walked. */
+  private aimDir(): Dir {
+    const a = this.aim ?? this.lastMove;
+    return dirOf(a.x, a.y);
+  }
+
+  private facing(): { x: number; y: number } {
+    const a = (FACING_DEG[this.dir] * Math.PI) / 180;
+    return { x: Math.round(Math.cos(a)), y: Math.round(Math.sin(a)) };
+  }
+
+  private updateHud(): void {
+    // The special button's ring refills over the cooldown and glows when ready.
+    beamHud.charge = 1 - this.specialCd / SPECIAL_COOLDOWN;
+    beamHud.over = 0;
+    const since = this.clock - this.lastSwingAt;
+    comboHud.hits = this.step;
+    comboHud.window = this.step === 0 ? 0 : this.step < 3 ? Math.max(0, 1 - since / COMBO_WINDOW) : Math.max(0, 1 - since / 700);
+  }
+
+  private sync(): void {
+    const rx = snap(this.x);
+    const ry = snap(this.y);
+    const frame = this.body.frame.name;
+    this.body.setPosition(rx, ry).setDepth(ry).setAlpha(this.alpha);
+    this.glowLayer.setPosition(rx, ry).setDepth(ry + 0.1).setFrame(frame).setAlpha(this.alpha);
+    this.shadow.setPosition(rx, ry - 1).setAlpha(this.alpha);
+    this.castShadow.setPosition(rx, ry - 1).setFrame(frame).setAlpha(SUN_SHADOW_ALPHA * this.daylight * this.alpha);
+    this.aura.setPosition(rx, ry - 14);
+    this.aura.intensity = 0.55 * (1 - this.daylight);
+  }
+}
