@@ -399,11 +399,11 @@ export const PARTS: PartDef[] = [
   { id: 'screen', name: 'Folding screen', tab: 'furniture', shelf: 'living', w: 2, h: 1, block: 'full' },
 
   // ---- Later lights and wall decor (art/homeTrim.ts).
-  { id: 'moonlamp', name: 'Moon lamp', tab: 'light', shelf: 'lamps', w: 1, h: 1, block: 'post', light: { color: 0xcfe2ff, radius: 90, intensity: 1.4, day: 0.3, y: 16 } },
-  { id: 'tiffany', name: 'Tiffany lamp', tab: 'light', shelf: 'lamps', w: 1, h: 1, block: 'post', light: { color: 0xffb870, radius: 80, intensity: 1.4, day: 0.2, y: 18 } },
-  { id: 'stringlights', name: 'String lights', tab: 'light', shelf: 'outdoor', w: 2, h: 1, block: 'post', light: { color: 0xffd890, radius: 110, intensity: 1.4, day: 0.2, y: 24 } },
-  { id: 'pathlight', name: 'Path light', tab: 'light', shelf: 'outdoor', w: 1, h: 1, block: 'none', light: { color: 0xffe2a0, radius: 56, intensity: 1.1, day: 0.15, y: 6 } },
-  { id: 'starlantern', name: 'Star lantern', tab: 'light', shelf: 'outdoor', w: 1, h: 1, block: 'post', flip: true, light: { color: 0xfff0b0, radius: 100, intensity: 1.5, day: 0.25, y: 26 } },
+  { id: 'moonlamp', name: 'Moon lamp', tab: 'light', shelf: 'lamps', w: 1, h: 1, block: 'post', light: { color: 0xcfe2ff, radius: 90, intensity: 1.4, day: 0.3, y: 20 } },
+  { id: 'tiffany', name: 'Tiffany lamp', tab: 'light', shelf: 'lamps', w: 1, h: 1, block: 'post', light: { color: 0xffb870, radius: 80, intensity: 1.4, day: 0.2, y: 23 } },
+  { id: 'stringlights', name: 'String lights', tab: 'light', shelf: 'outdoor', w: 2, h: 1, block: 'post', light: { color: 0xffd890, radius: 110, intensity: 1.4, day: 0.2, y: 20 } },
+  { id: 'pathlight', name: 'Path light', tab: 'light', shelf: 'outdoor', w: 1, h: 1, block: 'none', light: { color: 0xffe2a0, radius: 56, intensity: 1.1, day: 0.15, y: 8 } },
+  { id: 'starlantern', name: 'Star lantern', tab: 'light', shelf: 'outdoor', w: 1, h: 1, block: 'post', flip: true, light: { color: 0xfff0b0, radius: 100, intensity: 1.5, day: 0.25, y: 24 } },
   { id: 'bunting', name: 'Bunting', tab: 'decor', shelf: 'hangings', w: 1, h: 1, block: 'none', wall: true, flip: true },
   { id: 'plates', name: 'Plate rack', tab: 'decor', shelf: 'hangings', w: 1, h: 1, block: 'none', wall: true },
   { id: 'herbs', name: 'Dried herbs', tab: 'decor', shelf: 'hangings', w: 1, h: 1, block: 'none', wall: true, flip: true },
