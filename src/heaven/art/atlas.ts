@@ -46,6 +46,7 @@ export const ISLE_SPOTS: Record<string, IsleSpot> = {
   saltflats: { x: 116, y: 236, lift: 22, links: ['cloudrest', 'glimmerdeep', 'home'] },
   hushfall: { x: 760, y: 142, lift: 36, links: ['starwatch', 'everwood'] },
   lumen: { x: 452, y: 200, lift: 32, links: ['home', 'cloudrest', 'starwatch'] },
+  dunes: { x: 796, y: 400, lift: 30, links: ['shore', 'everwood'] },
 };
 
 /** Open sky for places still to come, taken in turn by places the table doesn't know. */

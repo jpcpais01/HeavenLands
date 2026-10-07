@@ -1861,6 +1861,110 @@ function lumenIsle(): IsleArt {
 }
 
 /** A place with no picture of its own yet: a grassy isle with a few trees and a waymarker. */
+// ---------------------------------------------------------------- Sunsong Dunes
+
+const DUNE_SAND = ramp('#7a4422', '#9a5a2e', '#b8743a', '#d08e48', '#e2a85a', '#f0c070', '#f8d890', '#fff0c0');
+const RED_ROCK = ramp('#2e1418', '#48201e', '#662e24', '#86402c', '#a45636', '#be7044', '#d48c58', '#e6aa74');
+const OASIS = ramp('#0e4a5c', '#14646e', '#1e8288', '#30a4a0', '#52c2b4', '#86dcc8', '#c4f2e2');
+const OASIS_GREEN = ramp('#1e3a1c', '#2a5222', '#3a6a28', '#52842e', '#6ea03a', '#94ba4e');
+
+function dunesIsle(): IsleArt {
+  const a = new Art(116, 112);
+  const cx = 56;
+  const cy = 42;
+  const rx = 44;
+  const ry = 20;
+  // Dunes: crests running north to south, each a long lit windward slope and a short shaded slip face.
+  const dune = (x: number, y: number): number => {
+    const u = (x + valueNoise(x, y, 14, 121) * 9 + Math.sin(y * 0.35) * 2.2) / 13;
+    const f = u - Math.floor(u);
+    return f < 0.72 ? 0.05 + f * 0.25 : -0.32 + (f - 0.72) * 0.6;
+  };
+  const b = body(a, { cx, cy, rx, ry, depth: 38, seed: 121, grass: DUNE_SAND, rock: RED_ROCK, soil: ramp('#3a1c16', '#5a2c1e', '#7c4028', '#9a5634'), bounce: hex('#f0b0a0'), roots: 0, spikes: 4, relief: dune });
+  // A pool in a hollow of the dunes: damp sand, a ring of green, turquoise water.
+  const px = 40;
+  const py = 46;
+  const ring = (x: number, y: number): number => Math.hypot((x + 0.5 - px) / 11, (y + 0.5 - py) / 5.5) + (valueNoise(x, y, 3, 122) - 0.5) * 0.12;
+  for (let y = 0; y < a.h; y++) {
+    for (let x = 0; x < a.w; x++) {
+      if (!b.inTop(x, y, 1)) continue;
+      const e = ring(x, y);
+      if (e > 1.9) continue;
+      if (e > 1.55) {
+        if (bayer(x, y) < (1.9 - e) / 0.35) a.set(x, y, tone(DUNE_SAND, 0.35, x, y));
+      } else if (e > 1.05) a.set(x, y, tone(OASIS_GREEN, 0.75 - (e - 1.05) * 0.6 + (hash2(x, y, 123) < 0.1 ? 0.2 : 0) - (y - py) * 0.04, x, y, 0.7));
+      else a.set(x, y, e > 0.88 ? OASIS[6] : tone(OASIS, 0.15 + Math.pow(e, 1.6) * 0.6 + ((x + y * 3) % 9 === 0 ? 0.2 : 0), x, y, 0.6));
+    }
+  }
+  for (const [lx, ly] of [[36, 45], [44, 47], [41, 44]]) {
+    a.set(lx, ly, hex('#4a8a44'));
+    a.set(lx + 1, ly, hex('#6aa850'));
+  }
+  a.set(42, 43, hex('#ffc0d0'));
+  const items: { y: number; draw: () => void }[] = [];
+  for (const [x, y, h, lean, s] of [
+    [27, 45, 10, -3, 1],
+    [52, 43, 11, 3, 2],
+    [29, 52, 8, -2, 3],
+  ] as [number, number, number, number, number][]) items.push({ y, draw: () => palm(a, x, y, h, lean, 130 + s) });
+  // A striped caravan tent, glowing inside, and a camel resting by it.
+  let lamp = { x: 0, y: 0 };
+  items.push({
+    y: 40,
+    draw: () => {
+      softShadow(a, 76, 40, 9, 2.2, 0.72);
+      piece(a, 68, 31, 15, 9, (p) => {
+        for (let x = 0; x < 15; x++) {
+          const peak = Math.min(Math.abs(x - 4), Math.abs(x - 10));
+          const top = Math.round(peak * 0.7);
+          const col = Math.floor(x / 2) % 3 === 0 ? hex('#c04a36') : Math.floor(x / 2) % 3 === 1 ? hex('#f0e2c8') : hex('#3a4a8a');
+          for (let y = top; y < 5; y++) p.set(x, y, y === top ? mix(col, hex('#ffffff'), 0.25) : col);
+          for (let y = 5; y < 9; y++) p.set(x, y, x < 3 || x > 11 ? mix(col, INK, 0.25) : y === 5 ? hex('#ffb050') : hex('#ffd890'));
+        }
+      });
+      lamp = { x: 75, y: 37 };
+      softShadow(a, 66, 46, 4, 1.2, 0.75);
+      piece(a, 62, 40, 7, 6, (p) => {
+        const fur = hex('#b8844c');
+        const dark = hex('#7a5230');
+        p.rect(1, 2, 4, 3, () => fur);
+        p.set(2, 1, fur);
+        p.set(3, 1, fur);
+        p.set(5, 2, fur);
+        p.set(6, 1, fur);
+        p.set(6, 0, fur);
+        for (const lx of [1, 4]) for (let y = 4; y < 6; y++) p.set(lx, y, dark);
+        p.set(2, 2, hex('#c04a36'));
+        p.set(3, 2, hex('#3a4a8a'));
+      });
+    },
+  });
+  // A sandstone hoodoo on the far side.
+  items.push({
+    y: 38,
+    draw: () => {
+      softShadow(a, 90, 38, 4, 1.2, 0.75);
+      piece(a, 86, 26, 7, 12, (p) => {
+        for (let y = 0; y < 12; y++) {
+          const hw = y < 2 ? 3 : 1.4 + y * 0.18;
+          for (let x = Math.round(3 - hw); x <= Math.round(3 + hw); x++) p.set(x, y, tone(RED_ROCK, 0.7 - (x - 3) * 0.12 + (y % 4 === 0 ? 0.12 : 0), x, y));
+        }
+      });
+    },
+  });
+  items.sort((p, q) => p.y - q.y).forEach((i) => i.draw());
+  return {
+    art: a,
+    ax: cx,
+    ay: cy,
+    rx,
+    ry,
+    falls: [],
+    glows: [{ ...lamp, r: 10, tint: 0xffb060 }, { x: px, y: py, r: 10, tint: 0x60e0d0 }],
+    glints: [{ x: px - 3, y: py }, { x: px + 4, y: py + 1 }, lamp],
+  };
+}
+
 function genericIsle(): IsleArt {
   const a = new Art(88, 88);
   const cx = 44;
@@ -1897,6 +2001,7 @@ export const ISLE_ART: Record<string, () => IsleArt> = {
   saltflats: saltIsle,
   hushfall: hushfallIsle,
   lumen: lumenIsle,
+  dunes: dunesIsle,
   generic: genericIsle,
 };
 

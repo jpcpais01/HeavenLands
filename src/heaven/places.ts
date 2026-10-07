@@ -121,6 +121,16 @@ export const PLACES: Place[] = [
     together: true,
     dayNight: true,
   },
+  {
+    id: 'dunes',
+    arena: 'dunes',
+    name: 'Sunsong Dunes',
+    blurb: 'Where the sand sings',
+    lore: 'Golden dunes roll on for ever under a wide sky, the wind always lifting a little sand off their crests. Find the oases with their palms and lotus pools, caravan camps with the tea still warm, and arches of red stone; by night the sand glints silver under the stars.',
+    endless: true,
+    together: true,
+    dayNight: true,
+  },
 ];
 
 export const placeById = (id: string | undefined): Place => PLACES.find((p) => p.id === id || p.arena === id) ?? PLACES[0];
