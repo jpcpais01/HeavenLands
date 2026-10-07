@@ -18,6 +18,15 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    v: 2,
+    date: '2026-10-07',
+    title: 'Sand and showers',
+    notes: [
+      'A new endless land, Sunsong Dunes: golden dunes, oases with palms and lotus pools, caravan camps with camels, red rock arches and old ruins.',
+      'Soft showers now pass over the open places now and then, the same for friends together, with a rainbow after.',
+    ],
+  },
+  {
     v: 1,
     date: '2026-10-07',
     title: 'First light',

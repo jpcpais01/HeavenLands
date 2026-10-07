@@ -12,6 +12,7 @@
 
 import { grade } from '../game/LitPipeline';
 import { skyState } from '../game/SkyPipeline';
+import { weather } from './weather';
 
 type V3 = [number, number, number];
 type V4 = [number, number, number, number];
@@ -30,6 +31,12 @@ interface Glow {
 
 /** How much of the world's cloud shadow is kept. */
 const CLOUD_SHADOW = 0.45;
+
+/** Under a shower: how much the light dims and greys, the grey-blue the veil turns, and the cloud shadow it brings. */
+const RAIN_DIM = 0.15;
+const RAIN_GREY = 0.35;
+const RAIN_VEIL: V4 = [0.8, 0.85, 0.94, 0.26];
+const RAIN_CLOUDS = 0.6;
 
 /** In daynight's phase order: morning, day, sunset, night. */
 const PHASE_GLOW: Glow[] = [
@@ -66,6 +73,14 @@ export function heavenLight(weights: readonly number[], time: number): void {
       shafts[c] += g.shafts[c] * w;
     }
   });
+  // A shower greys the light and takes the shafts of sun away.
+  const r = weather.rain;
+  if (r > 0) {
+    exposure *= 1 - RAIN_DIM * r;
+    sat *= 1 - RAIN_GREY * r;
+    for (let c = 0; c < 4; c++) veil[c] += (RAIN_VEIL[c] - veil[c]) * r * 0.8;
+    shafts[3] *= 1 - r;
+  }
   grade.on = true;
   grade.exposure = exposure;
   grade.shoulder = shoulder;
@@ -74,6 +89,7 @@ export function heavenLight(weights: readonly number[], time: number): void {
   grade.glow = glow;
   // Cloud shadows drift lighter here: the sky is mostly light.
   skyState.clouds *= CLOUD_SHADOW;
+  skyState.clouds += (RAIN_CLOUDS - skyState.clouds) * r;
   const h = skyState.heaven;
   h.on = true;
   h.veil = veil;

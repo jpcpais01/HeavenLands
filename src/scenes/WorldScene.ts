@@ -61,7 +61,7 @@ import { ForestSpawner } from '../world/ForestSpawner';
 import { EVERWOOD_SEED, ForestGen, useForest } from '../world/forestGen';
 import { omenMods, resetOmens } from '../game/omens';
 import { BossIntro, FinalBlow, bossTint } from '../game/BossIntro';
-import { cozy, pastimeHud, type CozyLand, type CozyPastimes } from '../game/cozy';
+import { cozy, pastimeHud, type CozyLand, type CozyPastimes, type CozyWeather } from '../game/cozy';
 
 type V3 = [number, number, number];
 
@@ -353,6 +353,8 @@ export class WorldScene extends Phaser.Scene {
   private woodBuild: ForestBuild | null = null;
   /** Heaven Lands' pastimes in this place (see game/cozy.ts). */
   private pastimes: CozyPastimes | null = null;
+  /** Heaven Lands' weather here (see game/cozy.ts). */
+  private weather: CozyWeather | null = null;
   private shafts: Phaser.GameObjects.TileSprite | null = null;
   private shadows: Phaser.GameObjects.Image[] = [];
   private pollen!: Phaser.GameObjects.Particles.ParticleEmitter;
@@ -661,9 +663,12 @@ export class WorldScene extends Phaser.Scene {
     // Heaven Lands' pastimes: seats and beds, music, the stars, bees and finds.
     const built = this.home?.buildLand ?? this.woodBuild?.land ?? null;
     this.pastimes = cozy.pastimes?.(this, { arena: arena.id, land: built, owner: this.home?.owner ?? this.woodBuild?.mine ?? true }) ?? null;
+    this.weather = cozy.weather?.(this, arena.id) ?? null;
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.pastimes?.destroy();
       this.pastimes = null;
+      this.weather?.destroy();
+      this.weather = null;
     });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.net?.destroy();
@@ -2440,6 +2445,7 @@ export class WorldScene extends Phaser.Scene {
     }
     // Heaven Lands' pastimes, after the farm has said what E does here.
     this.pastimes?.update(dt, this.daylight);
+    this.weather?.update(dt, this.daylight, this.view, this.indoors());
     this.critters?.update(dt, this.hero.x, this.hero.y, this.downT > 0, this.daylight, this.view, controls.mouse, this.indoors());
     this.island?.update(time, dt);
     this.spirit?.update(time, dt);

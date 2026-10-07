@@ -40,6 +40,14 @@ export interface CozyHooks {
   light: ((weights: readonly number[], time: number) => void) | null;
   /** Heaven Lands' pastimes in the place being played (seats, beds, music, stars, bees, finds), built by the world once it's up. */
   pastimes: ((world: WorldScene, at: CozySpot) => CozyPastimes | null) | null;
+  /** Heaven Lands' weather over the place being played (passing showers), or null where there's none. */
+  weather: ((world: WorldScene, arena: string) => CozyWeather | null) | null;
+}
+
+export interface CozyWeather {
+  /** Each frame: the daylight, the view, and whether the hero is under a roof. */
+  update(dt: number, daylight: number, view: Phaser.Geom.Rectangle, indoors: boolean): void;
+  destroy(): void;
 }
 
 /** What the pastimes are given of the place: its arena, and the grid things are built on there (the Home's, the Everwood's), whose owner this player is or isn't. */
@@ -95,4 +103,4 @@ export interface CozyHud {
   update(dt: number, hidden: boolean): void;
 }
 
-export const cozy: CozyHooks = { on: false, character: null, spawn: null, me: null, treasure: null, hud: null, arena: null, placeName: null, land: null, map: null, light: null, pastimes: null };
+export const cozy: CozyHooks = { on: false, character: null, spawn: null, me: null, treasure: null, hud: null, arena: null, placeName: null, land: null, map: null, light: null, pastimes: null, weather: null };
