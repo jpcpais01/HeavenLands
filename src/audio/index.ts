@@ -433,6 +433,22 @@ class GameSound {
     this.fx('critterRelease', 'critterRelease', [pan], 0);
   }
 
+  clap(pan = 0): void {
+    this.fx('clap', 'clap', [pan], 0);
+  }
+
+  hug(pan = 0): void {
+    this.fx('hug', 'hug', [pan], 0);
+  }
+
+  shutter(): void {
+    this.fx('shutter', 'shutter', [0], 0);
+  }
+
+  lanternRise(pan = 0): void {
+    this.fx('lanternRise', 'lanternRise', [pan], 0);
+  }
+
   stag(kind: 'appear' | 'reveal' | 'flee', pan = 0): void {
     this.fx(`stag_${kind}`, 'stag', [pan, kind], 0);
   }
