@@ -39,6 +39,13 @@ uniform vec3 uBounceColor;
 // camera renders at art resolution (see PixelPipeline).
 uniform float uFragScale;
 uniform float uFragShiftY;
+// The colour grade (see grade below): off until Heaven Lands sets it.
+uniform float uGrade;
+uniform float uExposure;
+uniform float uShoulder;
+uniform float uSat;
+uniform vec3 uLift;
+uniform vec3 uGlow;
 
 varying vec2 outTexCoord;
 varying float outTexId;
@@ -96,6 +103,23 @@ void main ()
     }
 
     gl_FragColor = color * vec4(finalColor, 1.0);
+
+    if (uGrade > 0.0)
+    {
+        // Out of premultiplied alpha, so a half-faded layer grades like a whole one.
+        vec3 c = gl_FragColor.rgb / gl_FragColor.a * uExposure;
+        // A soft shoulder: the middle tones rise, highlights ease in instead of clipping.
+        c = c * (1.0 + uShoulder) / (1.0 + c * uShoulder);
+        float l = dot(c, vec3(0.299, 0.587, 0.114));
+        c = mix(vec3(l), c, uSat);
+        // Bright surfaces bloom a little toward the light's colour.
+        c += uGlow * smoothstep(0.45, 1.0, l);
+        // The shade lifts toward a soft tint, the darker the more: no ink-black
+        // anywhere, while the lit colours keep their depth.
+        float shade = 1.0 - clamp(l, 0.0, 1.0);
+        c += uLift * shade * shade;
+        gl_FragColor.rgb = clamp(c, 0.0, 1.0) * gl_FragColor.a;
+    }
 }
 `;
 
@@ -114,6 +138,26 @@ export const sky: SkyState = {
   bounce: [0, 0, 0],
 };
 
+/**
+ * A colour grade over everything lit, for a softer, brighter look (Heaven
+ * Lands sets it each frame; off, everything is drawn as painted). It costs a few
+ * sums per lit pixel and no extra pass. Neutral is exposure 1, shoulder 0,
+ * sat 1, no lift, no glow.
+ */
+export const grade = {
+  on: false,
+  /** Light multiplied in before anything else. */
+  exposure: 1,
+  /** How far the middle tones are lifted and highlights rolled off. */
+  shoulder: 0,
+  /** Saturation: 1 is as painted. */
+  sat: 1,
+  /** The colour the deepest shade lifts to. */
+  lift: [0, 0, 0] as [number, number, number],
+  /** Light added to bright surfaces. */
+  glow: [0, 0, 0] as [number, number, number],
+};
+
 export class LitPipeline extends Phaser.Renderer.WebGL.Pipelines.LightPipeline {
   constructor(game: Phaser.Game) {
     super({ game, fragShader: FRAG } as Phaser.Types.Renderer.WebGL.WebGLPipelineConfig);
@@ -130,5 +174,13 @@ export class LitPipeline extends Phaser.Renderer.WebGL.Pipelines.LightPipeline {
     const frame = PixelPipeline.frameOf(camera);
     this.set1f('uFragScale', frame.scale);
     this.set1f('uFragShiftY', frame.shiftY);
+    this.set1f('uGrade', grade.on ? 1 : 0);
+    if (grade.on) {
+      this.set1f('uExposure', grade.exposure);
+      this.set1f('uShoulder', grade.shoulder);
+      this.set1f('uSat', grade.sat);
+      this.set3f('uLift', ...grade.lift);
+      this.set3f('uGlow', ...grade.glow);
+    }
   }
 }

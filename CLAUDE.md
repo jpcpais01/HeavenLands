@@ -59,6 +59,6 @@ The engine underneath (world, Home, Everwood, art, online) was the Myths and Leg
 **Art** (`src/art/`)
 - `pixel.ts`: the engine. Shapes carry a material and a surface normal; `render()` gives diffuse, normal map and emissive layers. `textures.ts` packs and registers everything; every lit texture has `_e` (emissive) and `_s` (shadow) companions. Sheets and arena grounds are built in workers (`sheetWorker.ts`, `arenaWorker.ts`). `font.ts`/`glyphs.ts`: the pixel font.
 
-**Rendering** (`src/game/`): `LitPipeline.ts` (sun or moon plus sky light on top of Light2D), `PixelPipeline.ts` (ground drawn at art resolution, then scaled up), `SkyPipeline.ts` (cloud shadows and vignette), `display.ts` (pixel ratio, zoom, `snap`), `settings.ts` (quality, zoom, volumes, brightness, screen shake).
+**Rendering** (`src/game/`): `LitPipeline.ts` (sun or moon plus sky light on top of Light2D), `PixelPipeline.ts` (ground drawn at art resolution, then scaled up), `SkyPipeline.ts` (cloud shadows and vignette), `src/heaven/glow.ts` (the heavenly light: per phase of the day, a colour grade inside the Lit shader (`grade`) and, in the sky pass, a pale veil in place of the dark vignette plus slow shafts of light (`skyState.heaven`); set through `cozy.light`, no extra passes), `display.ts` (pixel ratio, zoom, `snap`), `settings.ts` (quality, zoom, volumes, brightness, screen shake).
 
 **Audio** (`src/audio/`): everything synthesised with Web Audio: `music.ts`, `ambience.ts`, `sfx.ts`, through `mixer.ts`; `index.ts` exposes `sound`.
