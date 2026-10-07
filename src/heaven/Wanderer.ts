@@ -12,6 +12,8 @@ import { stand } from '../game/rest';
 import type { Aim, Hero } from '../game/characters';
 import type { WorldScene } from '../scenes/WorldScene';
 import { ensureWanderer, W_ORIGIN, type Dir } from './art/sheet';
+
+export type { Dir } from './art/sheet';
 import type { Appearance } from './look';
 
 /** Walking pace, px a second. */
@@ -21,8 +23,11 @@ const FOOTFALLS = new Set([1, 4]);
 
 export type Emote = 'wave' | 'cheer' | 'dance' | 'sit' | 'heart';
 export const EMOTES: Emote[] = ['wave', 'cheer', 'dance', 'sit', 'heart'];
-/** Emotes that keep going until the wanderer walks off. */
-const LASTING = new Set<Emote>(['dance', 'sit']);
+/** The poses a pastime holds the wanderer in (see pastimes/): sat on a seat, strumming the lute, at an instrument, at a telescope. */
+export type Pose = 'sit' | 'strum' | 'play' | 'gaze';
+const POSES = new Set<string>(['sit', 'strum', 'play', 'gaze']);
+/** Emotes and poses that keep going until the wanderer walks off. */
+const LASTING = new Set<string>(['dance', 'sit', 'strum', 'play', 'gaze']);
 
 /** What the HUD and the keyboard ask for: the emote to make next. */
 export const emoteHud = { want: null as Emote | null, playing: null as Emote | null };
@@ -64,7 +69,10 @@ export class Wanderer implements Hero {
   private glowLayer: Phaser.GameObjects.Sprite;
   private shadow: Phaser.GameObjects.Image;
   private castShadow: Phaser.GameObjects.Sprite;
-  private emote: Emote | null = null;
+  private emote: string | null = null;
+  /** Sat on a seat: drawn this much higher than the feet, and this far in front of them (behind, below 0). */
+  private lift = 0;
+  private depthOff = 0;
   private emotes = 0;
   /** This one is played by this device (the HUD's emotes reach it). */
   private mine: boolean;
@@ -123,26 +131,60 @@ export class Wanderer implements Hero {
     this.sync();
   }
 
-  netEmote(tag: string): void {
-    const e = tag.split(':')[0] as Emote;
-    if (EMOTES.includes(e)) this.startEmote(e);
+  /** What the wanderer is doing now (an emote or a pastime's pose), or null. */
+  get posing(): string | null {
+    return this.emote;
   }
 
-  private startEmote(e: Emote): void {
+  /**
+   * Hold a pastime's pose facing `dir` until walked off (or let go):
+   * on a seat it's drawn `lift` px up, `depth` px in front of its feet.
+   */
+  hold(p: Pose, dir: Dir = 'down', lift = 0, depth = 0): void {
+    this.startEmote(p, dir, lift, depth);
+  }
+
+  /** Stand up from a pastime's pose. */
+  release(): void {
+    if (this.emote) this.endEmote();
+  }
+
+  /** Another player's emote or pose, as their tag says: `<what>.<facing>.<lift>.<depth>:<count>`. */
+  netEmote(tag: string): void {
+    const [what, d, l, dp] = tag.split(':')[0].split('.');
+    const dir = (['down', 'up', 'left', 'right'] as Dir[]).find((x) => x === d) ?? 'down';
+    if (what === 'idle') {
+      if (this.emote) this.endEmote();
+      return;
+    }
+    if (!EMOTES.includes(what as Emote) && !POSES.has(what)) return;
+    if (!this.world.anims.exists(`${this.key}_${what}_${dir}`)) return;
+    this.startEmote(what, dir, Number(l) || 0, Number(dp) || 0);
+  }
+
+  private startEmote(e: string, dir: Dir = 'down', lift = 0, depth = 0): void {
     this.emote = e;
-    this.dir = 'down';
-    this.body.play(`${this.key}_${e}_down`);
+    this.dir = dir;
+    this.lift = lift;
+    this.depthOff = depth;
+    this.body.play(`${this.key}_${e}_${dir}`);
     if (this.mine) {
       this.emotes++;
-      this.emoteTag = `${e}:${this.emotes}`;
-      emoteHud.playing = e;
+      this.emoteTag = `${e}.${dir}.${Math.round(lift)}.${Math.round(depth)}:${this.emotes}`;
+      emoteHud.playing = EMOTES.includes(e as Emote) ? (e as Emote) : null;
     }
     if (e === 'wave' || e === 'cheer') this.float(e === 'wave' ? 'star' : 'spark', 1);
   }
 
   private endEmote(): void {
     this.emote = null;
-    if (this.mine) emoteHud.playing = null;
+    this.lift = this.depthOff = 0;
+    if (this.mine) {
+      emoteHud.playing = null;
+      // Friends see them stand up too.
+      this.emotes++;
+      this.emoteTag = `idle.${this.dir}.0.0:${this.emotes}`;
+    }
     this.body.play(`${this.key}_idle_${this.dir}`);
   }
 
@@ -170,9 +212,13 @@ export class Wanderer implements Hero {
     const rx = snap(this.x);
     const ry = snap(this.y);
     const frame = this.body.frame.name;
-    this.body.setPosition(rx, ry).setDepth(ry).setAlpha(this.alpha);
-    this.glowLayer.setPosition(rx, ry).setDepth(ry + 0.1).setFrame(frame).setAlpha(this.alpha);
-    this.shadow.setPosition(rx, ry - 1).setAlpha(this.alpha);
-    this.castShadow.setPosition(rx, ry - 1).setFrame(frame).setAlpha(SUN_SHADOW_ALPHA * this.daylight * this.alpha);
+    const by = ry - this.lift;
+    const depth = ry + this.depthOff;
+    this.body.setPosition(rx, by).setDepth(depth).setAlpha(this.alpha);
+    this.glowLayer.setPosition(rx, by).setDepth(depth + 0.1).setFrame(frame).setAlpha(this.alpha);
+    // Up on a seat the seat's own shadow is theirs.
+    const ground = this.lift > 0 ? 0 : this.alpha;
+    this.shadow.setPosition(rx, ry - 1).setAlpha(ground);
+    this.castShadow.setPosition(rx, ry - 1).setFrame(frame).setAlpha(SUN_SHADOW_ALPHA * this.daylight * ground);
   }
 }

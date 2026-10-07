@@ -39,6 +39,8 @@ export interface Pose {
   face?: 'content' | 'open' | 'grin';
   /** Wings and tails beat: 0..1 through a flap. */
   flap: number;
+  /** A lute held across the body (the jam's strum). */
+  lute?: boolean;
 }
 
 export interface Kit {

@@ -8,6 +8,7 @@ import type { CharacterDef, Hero } from './characters';
 import type Phaser from 'phaser';
 import type { WorldScene } from '../scenes/WorldScene';
 import type { ArenaDef } from '../world/arenas';
+import type { BuildLand } from '../world/buildLand';
 
 export interface CozyHooks {
   /** Heaven Lands is running: no monsters, no health or energy, chests give seeds and keepsakes. */
@@ -36,7 +37,38 @@ export interface CozyHooks {
    * the time in ms. Heaven Lands grades its colours and veils the screen in light here.
    */
   light: ((weights: readonly number[], time: number) => void) | null;
+  /** Heaven Lands' pastimes in the place being played (seats, beds, music, stars, bees, finds), built by the world once it's up. */
+  pastimes: ((world: WorldScene, at: CozySpot) => CozyPastimes | null) | null;
 }
+
+/** What the pastimes are given of the place: its arena, and the grid things are built on there (the Home's, the Everwood's), whose owner this player is or isn't. */
+export interface CozySpot {
+  arena: string;
+  land: BuildLand | null;
+  owner: boolean;
+}
+
+export interface CozyPastimes {
+  /** Each frame, after the hero has moved. */
+  update(dt: number, daylight: number): void;
+  /** E or the touch button: true if a pastime took it. */
+  act(): boolean;
+  destroy(): void;
+}
+
+/**
+ * The pastimes as the HUD sees them, written by the world each frame: the
+ * touch button's icon for what E would do here ('' for nothing), and whether
+ * an overlay (the jam's notes, the telescope) has the keys and the screen.
+ */
+export const pastimeHud = {
+  near: '',
+  busy: false,
+  /** A jam is on: the lute button is lit. */
+  jamming: false,
+  /** The lute button (or its key) was pressed: the world starts or ends a jam. */
+  jam: false,
+};
 
 /** An endless land's map for the minimap (scenes/MapScene.ts): tiles of `size` map pixels, one map pixel per MAP_CELL px of ground. */
 export interface CozyMap {
@@ -60,4 +92,4 @@ export interface CozyHud {
   update(dt: number, hidden: boolean): void;
 }
 
-export const cozy: CozyHooks = { on: false, character: null, spawn: null, me: null, treasure: null, hud: null, arena: null, placeName: null, land: null, map: null, light: null };
+export const cozy: CozyHooks = { on: false, character: null, spawn: null, me: null, treasure: null, hud: null, arena: null, placeName: null, land: null, map: null, light: null, pastimes: null };

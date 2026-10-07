@@ -86,6 +86,12 @@ export class NetPlay {
     return [...this.remotes.values()].map((r) => ({ x: r.x, y: r.y, accent: r.ch.accent, alive: r.alive }));
   }
 
+  /** Where another player in the room is, by their id (undefined if they aren't here). */
+  peerAt(id: number): { x: number; y: number } | undefined {
+    const r = this.remotes.get(id);
+    return r ? { x: r.x, y: r.y } : undefined;
+  }
+
   /** The other players standing, for monsters to hunt. */
   targets(): Target[] {
     const out: Target[] = [];

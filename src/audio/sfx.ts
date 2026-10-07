@@ -4,6 +4,8 @@ const SPARKLE = [2093, 2349, 2637, 3136, 3520, 4186]; // C major pentatonic, hig
 /** The minstrel's tune, one note per strum (MIDI, D dorian): his attacks play it through. */
 const LUTE_TUNE = [62, 65, 69, 67, 65, 64, 62, 57, 62, 69, 67, 72, 69, 65, 67, 62];
 export const LUTE_NOTES = LUTE_TUNE.length;
+/** Heaven Lands' jam: one pentatonic scale for every instrument (MIDI, C major), so whatever's played together fits. */
+export const JAM_SCALE = [60, 62, 64, 67, 69, 72, 74, 76];
 
 /** The Aurora Colosseum's frost sounds (see Sfx.frost). */
 export type FrostSound = 'crack' | 'freeze' | 'howl' | 'chime' | 'crunch' | 'gust';
@@ -950,6 +952,126 @@ export class Sfx {
     this.chirp(out, t, 'sine', 900, 380, 0.14, 0.07);
     [2093, 1760, 1568].forEach((f, i) => this.bell(out, t + 0.06 + i * 0.09, f, 0.028, 0.9));
     this.sparkle(out, t + 0.05, 4, 0.05);
+  }
+
+  // ------------------------------------------------------------ Heaven Lands' pastimes
+
+  /**
+   * A note played in a jam: `inst` 0 the lute (a warm plucked string), 1 the
+   * harp (a long, bright pluck an octave up, with a shimmer), 2 the piano
+   * (hammered partials that fade at their own pace). Every instrument plays
+   * the same pentatonic scale, so friends jamming together always agree.
+   */
+  jamNote(t: number, pan: number, inst: number, note: number): void {
+    const midi = JAM_SCALE[Math.max(0, Math.min(JAM_SCALE.length - 1, note))];
+    const ctx = this.m.ctx;
+    if (inst === 1) {
+      const out = this.out(pan, 0.7, 0.75);
+      const f = mtof(midi + 12);
+      this.pluck(out, t, f, 0.16, 1.9, false);
+      this.bell(out, t + 0.004, f * 2, 0.012, 1.2);
+      return;
+    }
+    if (inst === 2) {
+      const out = this.out(pan, 0.7, 0.45);
+      const f = mtof(midi);
+      for (const [r, a, d] of [
+        [1, 1, 1.6],
+        [2, 0.42, 1],
+        [3, 0.2, 0.6],
+        [4, 0.1, 0.4],
+        [5.02, 0.05, 0.25],
+      ]) {
+        for (const det of [0.999, 1.0012]) {
+          const g = gain(ctx, 0, out);
+          hit(g.gain, t, 0.06 * a, 0.004, d);
+          const o = osc(ctx, 'sine', f * r * det, g);
+          o.start(t);
+          o.stop(t + d + 0.1);
+        }
+      }
+      this.burstNoise(out, t, 'lowpass', 2400, 600, 0.7, 0.05, 0.03);
+      return;
+    }
+    const out = this.out(pan, 0.7, 0.4);
+    const f = mtof(midi);
+    this.pluck(out, t, f, 0.2, 0.9);
+    this.pluck(out, t + 0.012, f / 2, 0.07, 0.6, false);
+  }
+
+  /** Something found and picked up: a rustle, and a small bright chime (brighter for a rare or glowing one). */
+  forage(t: number, pan: number, tier: number): void {
+    const out = this.out(pan, 0.45, 0.4);
+    this.burstNoise(out, t, 'bandpass', 2400, 1600, 1.1, 0.12, 0.12);
+    const notes = tier ? [1319, 1760, 2349] : [1175, 1568];
+    notes.forEach((f, i) => this.bell(out, t + 0.07 + i * 0.06, f, 0.028, 0.6));
+    if (tier) this.sparkle(out, t + 0.12, 3, 0.04);
+  }
+
+  /** Honey taken from a hive: a sticky drip, a warm low hum of bees, a golden chime. */
+  honey(t: number): void {
+    const ctx = this.m.ctx;
+    const out = this.out(0, 0.45, 0.4);
+    this.chirp(out, t, 'sine', 520, 260, 0.12, 0.12);
+    const hum = gain(ctx, 0, filter(ctx, 'bandpass', 420, 2, out));
+    hum.gain.setValueAtTime(0, t);
+    hum.gain.linearRampToValueAtTime(0.05, t + 0.12);
+    hum.gain.linearRampToValueAtTime(0, t + 0.6);
+    const o = osc(ctx, 'sawtooth', 210, hum);
+    const lfo = osc(ctx, 'sine', 24, gain(ctx, 12, o.frequency));
+    for (const x of [o, lfo]) {
+      x.start(t);
+      x.stop(t + 0.65);
+    }
+    [988, 1319, 1568].forEach((f, i) => this.bell(out, t + 0.16 + i * 0.07, f, 0.03, 0.8));
+  }
+
+  /** Settling onto a seat: a soft creak of wood, a cushion's puff. */
+  sitDown(t: number, pan: number): void {
+    const out = this.out(pan, 0.35, 0.2);
+    this.burstNoise(out, t, 'lowpass', 700, 250, 0.8, 0.18, 0.1, true);
+    this.chirp(out, t + 0.03, 'triangle', 190, 150, 0.05, 0.14);
+  }
+
+  /** Off to sleep: a lullaby falling softly away. */
+  sleep(t: number): void {
+    const out = this.out(0, 0.5, 0.9);
+    [76, 72, 69, 67, 64].forEach((n, i) => this.bell(out, t + i * 0.28, mtof(n), 0.03, 1.6));
+  }
+
+  /** Morning: a bright rising chime, and birds. */
+  wake(t: number): void {
+    const out = this.out(0, 0.5, 0.7);
+    [67, 72, 76, 79].forEach((n, i) => this.bell(out, t + i * 0.12, mtof(n), 0.032, 1.2));
+    for (let i = 0; i < 3; i++) this.chirp(out, t + 0.6 + i * 0.16, 'sine', rand(3200, 3800), rand(4200, 4800), 0.025, 0.07);
+  }
+
+  /** A line drawn between two stars of a constellation: a clear chime, a step higher with each (`step` from 0). */
+  starLink(t: number, step: number): void {
+    const out = this.out(0, 0.5, 0.85);
+    const n = JAM_SCALE[step % JAM_SCALE.length] + 12 * (1 + Math.floor(step / JAM_SCALE.length));
+    this.bell(out, t, mtof(Math.min(n, 100)), 0.04, 1.4);
+    this.sparkle(out, t + 0.03, 2, 0.05);
+  }
+
+  /** Two stars that don't belong together: a soft, low blip. */
+  starMiss(t: number): void {
+    const out = this.out(0, 0.35, 0.4);
+    this.chirp(out, t, 'sine', 330, 250, 0.05, 0.16);
+  }
+
+  /** A constellation whole: a shimmering run up and a bloom of bells. */
+  constellation(t: number): void {
+    const out = this.out(0, 0.55, 1);
+    [72, 76, 79, 84, 88, 91].forEach((n, i) => this.bell(out, t + i * 0.07, mtof(n), 0.035, 1.8));
+    this.sparkle(out, t + 0.45, 8, 0.06);
+  }
+
+  /** The telescope drawn out to the eye: a brass slide and a click. */
+  telescope(t: number): void {
+    const out = this.out(0, 0.4, 0.3);
+    this.burstNoise(out, t, 'bandpass', 1800, 3200, 2, 0.08, 0.22);
+    this.burstNoise(out, t + 0.24, 'highpass', 4000, 6000, 1, 0.12, 0.03);
   }
 
   /**

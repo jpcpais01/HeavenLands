@@ -16,7 +16,7 @@ const id = (list: { id: string }[], i: number): string => list[i]?.id ?? list[0]
 
 // ---------------------------------------------------------------- poses
 
-export type AnimName = 'idle' | 'walk' | 'wave' | 'cheer' | 'dance' | 'sit' | 'heart';
+export type AnimName = 'idle' | 'walk' | 'wave' | 'cheer' | 'dance' | 'sit' | 'heart' | 'strum' | 'play' | 'gaze';
 
 export interface AnimDef {
   name: AnimName;
@@ -33,8 +33,15 @@ export const ANIMS: AnimDef[] = [
   { name: 'wave', frames: 8, fps: 9, loop: false, views: ['down'] },
   { name: 'cheer', frames: 6, fps: 9, loop: false, views: ['down'] },
   { name: 'dance', frames: 8, fps: 8, loop: true, views: ['down'] },
-  { name: 'sit', frames: 4, fps: 3, loop: true, views: ['down'] },
+  // Sitting on the ground, or on a seat facing any way (see heaven/pastimes).
+  { name: 'sit', frames: 4, fps: 3, loop: true, views: ['down', 'up', 'side'] },
   { name: 'heart', frames: 6, fps: 6, loop: false, views: ['down'] },
+  // Strumming the lute, played from the jam button anywhere.
+  { name: 'strum', frames: 6, fps: 8, loop: true, views: ['down'] },
+  // Seated at an instrument: at the piano (from behind) or the harp (side on).
+  { name: 'play', frames: 6, fps: 7, loop: true, views: ['up', 'side'] },
+  // Bent to a telescope's eyepiece (from behind).
+  { name: 'gaze', frames: 4, fps: 2, loop: true, views: ['up'] },
 ];
 
 const shY = (k: Kit, bob: number, hop = 0, sit = false) => 18 - k.tall + bob - hop + (sit ? 4 : 0);
@@ -166,18 +173,93 @@ export function pose(k: Kit, anim: AnimName, view: View, i: number): Pose {
   }
   if (anim === 'sit') {
     const bob = [0, 0, 1, 1][i];
-    const p = standing(k, 'down', bob);
+    const p = standing(k, view, bob);
     p.sit = true;
     const s = shY(k, bob, 0, true);
-    p.feet = [
-      { x: 9.6, y: 31 },
-      { x: 14.4, y: 31 },
-    ];
-    p.hands = [
-      { x: 12 - k.sw + 0.4, y: s + 5.6 },
-      { x: 12 + k.sw - 0.4, y: s + 5.6 },
-    ];
+    if (view === 'side') {
+      // Facing left on a seat: thighs out level, shins down, hands resting on the knees.
+      p.feet = [
+        { x: 7.6, y: 31 },
+        { x: 8.6, y: 31 },
+      ];
+      p.hands = [
+        { x: 9.4, y: s + 6.4 },
+        { x: 10.2, y: s + 6.2 },
+      ];
+    } else {
+      p.feet = [
+        { x: 9.6, y: 31 },
+        { x: 14.4, y: 31 },
+      ];
+      p.hands = [
+        { x: 12 - k.sw + 0.4, y: s + 5.6 },
+        { x: 12 + k.sw - 0.4, y: s + 5.6 },
+      ];
+    }
+    p.carry = false;
     p.blink = i === 3;
+    return p;
+  }
+  if (anim === 'strum') {
+    // The lute across the body: one hand up its neck, the other strumming over the bowl.
+    const bob = [0, 0, 1, 1, 0, 1][i];
+    const p = standing(k, 'down', bob);
+    const s = shY(k, bob);
+    const fret = [0, 0.6, 0, -0.6, 0, 0.6][i];
+    const strum = [0, 1.4, 0.4, -0.6, 1, 0][i];
+    p.hands = [
+      { x: 12 - k.sw - 1.2 + fret * 0.5, y: s + 2.8 + fret },
+      { x: 13.4, y: s + 6.2 + strum },
+    ];
+    p.carry = false;
+    p.lute = true;
+    p.face = i < 3 ? 'content' : undefined;
+    p.blink = i === 2 || i === 3;
+    p.sway = [0, 0.3, 0.4, 0.1, -0.2, -0.1][i];
+    return p;
+  }
+  if (anim === 'play') {
+    // Seated, hands out at the keys (from behind) or among the strings (side on), never still.
+    const bob = [0, 0, 1, 1, 0, 0][i];
+    const p = standing(k, view, bob);
+    p.sit = true;
+    const s = shY(k, bob, 0, true);
+    p.carry = false;
+    const a = [0, 1, 0, -1, 0, 1][i];
+    const b = [-1, 0, 1, 0, -1, 0][i];
+    if (view === 'side') {
+      p.feet = [
+        { x: 7.6, y: 31 },
+        { x: 8.6, y: 31 },
+      ];
+      p.hands = [
+        { x: 7.6 + a * 0.5, y: s + 3.4 + a },
+        { x: 8.4 + b * 0.5, y: s + 4.2 + b },
+      ];
+    } else {
+      p.feet = [
+        { x: 9.6, y: 31 },
+        { x: 14.4, y: 31 },
+      ];
+      p.hands = [
+        { x: 12 - k.sw + 0.2 + a, y: s + 3.2 - Math.abs(a) * 0.4 },
+        { x: 12 + k.sw - 0.2 + b, y: s + 3.2 - Math.abs(b) * 0.4 },
+      ];
+      p.dx = a * 0.3;
+    }
+    p.sway = a * 0.2;
+    return p;
+  }
+  if (anim === 'gaze') {
+    // Bent a little to the eyepiece, both hands up at it, a slow breath.
+    const bob = [1, 1, 2, 2][i];
+    const p = standing(k, 'up', bob);
+    const s = shY(k, bob);
+    p.hands = [
+      { x: 12 - k.sw + 0.6, y: s + 1.2 },
+      { x: 12 + k.sw - 0.6, y: s + 1.6 },
+    ];
+    p.carry = false;
     return p;
   }
   // heart: hands meeting at the chest, eyes closed happily.
@@ -1618,6 +1700,45 @@ export interface Layers {
   over(c: PixelCanvas, k: Kit, g: Geo): void;
 }
 
+const LUTE_WOOD = mat('#b0703a', { shine: true });
+const LUTE_RIB = mat('#6e3b1d');
+const LUTE_TOP = mat('#d9944a', { shine: true });
+const LUTE_NECK = mat('#5a3420');
+const LUTE_STRING = flat('#fff2d0');
+const LUTE_HOLE = flat('#3a1f12');
+
+/**
+ * The jam's lute, held across the body: a round bowl at the hip with its
+ * rose, a long neck up to the far shoulder, its pegbox bent back, strings
+ * catching the light; the hands drawn again over it, fretting and strumming.
+ */
+function lute(c: PixelCanvas, k: Kit, g: Geo): void {
+  const bx = g.cx + 2.4;
+  const by = g.hip - 0.6;
+  const [fret, pick] = g.hands;
+  // The neck from the bowl up past the fretting hand, the pegbox bent back at its end.
+  const nx = fret.x - 1.4;
+  const ny = fret.y - 1.2;
+  c.part();
+  c.capsule(bx - 2, by - 1.6, nx, ny, 1.1, 0.8, LUTE_NECK);
+  c.capsule(nx, ny, nx - 1.2, ny + 1.4, 0.75, 0.6, LUTE_NECK);
+  c.px(Math.round(nx - 1.5), Math.round(ny + 0.4), flat('#e8c88a'), FLAT);
+  c.part();
+  // The bowl: a ribbed back showing at the rim, the pale top face on, its dark rose.
+  c.ellipse(bx, by, 3.9, 3.4, LUTE_RIB);
+  c.ellipse(bx - 0.3, by - 0.3, 3.3, 2.9, LUTE_TOP, { flatten: 0.5 });
+  c.ellipse(bx - 0.8, by - 0.8, 0.9, 0.9, LUTE_HOLE);
+  c.px(Math.round(bx + 1.1), Math.round(by + 1), LUTE_WOOD, FLAT);
+  c.line(bx + 0.4, by + 1.1, bx + 1.6, by + 1.1, LUTE_NECK, () => FLAT);
+  // Strings from the bridge to the nut.
+  c.line(bx + 0.6, by + 0.6, nx + 0.2, ny + 0.2, LUTE_STRING, () => FLAT);
+  // The hands again, over the lute.
+  for (const h of [fret, pick]) {
+    c.part();
+    c.ellipse(h.x, h.y, 1.2, 1.1, k.skin);
+  }
+}
+
 export function drawFigure(c: PixelCanvas, k: Kit, g: Geo, L: Layers): void {
   const w = wearOf(k);
   c.offset(BX, BY);
@@ -1630,6 +1751,7 @@ export function drawFigure(c: PixelCanvas, k: Kit, g: Geo, L: Layers): void {
     arm(c, k, g, w, 0);
     arm(c, k, g, w, 1);
     cloak(c, k, g, w);
+    if (g.pose.lute) lute(c, k, g);
     L.neck(c, k, g);
     head(c, k, g);
     L.hairFront(c, k, g);

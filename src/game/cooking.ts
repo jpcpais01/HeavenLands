@@ -8,7 +8,8 @@
 //
 // The pantry (seeds, produce, fish to cook, dishes, and how often each dish
 // has been made) is one map in the player's collection; its keys are
-// `seed.<crop>`, `crop.<crop>`, `fish.<fish>`, `dish.<recipe>` and `made.<recipe>`.
+// `seed.<crop>`, `crop.<crop>`, `fish.<fish>`, `find.<find>` (finds.ts: forage
+// and honey), `dish.<recipe>` and `made.<recipe>`.
 
 import { FISH, fishById, type FishDef } from './fish';
 import { cropById } from './farm';
@@ -16,6 +17,7 @@ import { HOTBAR_SIZE, MAX_STACK, inventory, type ItemDef } from './items';
 import type { BuffDef } from './buffs';
 import { recipeById, type Ingredient, type RecipeDef } from './recipes';
 import { collection } from './collection';
+import { findById, findKey } from './finds';
 
 export { RECIPES, recipeById, type Ingredient, type RecipeDef } from './recipes';
 
@@ -40,6 +42,7 @@ export function fishFor(of: string): FishDef[] {
 /** How many of an ingredient the pantry holds. */
 export function have(i: Ingredient): number {
   if ('crop' in i) return collection.stock(cropKey(i.crop));
+  if ('find' in i) return collection.stock(findKey(i.find));
   return fishFor(i.fish).reduce((n, f) => n + collection.stock(fishKey(f.id)), 0);
 }
 
@@ -48,6 +51,10 @@ export function ingredientName(i: Ingredient): string {
   if ('crop' in i) {
     const c = cropById(i.crop);
     return c ? (i.n > 1 ? c.many : c.one) : i.crop;
+  }
+  if ('find' in i) {
+    const f = findById(i.find);
+    return f ? (i.n > 1 ? f.many : f.one) : i.find;
   }
   if (i.fish === 'any') return 'Any fish';
   if (i.fish === 'rare') return 'Rare fish';
@@ -64,6 +71,10 @@ export function cook(r: RecipeDef): boolean | null {
   for (const i of r.needs) {
     if ('crop' in i) {
       take.push([cropKey(i.crop), i.n]);
+      continue;
+    }
+    if ('find' in i) {
+      take.push([findKey(i.find), i.n]);
       continue;
     }
     let left = i.n;

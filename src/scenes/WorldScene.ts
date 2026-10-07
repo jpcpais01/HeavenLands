@@ -59,7 +59,7 @@ import { ForestSpawner } from '../world/ForestSpawner';
 import { EVERWOOD_SEED, ForestGen, useForest } from '../world/forestGen';
 import { omenMods, resetOmens } from '../game/omens';
 import { BossIntro, FinalBlow, bossTint } from '../game/BossIntro';
-import { cozy, type CozyLand } from '../game/cozy';
+import { cozy, pastimeHud, type CozyLand, type CozyPastimes } from '../game/cozy';
 
 type V3 = [number, number, number];
 
@@ -344,6 +344,8 @@ export class WorldScene extends Phaser.Scene {
   /** The Everwood, streamed round the view, when the world is in it. */
   private forest: Forest | null = null;
   private woodBuild: ForestBuild | null = null;
+  /** Heaven Lands' pastimes in this place (see game/cozy.ts). */
+  private pastimes: CozyPastimes | null = null;
   private shafts: Phaser.GameObjects.TileSprite | null = null;
   private shadows: Phaser.GameObjects.Image[] = [];
   private pollen!: Phaser.GameObjects.Particles.ParticleEmitter;
@@ -647,6 +649,13 @@ export class WorldScene extends Phaser.Scene {
     }
     this.scenery = new Scenery(this, arena.scenery(), arena.drift);
     this.net = session.active ? new NetPlay(this) : null;
+    // Heaven Lands' pastimes: seats and beds, music, the stars, bees and finds.
+    const built = this.home?.buildLand ?? this.woodBuild?.land ?? null;
+    this.pastimes = cozy.pastimes?.(this, { arena: arena.id, land: built, owner: this.home?.owner ?? this.woodBuild?.mine ?? true }) ?? null;
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.pastimes?.destroy();
+      this.pastimes = null;
+    });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.net?.destroy();
       this.net = null;
@@ -716,7 +725,8 @@ export class WorldScene extends Phaser.Scene {
     // Keys 1 to 3 (top row or keypad) use the hotbar's slots.
     kb.on('keydown', (e: KeyboardEvent) => {
       const n = e.key.length === 1 ? e.key.charCodeAt(0) - 49 : -1;
-      if (n >= 0 && n < HOTBAR_SIZE) controls.items.push(n);
+      // While a pastime has the keys (the jam's notes), they're its.
+      if (n >= 0 && n < HOTBAR_SIZE && !pastimeHud.busy) controls.items.push(n);
     });
 
     // A fresh hotbar and no buffs each run.
@@ -845,6 +855,11 @@ export class WorldScene extends Phaser.Scene {
   }
 
   /** The Home's plot, while in the Home (its layout is what the map draws). */
+  /** The online play, when in a room. */
+  get netPlay(): NetPlay | null {
+    return this.net;
+  }
+
   get homePlot(): Home | null {
     return this.home;
   }
@@ -2395,8 +2410,10 @@ export class WorldScene extends Phaser.Scene {
     this.companion?.update(dt, this.hero.x, this.hero.y, this.downT > 0, this.daylight);
     if (controls.netTap) {
       controls.netTap = false;
-      if (this.downT <= 0 && !session.paused && !this.fishing?.tap() && !this.home?.act() && !this.woodBuild?.act()) this.critters?.swingNet(this.hero.x, this.hero.y, this.facing.x);
+      if (this.downT <= 0 && !session.paused && !this.fishing?.tap() && !this.home?.act() && !this.woodBuild?.act() && !this.pastimes?.act()) this.critters?.swingNet(this.hero.x, this.hero.y, this.facing.x);
     }
+    // Heaven Lands' pastimes, after the farm has said what E does here.
+    this.pastimes?.update(dt, this.daylight);
     this.critters?.update(dt, this.hero.x, this.hero.y, this.downT > 0, this.daylight, this.view, controls.mouse, this.indoors());
     this.island?.update(time, dt);
     this.spirit?.update(time, dt);

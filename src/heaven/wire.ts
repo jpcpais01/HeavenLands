@@ -15,6 +15,7 @@ import { PLACES } from './places';
 import { buildLand, landArena } from './lands';
 import { landMap } from './lands/landMap';
 import { heavenLight } from './glow';
+import { Pastimes } from './pastimes';
 
 /** Seed packets in a chest: how many, and the odds a packet is a magic seed rather than a wild one. */
 const CHEST_SEEDS: [number, number] = [2, 3];
@@ -43,6 +44,7 @@ export function wireCozy(): void {
   cozy.land = (world, arena, ground, view) => buildLand(world, arena, ground, view);
   cozy.map = (id) => landMap(id);
   cozy.light = heavenLight;
+  cozy.pastimes = (world, at) => new Pastimes(world, at);
   cozy.placeName = (arena) => PLACES.find((p) => p.arena === arena)?.name ?? arena;
   cozy.treasure = (world, x, y) => {
     const wild = CROPS.filter((c) => c.kind === 'wild');

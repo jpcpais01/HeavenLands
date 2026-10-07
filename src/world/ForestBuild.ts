@@ -57,6 +57,11 @@ export class ForestBuild implements RodHost {
   private shownVer = -1;
   private rodSpots: RodSpot[] | null = null;
   private readonly owner: boolean;
+
+  /** This player's own forest (alone, or the room's host). */
+  get mine(): boolean {
+    return this.owner;
+  }
   private cursor: Phaser.GameObjects.Graphics;
   private ghost: Img;
   /** The forest's own thing the eraser is over, tinted to show it'll go. */

@@ -18,6 +18,8 @@ import { ForestLoadScene } from '../scenes/ForestLoadScene';
 import { ArenaLoadScene } from '../scenes/ArenaLoadScene';
 import { SoundScene } from '../scenes/SoundScene';
 import { FpsScene } from '../scenes/FpsScene';
+import { JamScene } from './scenes/JamScene';
+import { StarScene } from './scenes/StarScene';
 import { LitPipeline } from '../game/LitPipeline';
 import { PixelPipeline } from '../game/PixelPipeline';
 import { SkyPipeline } from '../game/SkyPipeline';
@@ -61,7 +63,7 @@ const game = new Phaser.Game({
   input: { activePointers: 3 },
   disableContextMenu: true,
   // Later scenes draw on top.
-  scene: [HeavenBoot, TitleScene, AtlasScene, CreatorScene, WorldScene, ShadeScene, UIScene, MapScene, FishScene, ForestLoadScene, ArenaLoadScene, PauseScene, SoundScene, FpsScene],
+  scene: [HeavenBoot, TitleScene, AtlasScene, CreatorScene, WorldScene, ShadeScene, UIScene, MapScene, FishScene, JamScene, StarScene, ForestLoadScene, ArenaLoadScene, PauseScene, SoundScene, FpsScene],
 });
 installPointer(game);
 
