@@ -36,14 +36,12 @@ export interface IsleSpot {
 
 /** Where each known place floats. */
 export const ISLE_SPOTS: Record<string, IsleSpot> = {
-  home: { x: 330, y: 300, lift: 26, links: ['everwood', 'garden', 'cloudrest', 'glimmerdeep'] },
+  home: { x: 330, y: 300, lift: 26, links: ['everwood', 'cloudrest', 'shore'] },
   everwood: { x: 640, y: 310, lift: 30, links: ['starwatch'] },
   cloudrest: { x: 290, y: 128, lift: 54, links: ['starwatch'] },
-  garden: { x: 470, y: 444, lift: 24, links: ['everwood'] },
-  glimmerdeep: { x: 160, y: 412, lift: 28 },
   starwatch: { x: 540, y: 72, lift: 40 },
-  shore: { x: 652, y: 494, lift: 26, links: ['garden', 'everwood'] },
-  saltflats: { x: 116, y: 236, lift: 22, links: ['cloudrest', 'glimmerdeep', 'home'] },
+  shore: { x: 652, y: 494, lift: 26, links: ['everwood'] },
+  saltflats: { x: 116, y: 236, lift: 22, links: ['cloudrest', 'home'] },
   hushfall: { x: 760, y: 142, lift: 36, links: ['starwatch', 'everwood'] },
   lumen: { x: 452, y: 200, lift: 32, links: ['home', 'cloudrest', 'starwatch'] },
   dunes: { x: 796, y: 400, lift: 30, links: ['shore', 'everwood'] },

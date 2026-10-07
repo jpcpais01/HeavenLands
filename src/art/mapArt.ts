@@ -728,10 +728,38 @@ const MARKS: Record<WoodKind, [RGB, RGB]> = {
 };
 
 /** Paper at (x, y): mottled with age, a fibre here and there. */
+/**
+ * The explorer's paper repeats every PAPER_REPEAT chunks each way, too far
+ * apart to notice, so a square never walked is one of a handful of blank
+ * squares, painted once and kept (world/trekMap.ts), however much of the
+ * map is open.
+ */
+export const PAPER_REPEAT = 9;
+const PAPER_SPAN = PAPER_REPEAT * CHUNK;
+const wrap = (v: number, n: number): number => ((v % n) + n) % n;
+
+/** Value noise that tiles every PAPER_SPAN px (`scale` must divide it). */
+function paperNoise(x: number, y: number, scale: number, s: number): number {
+  const n = PAPER_SPAN / scale;
+  const fx = x / scale;
+  const fy = y / scale;
+  const x0 = Math.floor(fx);
+  const y0 = Math.floor(fy);
+  const tx = fx - x0;
+  const ty = fy - y0;
+  const sx = tx * tx * (3 - 2 * tx);
+  const sy = ty * ty * (3 - 2 * ty);
+  const a = hash2(wrap(x0, n), wrap(y0, n), s);
+  const b = hash2(wrap(x0 + 1, n), wrap(y0, n), s);
+  const c = hash2(wrap(x0, n), wrap(y0 + 1, n), s);
+  const d = hash2(wrap(x0 + 1, n), wrap(y0 + 1, n), s);
+  return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+}
+
 function paper(x: number, y: number, base: RGB): RGB {
-  const age = valueNoise(x, y, 180, 401) * 0.7 + valueNoise(x, y, 46, 403) * 0.3;
+  const age = paperNoise(x, y, 192, 401) * 0.7 + paperNoise(x, y, 48, 403) * 0.3;
   let c = mix(base, PAPER_DARK, clamp((age - 0.35) * 0.9, 0, 0.5));
-  if (hash2(x >> 3, y >> 3, 405) > 0.985) c = mix(c, INK, 0.12);
+  if (hash2(wrap(x >> 3, PAPER_SPAN / 8), wrap(y >> 3, PAPER_SPAN / 8), 405) > 0.985) c = mix(c, INK, 0.12);
   return c;
 }
 

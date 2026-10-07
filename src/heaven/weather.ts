@@ -15,7 +15,7 @@ import type { CozyWeather } from '../game/cozy';
 import type { WorldScene } from '../scenes/WorldScene';
 
 /** The places under open sky where showers pass (arena ids). Caves, the stars, the snow and the desert keep their own skies. */
-const SHOWER_PLACES = new Set(['home', 'forest', 'garden', 'island', 'shore', 'lumen', 'saltflats']);
+const SHOWER_PLACES = new Set(['home', 'forest', 'island', 'shore', 'lumen', 'saltflats']);
 /** The clock is cut into slots this long (ms); a slot has a shower at these odds, lasting this long (ms), easing in and out over FADE_MS. */
 const SLOT_MS = 14 * 60 * 1000;
 const SHOWER_ODDS = 0.3;
