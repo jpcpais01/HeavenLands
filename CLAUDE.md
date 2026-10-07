@@ -8,6 +8,7 @@ The engine underneath (world, Home, Everwood, art, online) was the Myths and Leg
 
 - Don't test, playtest or visualize everything along the way. Write good, logical code, and only do a light verification at the end if it seems necessary.
 - Don't build or publish a preview Artifact (João, 2026-09-26). Just work on the code: merge to main, and the Vercel site deploys from there.
+- Every merge players will notice adds a patch note: a new entry at the top of `PATCH_NOTES` in `src/heaven/patchNotes.ts` (`v` one higher than the last, today's date, a short title, a line per change in players' words), or a line in the top entry if it has not been merged to main yet. That is what running games show as "A new update is here" before the player updates.
 - Match the existing style: plain-English comments that explain why, `const` tuning numbers at the top of a file, no new dependencies.
 
 ## Commands
@@ -23,6 +24,7 @@ The engine underneath (world, Home, Everwood, art, online) was the Myths and Leg
 - `index.html`: the page, its inline loading screen (clouds, motes, the logo and the pixel-font status line, `window.bootLoader`) and the tap to start on phones. `src/heaven/entry.ts` moves storage first (`storage.ts`: every localStorage key under `pixel-battle.` is read and written as `heaven-lands.` instead, so the engine's keys stay this game's own; keep it), then imports `main.ts` only after the page's load event (so the browser's loading bar ends at once).
 - `src/heaven/main.ts` wires cozy mode (`wire.ts`), makes the Phaser game with its scenes and pipelines, fits the canvas and drops the graphics level when the world runs slowly.
 - `scripts/pwa.ts`: the Vite plugin that serves (dev) and emits (build) the manifest, the icons (`src/heaven/art/icon.ts`), the loading screen's logo (`src/heaven/art/logo.ts`, frames stacked in `loader/logo.png`) and the service worker `sw.js` (precaches the build, caches named `heaven-<hash>`, navigations network-first). Never set `orientation` in the manifest (some phones never open an installed app with one); `display: standalone`; landscape comes from the loading screen's tap, which goes fullscreen (`src/pwa.ts`, which also registers the service worker and shows the Install button and the rotate hint).
+- Updates (`src/heaven/updates.ts`, `scenes/NotesScene.ts`): the build publishes `PATCH_NOTES` as `notes.json`, left out of the service worker's precache. The running game fetches it (no cache) a few seconds after starting, every 10 minutes and when the app comes back to the foreground; a note newer than its own build's shows the update card (what's coming, Update now, Later) over the title screen, the Atlas or the pause menu, never mid-play. After an update the card shows once as What's new (`heaven-lands.notesSeen`). `?notes` shows it at once.
 - `src/diagnostics.ts`: crash reports, switched off (`CRASH_REPORTS`).
 
 **Heaven Lands** (`src/heaven/`)
