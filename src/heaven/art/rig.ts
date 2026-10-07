@@ -6,7 +6,7 @@
 
 import { cyl, sphere, FLAT, type Material, type PixelCanvas } from '../../art/pixel';
 import { BOTTOMS, DRESSES, EYES, MOUTHS, TOPS, BROWS, BEARDS, SHOES } from '../look';
-import { hsh, recolor, rows, type Geo, type Kit, type P, type Pose, type View } from './kit';
+import { GROUND_DROP, SEAT_DROP, hsh, recolor, rows, type Geo, type Kit, type P, type Pose, type View } from './kit';
 import { flat, mat } from './paint';
 
 export const BX = 4;
@@ -16,7 +16,7 @@ const id = (list: { id: string }[], i: number): string => list[i]?.id ?? list[0]
 
 // ---------------------------------------------------------------- poses
 
-export type AnimName = 'idle' | 'walk' | 'wave' | 'cheer' | 'dance' | 'sit' | 'heart' | 'hug' | 'bow' | 'clap' | 'lantern' | 'strum' | 'play' | 'gaze';
+export type AnimName = 'idle' | 'walk' | 'wave' | 'cheer' | 'dance' | 'sit' | 'seat' | 'heart' | 'hug' | 'bow' | 'clap' | 'lantern' | 'strum' | 'play' | 'gaze';
 
 export interface AnimDef {
   name: AnimName;
@@ -33,8 +33,10 @@ export const ANIMS: AnimDef[] = [
   { name: 'wave', frames: 8, fps: 9, loop: false, views: ['down'] },
   { name: 'cheer', frames: 6, fps: 9, loop: false, views: ['down'] },
   { name: 'dance', frames: 8, fps: 8, loop: true, views: ['down'] },
-  // Sitting on the ground, or on a seat facing any way (see heaven/pastimes).
+  // Sitting on the ground, cross-legged.
   { name: 'sit', frames: 4, fps: 3, loop: true, views: ['down', 'up', 'side'] },
+  // Sat on a seat facing any way (see heaven/pastimes): thighs out, shins hanging.
+  { name: 'seat', frames: 4, fps: 3, loop: true, views: ['down', 'up', 'side'] },
   { name: 'heart', frames: 6, fps: 6, loop: false, views: ['down'] },
   // A hug: from the side, arms round whoever stands there; from the front, arms opened then wrapped round.
   { name: 'hug', frames: 10, fps: 6, loop: false, views: ['down', 'side'] },
@@ -50,7 +52,8 @@ export const ANIMS: AnimDef[] = [
   { name: 'gaze', frames: 4, fps: 2, loop: true, views: ['up'] },
 ];
 
-const shY = (k: Kit, bob: number, hop = 0, sit = false) => 18 - k.tall + bob - hop + (sit ? 4 : 0);
+/** Where the shoulders are: `sit` lowers them on the ground (true) or on a seat ('seat'). */
+const shY = (k: Kit, bob: number, hop = 0, sit: boolean | 'seat' = false) => 18 - k.tall + bob - hop + (sit === 'seat' ? SEAT_DROP : sit ? GROUND_DROP : 0);
 
 function standing(k: Kit, view: View, bob = 0): Pose {
   const s = shY(k, bob);
@@ -178,28 +181,60 @@ export function pose(k: Kit, anim: AnimName, view: View, i: number): Pose {
     return p;
   }
   if (anim === 'sit') {
+    // On the ground, cross-legged: knees out to the sides, feet tucked in under them, hands in the lap.
     const bob = [0, 0, 1, 1][i];
     const p = standing(k, view, bob);
     p.sit = true;
     const s = shY(k, bob, 0, true);
     if (view === 'side') {
-      // Facing left on a seat: thighs out level, shins down, hands resting on the knees.
+      // Facing left: legs out in front, knees a little up, hands on them.
       p.feet = [
-        { x: 7.6, y: 31 },
-        { x: 8.6, y: 31 },
+        { x: 7.4, y: 31 },
+        { x: 8.4, y: 31 },
       ];
       p.hands = [
-        { x: 9.4, y: s + 6.4 },
-        { x: 10.2, y: s + 6.2 },
+        { x: 9.2, y: s + 5.6 },
+        { x: 10, y: s + 5.4 },
       ];
     } else {
       p.feet = [
-        { x: 9.6, y: 31 },
-        { x: 14.4, y: 31 },
+        { x: 12.9, y: 31 },
+        { x: 11.1, y: 31 },
       ];
       p.hands = [
-        { x: 12 - k.sw + 0.4, y: s + 5.6 },
-        { x: 12 + k.sw - 0.4, y: s + 5.6 },
+        { x: 12 - 1.2, y: s + 6.4 },
+        { x: 12 + 1.2, y: s + 6.4 },
+      ];
+    }
+    p.carry = false;
+    p.blink = i === 3;
+    return p;
+  }
+  if (anim === 'seat') {
+    // On a seat: thighs out level, shins hanging, hands resting on the knees.
+    const bob = [0, 0, 1, 1][i];
+    const p = standing(k, view, bob);
+    p.sit = true;
+    p.seat = true;
+    const s = shY(k, bob, 0, 'seat');
+    if (view === 'side') {
+      // Facing left.
+      p.feet = [
+        { x: 8.3, y: 31 },
+        { x: 9.3, y: 31 },
+      ];
+      p.hands = [
+        { x: 9.4, y: s + 6.6 },
+        { x: 10.2, y: s + 6.4 },
+      ];
+    } else {
+      p.feet = [
+        { x: 10, y: 31 },
+        { x: 14, y: 31 },
+      ];
+      p.hands = [
+        { x: 12 - k.sw + 0.6, y: s + 7 },
+        { x: 12 + k.sw - 0.6, y: s + 7 },
       ];
     }
     p.carry = false;
@@ -229,14 +264,15 @@ export function pose(k: Kit, anim: AnimName, view: View, i: number): Pose {
     const bob = [0, 0, 1, 1, 0, 0][i];
     const p = standing(k, view, bob);
     p.sit = true;
-    const s = shY(k, bob, 0, true);
+    p.seat = true;
+    const s = shY(k, bob, 0, 'seat');
     p.carry = false;
     const a = [0, 1, 0, -1, 0, 1][i];
     const b = [-1, 0, 1, 0, -1, 0][i];
     if (view === 'side') {
       p.feet = [
-        { x: 7.6, y: 31 },
-        { x: 8.6, y: 31 },
+        { x: 8.3, y: 31 },
+        { x: 9.3, y: 31 },
       ];
       p.hands = [
         { x: 7.6 + a * 0.5, y: s + 3.4 + a },
@@ -244,8 +280,8 @@ export function pose(k: Kit, anim: AnimName, view: View, i: number): Pose {
       ];
     } else {
       p.feet = [
-        { x: 9.6, y: 31 },
-        { x: 14.4, y: 31 },
+        { x: 10, y: 31 },
+        { x: 14, y: 31 },
       ];
       p.hands = [
         { x: 12 - k.sw + 0.2 + a, y: s + 3.2 - Math.abs(a) * 0.4 },
@@ -496,11 +532,69 @@ function legCover(k: Kit, w: Wear): { to: number; r: number; m: Material } | nul
   }
 }
 
+/** A leg as a path from the hip (0) through the knee, when it bends, to the ankle (1). */
+interface LegPath {
+  at(t: number): P;
+  /** Draw `f` along each straight piece between t0 and t1. */
+  pieces(t0: number, t1: number, f: (a: P, b: P, i: number) => void): void;
+  /** Where the knee is along it. */
+  knee: number;
+}
+
+function legPath(h: P, knee: P | null, a: P): LegPath {
+  const pts = knee ? [h, knee, a] : [h, a];
+  const lens = pts.slice(1).map((p, i) => Math.hypot(p.x - pts[i].x, p.y - pts[i].y));
+  const total = lens.reduce((s, l) => s + l, 0) || 1;
+  const at = (t: number): P => {
+    let d = Math.max(0, Math.min(1, t)) * total;
+    for (let i = 0; i < lens.length; i++) {
+      if (d <= lens[i] || i === lens.length - 1) {
+        const u = lens[i] ? Math.min(1, d / lens[i]) : 0;
+        return { x: pts[i].x + (pts[i + 1].x - pts[i].x) * u, y: pts[i].y + (pts[i + 1].y - pts[i].y) * u };
+      }
+      d -= lens[i];
+    }
+    return a;
+  };
+  const marks = [0, ...lens.map((_, i) => lens.slice(0, i + 1).reduce((s, l) => s + l, 0) / total)];
+  return {
+    at,
+    knee: knee ? marks[1] : 0.52,
+    pieces(t0, t1, f) {
+      for (let i = 0; i + 1 < marks.length; i++) {
+        const s0 = Math.max(t0, marks[i]);
+        const s1 = Math.min(t1, marks[i + 1]);
+        if (s1 > s0) f(at(s0), at(s1), i);
+      }
+    },
+  };
+}
+
 /** A band straight across a leg at `t` of the way from hip to ankle, over what's drawn there in `on`. */
-function legBand(c: PixelCanvas, a: P, b: P, t: number, r: number, on: Material, m: Material, bias = 0): void {
-  const x = a.x + (b.x - a.x) * t;
-  const y = Math.round(a.y + (b.y - a.y) * t);
+function legBand(c: PixelCanvas, leg: LegPath, t: number, r: number, on: Material, m: Material, bias = 0): void {
+  const { x, y: fy } = leg.at(t);
+  const y = Math.round(fy);
   for (let px = Math.floor(x - r - 0.5); px <= Math.ceil(x + r); px++) if (c.materialAt(px, y) === on) c.px(px, y, m, cyl((px + 0.5 - x) / (r + 0.5), 0.2), { bias });
+}
+
+/**
+ * Where a knee bends, if it does: on a seat the thigh comes out toward us (a
+ * short lap under the body) or forward (side on), and the shin hangs from
+ * it; on the ground the knees go out wide with the feet crossed under them,
+ * or up a little with the legs out in front (side on). Standing, the leg is
+ * one straight line.
+ */
+function kneeOf(k: Kit, g: Geo, i: number, hip: P): P | null {
+  const p = g.pose;
+  if (!p.sit) return null;
+  const out = i ? 1 : -1;
+  if (p.seat) {
+    if (g.view === 'side') return { x: g.cx - 3.2 - (i ? 0 : 0.4), y: hip.y + 0.9 };
+    if (g.view === 'down') return { x: hip.x + out * 0.4, y: hip.y + 2 };
+    return null;
+  }
+  if (g.view === 'side') return { x: g.cx - 2.8 - (i ? 0 : 0.4), y: hip.y - 0.4 };
+  return { x: g.cx + out * (k.hw + 1.1), y: hip.y + 1.2 };
 }
 
 function legs(c: PixelCanvas, k: Kit, g: Geo, w: Wear): void {
@@ -511,20 +605,31 @@ function legs(c: PixelCanvas, k: Kit, g: Geo, w: Wear): void {
     const f = g.feet[i];
     const hipX = side ? g.cx + 0.3 + (i ? 0.6 : -0.2) : g.cx + (i ? 1.65 : -1.65);
     const hipY = g.hip;
-    const ax = f.x;
-    const ay = f.y - 1.6;
+    const hipP = { x: hipX, y: hipY };
+    const ankP = { x: f.x, y: f.y - 1.6 };
+    const leg = legPath(hipP, kneeOf(k, g, i, hipP), ankP);
     const far = side && i === 1 ? -1 : 0;
     // Which way is out, front on (seen from behind the legs swap, but a stripe down the outside is still outside).
     const out = side ? 0 : i ? 1 : -1;
+    // Sat on a seat seen from the front, the thighs come toward us as a full lap
+    // and the shins hang thinner below it, in its shadow: that's what reads as sitting.
+    const lap = !!g.pose.seat && g.view === 'down';
+    const thick = (piece: number, r: number) => (lap ? (piece === 0 ? r + 0.25 : r - 0.25) : r);
+    const shade = (piece: number) => far + (lap && piece === 1 ? -1 : 0);
     c.part();
-    c.capsule(hipX, hipY, ax, ay, 1.4, 1.25, k.skin, { bias: far });
+    leg.pieces(0, 1, (a, b, n) => c.capsule(a.x, a.y, b.x, b.y, thick(n, 1.4), thick(n, 1.25), k.skin, { bias: shade(n) }));
     if (cover) {
       const M = cover.m;
-      const ex = hipX + (ax - hipX) * cover.to;
-      const ey = hipY + (ay - hipY) * cover.to;
-      const hipP = { x: hipX, y: hipY };
-      const ankP = { x: ax, y: ay };
-      c.capsule(hipX, hipY - 0.5, ex, ey, cover.r, w.bottom === 'bloomers' && !w.suit ? cover.r - 0.4 : cover.r - 0.1, M, { bias: far });
+      const e = leg.at(cover.to);
+      const ex = e.x;
+      const ey = e.y;
+      const bent = !!g.pose.sit;
+      leg.pieces(0, cover.to, (a, b, n) => {
+        const top = Math.abs(a.x - hipX) < 0.01 && Math.abs(a.y - hipY) < 0.01;
+        const end = Math.abs(b.x - ex) < 0.01 && Math.abs(b.y - ey) < 0.01;
+        const r1 = end && !bent && w.bottom === 'bloomers' && !w.suit ? cover.r - 0.4 : end && !bent ? cover.r - 0.1 : cover.r;
+        c.capsule(a.x, top ? a.y - 0.5 : a.y, b.x, b.y, thick(n, cover.r), thick(n, r1), M, { bias: shade(n) });
+      });
       const what = w.suit ? w.dress : w.bottom;
       if (what === 'rolled' || what === 'shorts' || what === 'coveralls') {
         // A turned-up cuff, lighter where the cloth folds over.
@@ -532,43 +637,49 @@ function legs(c: PixelCanvas, k: Kit, g: Geo, w: Wear): void {
       }
       if (what === 'bloomers') for (let dx = -1; dx <= 1; dx++) c.px(Math.round(ex + dx - 0.5), Math.round(ey + 0.5), M, FLAT, { bias: -2 + far });
       if (what === 'cargo' || what === 'coveralls') {
-        const px = Math.round(hipX + (ax - hipX) * 0.45 + (side ? 0 : i ? 0.6 : -1.4));
-        const py = Math.round(hipY + (ay - hipY) * 0.45);
+        const q = leg.at(0.45);
+        const px = Math.round(q.x + (side ? 0 : i ? 0.6 : -1.4));
+        const py = Math.round(q.y);
         for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) c.px(px + x, py + y, M, FLAT, { bias: (y === 0 ? 0 : -1) + far });
       }
       if (what === 'joggers' || what === 'boardshorts') {
         // A stripe down the outside of the leg in the trim's colour, and joggers' gathered cuffs.
         const off = side ? 0.2 : out * (cover.r - 0.55);
-        if (!side || i === 0) c.line(hipX + off - 0.5, hipY - 0.2, ex + off - 0.5, ey - 0.6, k.trim, () => cyl(out * 0.6), { bias: far });
-        if (what === 'joggers') legBand(c, hipP, ankP, 0.95, cover.r - 0.3, M, M, -1 + far);
-        else legBand(c, hipP, ankP, cover.to - 0.03, cover.r, M, M, -1 + far);
+        if (!side || i === 0) leg.pieces(0, cover.to, (a, b) => c.line(a.x + off - 0.5, a.y - 0.2, b.x + off - 0.5, b.y - 0.6, k.trim, () => cyl(out * 0.6), { bias: far }));
+        if (what === 'joggers') legBand(c, leg, 0.95, cover.r - 0.3, M, M, -1 + far);
+        else legBand(c, leg, cover.to - 0.03, cover.r, M, M, -1 + far);
       }
       if (what === 'ripped') {
         // Torn knees with white threads across, and a faded thigh.
-        const kx = Math.round(hipX + (ax - hipX) * 0.56 - 0.5);
-        const ky = Math.round(hipY + (ay - hipY) * 0.56);
+        const q = leg.at(bent ? leg.knee : 0.56);
+        const kx = Math.round(q.x - 0.5);
+        const ky = Math.round(q.y);
         if (!side || i === 0) {
           c.px(kx, ky, k.skin, FLAT, { bias: far });
           c.px(kx, ky + 1, k.linen, FLAT, { bias: far });
           if (!side) c.px(kx + (i ? -1 : 1), ky, k.linen, FLAT, { bias: far });
         }
-        if (i === 1 && !side) c.px(Math.round(hipX + (ax - hipX) * 0.28 - 0.5), Math.round(hipY + (ay - hipY) * 0.28), k.skin, FLAT);
-        const tx = Math.round(hipX + (ax - hipX) * 0.2 - 0.5);
+        const th = leg.at(0.28);
+        if (i === 1 && !side && !bent) c.px(Math.round(th.x - 0.5), Math.round(th.y), k.skin, FLAT);
+        const tx = Math.round(leg.at(0.2).x - 0.5);
         for (let y = Math.round(hipY + 0.5); y < ky - 1; y++) if (c.materialAt(tx, y) === M) c.shade(tx, y, 1);
       }
       if (what === 'spacesuit') {
-        legBand(c, hipP, ankP, 0.5, cover.r, M, M, -1 + far);
-        legBand(c, hipP, ankP, 0.93, cover.r, M, k.trim, far);
+        legBand(c, leg, 0.5, cover.r, M, M, -1 + far);
+        legBand(c, leg, 0.93, cover.r, M, k.trim, far);
       }
       if (what === 'knight') {
         // Knee cops catching the light, and the greaves' edge.
-        const kx = hipX + (ax - hipX) * 0.52;
-        const ky = hipY + (ay - hipY) * 0.52;
+        const q = leg.at(bent ? leg.knee : 0.52);
         c.part();
-        c.ellipse(kx + (side ? -0.6 : 0), ky, 1.5, 1.1, M, { bias: 1 + far });
-        legBand(c, hipP, ankP, 0.75, cover.r, M, M, -1 + far);
+        c.ellipse(q.x + (side ? -0.6 : 0), q.y, 1.5, 1.1, M, { bias: 1 + far });
+        legBand(c, leg, 0.75 + (bent ? 0.1 : 0), cover.r, M, M, -1 + far);
       }
-      if (what === 'ninja') for (const t of [0.7, 0.8, 0.9]) legBand(c, hipP, ankP, t, cover.r, M, M, -1 + far);
+      if (what === 'ninja') for (const t of [0.7, 0.8, 0.9]) legBand(c, leg, t, cover.r, M, M, -1 + far);
+    } else if (g.pose.seat && g.view === 'down') {
+      // Bare knees catch the light where they come toward us.
+      const q = leg.at(leg.knee);
+      c.px(Math.round(q.x - 0.5), Math.round(q.y - 0.6), k.skin, FLAT, { bias: 1 + far });
     }
     shoe(c, k, f, side, far);
   }
@@ -1200,7 +1311,8 @@ function bottoms(c: PixelCanvas, k: Kit, g: Geo, w: Wear): void {
   if (w.dress !== 'none') {
     const hem = DRESS_HEM[w.dress];
     const kind = w.dress === 'starrobe' ? 'stars' : w.dress === 'gown' || w.dress === 'ballgown' ? 'tier' : 'plain';
-    const end = g.pose.sit ? Math.min(31, g.hip + 4) : hem - g.pose.hop;
+    // Sat on a seat the skirt drapes over the knees and the shins show below it; on the ground it pools.
+    const end = g.pose.seat ? Math.min(hem, g.hip + 3) : g.pose.sit ? Math.min(31, g.hip + 4) : hem - g.pose.hop;
     skirt(c, k, g, k.dress, end, DRESS_FLARE[w.dress], kind, w.dress === 'captain' ? 1.1 : 0);
     const cx = Math.round(g.cx);
     const D = w.torso;
