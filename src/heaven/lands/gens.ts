@@ -12,12 +12,15 @@ import { HushGen } from './hushfall/gen';
 import { hushSheets } from './hushfall/art';
 import { LumenGen } from './lumen/gen';
 import { lumenSheets } from './lumen/art';
+import { DuneGen } from './dunes/gen';
+import { duneSheets } from './dunes/art';
 
 const MAKERS: Record<string, { gen: () => LandGen; sheets: () => SheetDef[] }> = {
   shore: { gen: () => new ShoreGen(), sheets: shoreSheets },
   saltflats: { gen: () => new SaltGen(), sheets: saltSheets },
   hushfall: { gen: () => new HushGen(), sheets: hushSheets },
   lumen: { gen: () => new LumenGen(), sheets: lumenSheets },
+  dunes: { gen: () => new DuneGen(), sheets: duneSheets },
 };
 
 const made = new Map<string, LandGen>();

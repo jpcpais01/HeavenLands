@@ -17,9 +17,10 @@ import { SHORE } from './shore';
 import { SALTFLATS } from './saltflats';
 import { HUSHFALL } from './hushfall';
 import { LUMEN } from './lumen';
+import { DUNES } from './dunes';
 import type { LandDef } from './types';
 
-export const LANDS: LandDef[] = [SHORE, SALTFLATS, HUSHFALL, LUMEN];
+export const LANDS: LandDef[] = [SHORE, SALTFLATS, HUSHFALL, LUMEN, DUNES];
 
 /** Each land's gen with its layouts kept, shared by the arena's feet and the runtime. */
 const worlds = new Map<string, LandWorld>();
