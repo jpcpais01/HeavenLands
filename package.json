@@ -9,6 +9,7 @@
     "preview": "vite preview --host",
     "typecheck": "tsc --noEmit",
     "wanderer": "tsx scripts/wanderer.ts wanderer.png 6",
+    "outfits": "tsx scripts/outfits.ts outfits.png 4",
     "lands": "tsx scripts/lands.ts"
   },
   "dependencies": {

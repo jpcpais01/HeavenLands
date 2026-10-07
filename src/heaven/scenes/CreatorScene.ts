@@ -38,12 +38,15 @@ import {
   HELD,
   MOUTHS,
   NECKS,
+  PRESETS,
+  presetWear,
   randomLook,
   SHOES,
   SKINS,
   TOPS,
   type Appearance,
   type Named,
+  type Preset,
 } from '../look';
 import { WFH } from '../art/sheet';
 import { buildCreatorFonts } from '../art/creatorFont';
@@ -168,8 +171,8 @@ const TABS: TabDef[] = [
       { kind: 'color', key: 'trim', label: 'Trim', list: CLOTH },
       { kind: 'pick', key: 'bottom', label: 'Bottoms', list: BOTTOMS, thumb: 'legs' },
       { kind: 'color', key: 'bottomColor', label: 'Bottoms colour', list: CLOTH },
-      { kind: 'pick', key: 'dress', label: 'Dress', list: DRESSES, thumb: 'dress' },
-      { kind: 'color', key: 'dressColor', label: 'Dress colour', list: CLOTH, of: 'dress' },
+      { kind: 'pick', key: 'dress', label: 'Dress or suit', list: DRESSES, thumb: 'dress' },
+      { kind: 'color', key: 'dressColor', label: 'Dress or suit colour', list: CLOTH, of: 'dress' },
       { kind: 'pick', key: 'shoes', label: 'Shoes', list: SHOES, thumb: 'feet' },
       { kind: 'color', key: 'shoesColor', label: 'Shoes colour', list: CLOTH, of: 'shoes' },
     ],
@@ -208,6 +211,8 @@ const wearOutfit = (look: Appearance, outfit: Appearance): Appearance => {
   return a;
 };
 const sameOutfit = (a: Appearance, b: Appearance): boolean => OUTFIT_KEYS.every((k) => a[k] === b[k]);
+/** Wearing a ready-made outfit: every choice it sets is as it sets it. */
+const wearingPreset = (a: Appearance, p: Preset): boolean => Object.entries(presetWear(p)).every(([k, v]) => a[k as Key] === v);
 /** Nothing worn there: the first entry of a list that starts with None (or bare feet). */
 const unworn = (list: Named[], i: number): boolean => list[i]?.id === 'none' || list[i]?.id === 'bare';
 const hexNum = (h: string): number => parseInt(h.slice(1), 16);
@@ -872,7 +877,30 @@ export class CreatorScene extends Phaser.Scene {
       : 'Tap an empty hanger to keep what you wear. Tap a kept outfit to put it on.';
     const t = inkText(this, 0, y, hint, this.armed ? C.roseDeep : C.inkSoft).setMaxWidth(cw);
     this.content.add(t);
-    return y + t.height + ROW_GAP;
+    y += t.height + ROW_GAP;
+    return this.presetsRow(g, y, cw);
+  }
+
+  /** Ready-made outfits: a portrait of each on the wanderer being made, its name under it; tap to put it on. */
+  private presetsRow(g: Phaser.GameObjects.Graphics, y: number, cw: number): number {
+    this.content.add(inkText(this, 0, y, 'Ready to wear', C.inkSoft));
+    y += LABEL_H;
+    const cols = clamp(Math.floor((cw + 4) / 48), 2, 5);
+    const cardW = Math.floor((cw - (cols - 1) * 4) / cols);
+    const cardH = WFH + 14;
+    PRESETS.forEach((p, i) => {
+      const x = (i % cols) * (cardW + 4);
+      const cy = y + Math.floor(i / cols) * (cardH + 4);
+      drawCard(g, x, cy, cardW, cardH, wearingPreset(this.look, p) ? TILE_PICKED : TILE_CARD);
+      const slot = OUTFIT_SLOTS + i;
+      this.thumbs.outfit(slot, () => ({ ...this.look, ...presetWear(p) }));
+      this.content.add(this.add.image(x + Math.round((cardW - 32) / 2), cy + 2, this.thumbs.outfitKey, `o${slot}`).setOrigin(0));
+      const name = inkText(this, 0, cy + cardH - 10, p.name, C.ink);
+      name.setX(Math.round(x + (cardW - name.width) / 2));
+      this.content.add(name);
+      this.inner.push({ x, y: cy, w: cardW, h: cardH, tap: () => this.wearPreset(p) });
+    });
+    return y + Math.ceil(PRESETS.length / cols) * (cardH + 4) + ROW_GAP;
   }
 
   private arrowButton(g: Phaser.GameObjects.Graphics, x: number, y: number, dir: 'left' | 'right', a: number): void {
@@ -1049,6 +1077,11 @@ export class CreatorScene extends Phaser.Scene {
 
   private wear(outfit: Appearance): void {
     this.look = wearOutfit(this.look, outfit);
+    this.changed();
+  }
+
+  private wearPreset(p: Preset): void {
+    this.look = { ...this.look, ...presetWear(p) };
     this.changed();
   }
 
