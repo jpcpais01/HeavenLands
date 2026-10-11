@@ -13,7 +13,7 @@ import { CRITTERS, critterById } from '../game/critters';
 import { daynight, type Phase } from '../game/daynight';
 import { SUN_SHADOW_ALPHA, sunShadow } from '../game/Wizard';
 import { sway, treeSwayReady } from '../game/treeSway';
-import { Pieces, sendPieces } from '../net/pieces';
+import { Pieces, farmFits, sendFarm, sendPieces } from '../net/pieces';
 import { session, type Msg } from '../net/session';
 import type { WorldScene } from '../scenes/WorldScene';
 import { HOME_SPAWN, homeWalkable, setHomeMask } from './homeGround';
@@ -145,6 +145,9 @@ export class Home implements LinkHost {
   private daylight = -1;
   private lastDay = dayKey();
   private pieces = new Pieces();
+  private farmPieces = new Pieces();
+  /** Friends' strokes that came before the home itself: laid once it's in. */
+  private early: BuildPatch[] = [];
   private netOff: (() => void) | null = null;
   private hero = { x: 0, y: 0 };
   private id = uid++;
@@ -190,7 +193,7 @@ export class Home implements LinkHost {
     this.cursor = add.graphics().setDepth(9000).setVisible(false);
     this.ghost = add.image(0, 0, 'home', 'chimney').setAlpha(0.6).setDepth(9001).setVisible(false);
     this.critters = new HomeCritters(scene);
-    this.farm = new Farm(scene, this.link.mine, () => this.farmChanged(), this.land);
+    this.farm = new Farm(scene, () => this.link.mine, () => this.farmChanged(), this.land);
     if (initial) this.farm.adopt(initial.farm);
     this.bridges = new BridgeView(scene, PLOT_X, PLOT_Y);
     this.roofView = new RoofView(scene, PLOT_X, PLOT_Y);
@@ -392,7 +395,12 @@ export class Home implements LinkHost {
       this.unplace(p);
       this.placed.delete(k);
     }
-    for (const [k, t] of want) if (!this.placed.has(k)) this.place(k, t);
+    for (const [k, t] of want) {
+      const p = this.placed.get(k);
+      // The same thing in a layout come whole (from the room or the cloud): it's that layout's object now, which doors and the eraser look for.
+      if (p) p.t = t;
+      else this.place(k, t);
+    }
     this.hangDoors();
     for (const p of this.placed.values()) p.house = this.houseAt[cellIndex(p.t.x, p.t.y + extent(p.part, p.t.turn).h - 1)];
     if (this.leaves) this.leaves.emitting = l.things.some((t) => LEAF_TINTS[t.id]);
@@ -701,6 +709,8 @@ export class Home implements LinkHost {
       this.ghost.setVisible(false);
       build.pressed = build.released = false;
       this.lastCell = null;
+      // Building ended mid-stroke (Esc, Done, the switch turned off): what was laid so far is kept, sent and undoable all the same.
+      this.endStroke();
       return;
     }
     if (build.undo) {
@@ -782,16 +792,16 @@ export class Home implements LinkHost {
     if (pick.layer === 'seed') return this.farm.canSow(cx, cy, pick.id);
     if (pick.layer === 'thing') {
       const p = partById(pick.id);
-      return !!p?.bridge && this.layout.canPlace(p, cx, cy);
+      return !!p?.bridge && this.layout.canPlace(p, cx, cy) && !this.farm.plotAt(cx, cy);
     }
     if (pick.layer === 'floor') {
       if (!FLOORS[pick.value - 1]?.water) return true;
       return !this.layout.thingsAt(cx, cy).some((t) => !partById(t.id)?.water && !partById(t.id)?.wall && !partById(t.id)?.door && !partById(t.id)?.critter);
     }
     // A critter's spot doesn't hold anything up: it finds open ground nearby.
-    if (pick.layer === 'wall') return !this.layout.thingsAt(cx, cy).some((t) => !partById(t.id)?.wall && !partById(t.id)?.door && !partById(t.id)?.critter) && !this.heroIn(cx, cy) && !this.layout.isWater(cx, cy) && !this.layout.tentAt(cx, cy);
+    if (pick.layer === 'wall') return !this.layout.thingsAt(cx, cy).some((t) => !partById(t.id)?.wall && !partById(t.id)?.door && !partById(t.id)?.critter) && !this.heroIn(cx, cy) && !this.layout.isWater(cx, cy) && !this.layout.tentAt(cx, cy) && !this.farm.plotAt(cx, cy);
     // A tent is its own walls: it goes on open ground, not over walls or water, nor on the hero (its hem would hold them).
-    if (pick.layer === 'tent') return !this.layout.wallAt(cx, cy) && !this.layout.isWater(cx, cy) && (this.layout.tentAt(cx, cy) > 0 || !this.heroIn(cx, cy));
+    if (pick.layer === 'tent') return !this.layout.wallAt(cx, cy) && !this.layout.isWater(cx, cy) && !this.farm.plotAt(cx, cy) && (this.layout.tentAt(cx, cy) > 0 || !this.heroIn(cx, cy));
     return pick.layer === 'roof' || i >= 0;
   }
 
@@ -869,8 +879,11 @@ export class Home implements LinkHost {
       this.farm.uproot(cx, cy);
       return false;
     }
-    if (what === 'floor') l.floor[i] = 0;
-    else if (what === 'wall') {
+    if (what === 'floor') {
+      l.floor[i] = 0;
+      // A pond taken up takes its lily pads with it.
+      l.things = l.things.filter((t) => !(partById(t.id)?.water === 'only' && t.x === cx && t.y === cy));
+    } else if (what === 'wall') {
       l.wall[i] = 0;
       this.checkDecor();
     } else if (what === 'roof') l.roof[i] = 0;
@@ -941,6 +954,13 @@ export class Home implements LinkHost {
     this.committed(change);
   }
 
+  /** Strokes made on an old copy of the home can't be undone over a new one come whole. */
+  private forgetStrokes(): void {
+    this.undoStack = [];
+    this.before = null;
+    build.canUndo = false;
+  }
+
   private undo(): void {
     const back = this.undoStack.pop();
     build.canUndo = this.undoStack.length > 0;
@@ -992,7 +1012,7 @@ export class Home implements LinkHost {
   /** The farm changed (sown, picked, pulled up): to the room, and kept like the home. */
   private farmChanged(): void {
     this.link.changed();
-    if (session.active) session.send({ t: 'fs', s: this.farm.encoded() });
+    if (session.active) sendFarm(this.farm.encoded());
   }
 
   // ---------------------------------------------------------------- The world (see worldLink.ts)
@@ -1009,6 +1029,7 @@ export class Home implements LinkHost {
   adopt(data: string, farm: string): void {
     const l = HomeLayout.decode(data);
     if (!l) return;
+    this.forgetStrokes();
     this.layout = l;
     this.refresh();
     this.farm.adopt(farm, true);
@@ -1018,15 +1039,20 @@ export class Home implements LinkHost {
   // ---------------------------------------------------------------- Online
 
   private receive(m: Msg): void {
+    // The room was left (another being joined): nothing more of it belongs here.
+    if (!this.scene.listening) return;
     switch (m.t) {
       case 'hq':
         // Someone just came: the home, the farm, the critters for the jar shelves and the time of day.
-        if (this.owner) {
-          sendPieces('hl', this.layout.encode(), { c: this.caught.join(','), fm: this.farm.encoded(), dn: daynight.phase, da: daynight.auto, dl: Math.round(daynight.left) }, m.f);
+        if (this.owner && this.arrived) {
+          const fm = this.farm.encoded();
+          sendPieces('hl', this.layout.encode(), { c: this.caught.join(','), ...(farmFits(fm) ? { fm } : {}), dn: daynight.phase, da: daynight.auto, dl: Math.round(daynight.left) }, m.f);
+          if (!farmFits(fm)) sendFarm(fm, m.f);
         }
         break;
       case 'hl': {
-        if (this.owner) break;
+        // Taken until the home is in, even by one the room passed to meanwhile.
+        if (this.owner && this.arrived) break;
         const got = this.pieces.take(m);
         if (!got) break;
         const f = got.first;
@@ -1037,11 +1063,13 @@ export class Home implements LinkHost {
         }
         const l = HomeLayout.decode(got.s);
         if (!l) break;
+        this.forgetStrokes();
         this.layout = l;
         this.arrived = true;
+        for (const p of this.early.splice(0)) this.lay(p);
         this.refresh();
         if (typeof f.fm === 'string') this.farm.adopt(f.fm, this.link.mine);
-        if (this.link.mine) collection.saveHome(got.s);
+        if (this.link.mine) collection.saveHome(this.layout.encode());
         break;
       }
       case 'bp': {
@@ -1066,6 +1094,13 @@ export class Home implements LinkHost {
           this.link.changed();
         }
         break;
+      case 'fsl': {
+        const got = this.farmPieces.take(m);
+        if (!got) break;
+        this.farm.adopt(got.s, this.link.mine);
+        this.link.changed();
+        break;
+      }
       case 'dn':
         daynight.adopt(m.v as Phase, !!m.a, m.l as number);
         this.lastDay = dayKey();
@@ -1075,8 +1110,17 @@ export class Home implements LinkHost {
 
   /** A friend's stroke: laid here too, and kept like one of this player's own. */
   private received(p: BuildPatch): void {
+    // Before the home is in, it waits (the home sent may not have it yet).
+    if (!this.arrived) {
+      this.early.push(p);
+      return;
+    }
     this.lay(p);
     this.keep();
+  }
+
+  ready(): boolean {
+    return this.arrived;
   }
 
   /**
@@ -1091,6 +1135,8 @@ export class Home implements LinkHost {
   }
 
   destroy(): void {
+    // Left mid-stroke: what was laid so far is saved and sent before the world lets go.
+    this.endStroke();
     this.link.destroy();
     this.netOff?.();
     this.netOff = null;

@@ -10,6 +10,7 @@
 
 import { CloudError, WorldsLocked, account, cloudReady, loadWorldDoc, type WorldDoc } from '../game/cloud';
 import { cozy } from '../game/cozy';
+import { PLACES } from '../heaven/places';
 
 export interface WorldRef {
   /** `<owner's uid>_<arena>`; '' for a world that can't be shared (played without an account). */
@@ -67,13 +68,16 @@ export const worlds = {
   locked: false,
   /** The last load failed for want of a connection (not because there was no such world). */
   offline: false,
+  /** This player's own shared world is being played by friends in a room that couldn't be joined (full, or out of reach): this visit keeps it out of the cloud, so it can't write over theirs. */
+  holdOff: false,
   /** A friend's world about to be opened (travel sets it, the world takes it), with what the cloud keeps of it. */
   entering: null as { ref: WorldRef; doc: WorldDoc } | null,
 
   /** Friends' worlds this player has been to, the latest first. */
   friends(): WorldRef[] {
     const list = read<unknown[]>(LIST_KEY, []);
-    return Array.isArray(list) ? list.filter(isRef).filter((r) => r.id && r.owner !== myId()) : [];
+    // Only worlds in places this build has (an old one's place may have been taken away since).
+    return Array.isArray(list) ? list.filter(isRef).filter((r) => r.id && r.owner !== myId() && PLACES.some((p) => p.arena === r.place)) : [];
   },
 
   /** A friend's world, to the top of the list. */

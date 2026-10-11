@@ -32,6 +32,7 @@ export class ForestFloors {
   private want = new Set<number>();
   /** The floors as last painted, to find what changed. */
   private shown = new Map<number, number>();
+  private shownWalls = new Map<number, number>();
   private version = 0;
   private daylight = 1;
 
@@ -45,11 +46,18 @@ export class ForestFloors {
     const changed = new Set<number>();
     for (const [k, v] of e.floors) if (this.shown.get(k) !== v) changed.add(k);
     for (const k of this.shown.keys()) if (!e.floors.has(k)) changed.add(k);
-    if (!changed.size) return;
-    this.shown = new Map(e.floors);
-    this.want.clear();
-    for (const k of e.floors.keys()) for (const p of this.round(k)) this.want.add(p);
-    for (const k of changed) {
+    // Walls shade the floor at their feet and stop soft floors at a house's walls: a wall built or taken away repaints round it too.
+    const walls = new Set<number>();
+    for (const [k, v] of e.walls) if (this.shownWalls.get(k) !== v) walls.add(k);
+    for (const k of this.shownWalls.keys()) if (!e.walls.has(k)) walls.add(k);
+    if (walls.size) this.shownWalls = new Map(e.walls);
+    if (!changed.size && !walls.size) return;
+    if (changed.size) {
+      this.shown = new Map(e.floors);
+      this.want.clear();
+      for (const k of e.floors.keys()) for (const p of this.round(k)) this.want.add(p);
+    }
+    for (const k of [...changed, ...walls]) {
       for (const p of this.round(k)) {
         const had = this.patches.get(p);
         if (!had) continue;

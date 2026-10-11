@@ -24,6 +24,8 @@ export interface LinkHost {
   localT(): number;
   /** A newer copy of this player's own world came from the cloud (friends built in it while they were away): take it. */
   adopt(data: string, farm: string, caught: string): void;
+  /** The world is here whole (a guest's once the host has sent it): nothing goes to the cloud before. */
+  ready(): boolean;
 }
 
 export class WorldLink {
@@ -54,6 +56,8 @@ export class WorldLink {
   ) {
     const entering = worlds.entering?.ref.place === arena ? worlds.entering : null;
     worlds.entering = null;
+    const holdOff = worlds.holdOff;
+    worlds.holdOff = false;
     this.wasHost = !session.active || session.isHost;
     if (this.wasHost && entering) {
       // A friend's world, opened while they're away: what the cloud keeps of it is the world.
@@ -68,8 +72,10 @@ export class WorldLink {
       this.open = worlds.friendsBuild;
       this.initial = null;
       this.mineFlag = true;
-      this.shared = !!this.ref.id && worlds.isShared(arena);
+      this.shared = !!this.ref.id && worlds.isShared(arena) && !holdOff;
       this.known = true;
+      // Friends are playing it in a room that couldn't be joined: alone, and no room opened here this visit.
+      if (holdOff) this.tried = true;
       if (this.shared) void this.catchUp();
     } else {
       this.ref = { id: '', place: arena, owner: '', name: '' };
@@ -92,9 +98,9 @@ export class WorldLink {
     return !session.active || session.isHost;
   }
 
-  /** This player may build here. */
+  /** This player may build here: their own world, or a friend's that lets them while it's kept (a room, or opened from the cloud). */
   get canBuild(): boolean {
-    return this.known && (this.mineFlag || this.open);
+    return this.known && (this.mineFlag || (this.open && (session.active || !!this.initial)));
   }
 
   /** It's kept in the cloud for friends. */
@@ -112,13 +118,14 @@ export class WorldLink {
       worlds.setShared(this.arena, false);
       return;
     }
-    this.open = doc.open;
+    // The switch is the owner's, kept on their device: the cloud's copy of it follows.
+    if (doc.open !== this.open) void this.write({ open: this.open });
     if (doc.dataT > this.host.localT() + 1000 && doc.data) this.host.adopt(doc.data, doc.farm, doc.caught);
   }
 
   /** Something changed here (built by anyone, or come in from the room): to the cloud a little later. */
   changed(): void {
-    if (!this.shared || !this.keeper) return;
+    if (!this.shared || !this.keeper || !this.host.ready()) return;
     this.dirty = true;
     this.writeT = SAVE_DELAY;
   }
@@ -141,8 +148,8 @@ export class WorldLink {
       this.tried = true;
       void this.openRoom();
     }
-    if (this.dirty && host && (this.writeT -= dt) <= 0 && performance.now() - this.lastWrite > MIN_GAP) this.flush();
-    if (this.shared && session.active && session.isHost && (this.beatT -= dt) <= 0) {
+    if (this.dirty && host && this.host.ready() && (this.writeT -= dt) <= 0 && performance.now() - this.lastWrite > MIN_GAP) this.flush();
+    if (this.shared && session.active && session.isHost && this.host.ready() && (this.beatT -= dt) <= 0) {
       this.beatT = ROOM_BEAT;
       void this.write({ room: session.room?.code ?? '', roomT: Date.now() });
     }
@@ -193,7 +200,7 @@ export class WorldLink {
   }
 
   private flush(keepalive = false): void {
-    if (!this.dirty) return;
+    if (!this.dirty || !this.host.ready()) return;
     this.dirty = false;
     this.lastWrite = performance.now();
     const s = this.host.state();
@@ -215,20 +222,39 @@ export class WorldLink {
   /** Whose world this is and whether friends may build, to the room (or one who just came). */
   announce(to?: number): void {
     if (!session.active || !session.isHost) return;
-    session.send({ t: 'wi', id: this.ref.id, pl: this.arena, o: this.ref.owner, n: this.ref.name, b: this.open }, to);
+    // `s`: kept in the cloud, so whoever the room passes to keeps it there too.
+    session.send({ t: 'wi', id: this.ref.id, pl: this.arena, o: this.ref.owner, n: this.ref.name, b: this.open, s: this.shared ? 1 : 0 }, to);
+  }
+
+  /**
+   * Its owner closes the room to friends: those still in it play on in
+   * their own copy, but no longer keep the world in the cloud (only the
+   * owner does now, alone), so the two can't write over each other.
+   */
+  closeToFriends(): void {
+    if (!this.mineFlag || !session.active || !session.isHost) return;
+    session.send({ t: 'wx' });
+    // Friends who open it now open the owner's own, not the room left behind.
+    if (this.shared) void this.write({ room: '' }, true);
   }
 
   private receive(m: Msg): void {
+    if (!this.world.listening) return;
     if (m.t === 'wq' || m.t === 'hq') {
       if (session.isHost) this.announce(m.f);
       return;
     }
     if (m.t === 'closed') return;
+    if (m.t === 'wx') {
+      if (!this.mineFlag) this.shared = false;
+      return;
+    }
     if (m.t !== 'wi' || session.isHost) return;
     this.ref = { id: String(m.id ?? ''), place: this.arena, owner: String(m.o ?? ''), name: String(m.n ?? '') };
     this.open = !!m.b;
     this.known = true;
     this.mineFlag = !!this.ref.owner && this.ref.owner === myId();
+    this.shared = !!m.s && !!this.ref.id;
     worlds.remember(this.ref);
   }
 
