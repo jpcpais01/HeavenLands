@@ -42,6 +42,8 @@ const STARRY = 0.3;
 const DOZE_MS = 1100;
 const DARK_MS = 1400;
 const WAKE_MS = 1300;
+/** Moved this far off a pastime's spot (travelled away: a campfire on the map), it ends there, nowhere else, px. */
+const LEFT = 24;
 
 type Doing =
   | { kind: 'seat'; spot: Spot; from: { x: number; y: number } }
@@ -99,16 +101,22 @@ export class Pastimes implements CozyPastimes {
     if (pastimeHud.jam) {
       pastimeHud.jam = false;
       if (this.doing?.kind === 'jam') this.stop();
-      else if (!this.doing && this.free()) this.startJam();
+      // (The farm's E nearby doesn't stop the lute: it has its own button.)
+      else if (!this.doing && !build.on && !fishHud.active) this.startJam();
     }
     this.follow(hero, dt, daylight);
 
     pastimeHud.busy = !!this.doing && this.doing.kind !== 'seat';
+    pastimeHud.asleep = this.doing?.kind === 'sleep' && !this.doing.woke;
     pastimeHud.jamming = this.doing?.kind === 'jam' || this.doing?.kind === 'play';
     this.near = this.doing || !this.free() ? null : this.lookAround(hero.x, hero.y);
     const n = this.near;
     pastimeHud.near = !n ? '' : 'find' in n ? `find_${n.find.def.id}` : 'honey' in n ? 'find_honey' : ICONS[n.spot.kind];
     this.showLabel();
+  }
+
+  get engaged(): boolean {
+    return !!this.doing;
   }
 
   /** Nothing else has the hero: no build mode, no rod out, nothing the farm would do here. */
@@ -120,11 +128,21 @@ export class Pastimes implements CozyPastimes {
   private follow(hero: Wanderer, dt: number, daylight: number): void {
     const d = this.doing;
     if (!d) return;
+    // Taken far off the spot (travelled from the map): the pastime ends where they are now.
+    if ('spot' in d && Math.hypot(hero.x - d.spot.x, hero.y - d.spot.y) > LEFT) {
+      this.drop(hero, d);
+      return;
+    }
     if (d.kind === 'sleep') {
       this.sleeping(hero, d, dt);
       return;
     }
-    const pose = d.kind === 'seat' ? 'seat' : d.kind === 'play' ? 'play' : d.kind === 'gaze' ? 'gaze' : 'strum';
+    // Building started on a seat (the tray's B): up first.
+    if (build.on) {
+      this.stop();
+      return;
+    }
+    const pose = poseOf(d);
     // Walked off (or anything else took the pose): the pastime ends with it.
     if (hero.posing !== pose) {
       this.stop();
@@ -265,16 +283,22 @@ export class Pastimes implements CozyPastimes {
       d.woke = true;
       // Morning, unless it's a friend's home: their clock keeps the time, so it was only a nap.
       if (!daynight.follower && daynight.enabled) {
-        if (daynight.auto) daynight.adopt('morning', true, 120_000);
-        else daynight.set('morning');
+        // set() keeps it, so a reload doesn't bring the night back; the clock runs on as it did.
+        const auto = daynight.auto;
+        daynight.set('morning');
+        if (auto) daynight.setAuto(true);
         PHASES.forEach((p, i) => (daynight.mix[i] = p === 'morning' ? 1 : 0));
       }
-      w.cameras.main.fadeIn(WAKE_MS, 8, 8, 24);
+      const cam = w.cameras.main;
+      cam.fadeIn(WAKE_MS, 8, 8, 24);
+      // A finished fade still draws over the screen every frame till it's cleared.
+      cam.once(Phaser.Cameras.Scene2D.Events.FADE_IN_COMPLETE, () => cam.fadeEffect.reset());
       sound.wake();
     }
     if (d.woke && d.t >= DOZE_MS + DARK_MS + WAKE_MS * 0.6) {
       this.doing = null;
-      this.say(daynight.follower ? 'WHAT A LOVELY NAP' : 'GOOD MORNING', 0xffe0a0);
+      // A friend's home keeps their clock, and a place of endless night (Starwatch) has no morning: it was a nap.
+      this.say(daynight.follower || !daynight.enabled ? 'WHAT A LOVELY NAP' : 'GOOD MORNING', 0xffe0a0);
     }
   }
 
@@ -307,11 +331,24 @@ export class Pastimes implements CozyPastimes {
       this.world.cameras.main.resetFX();
       return;
     }
-    if (hero.posing) hero.release();
+    // Only the pastime's own pose: an emote that took over (a wave from the bench) plays on.
+    if (hero.posing === poseOf(d)) hero.release();
     if ('from' in d) {
       hero.x = d.from.x;
       hero.y = d.from.y;
     }
+    this.closeOverlays();
+  }
+
+  /** Ended by being taken away from it: no going back to where they stood. */
+  private drop(hero: Wanderer, d: Doing): void {
+    this.doing = null;
+    if (d.kind === 'sleep') {
+      hero.alpha = 1;
+      this.world.cameras.main.resetFX();
+      return;
+    }
+    if (hero.posing === poseOf(d)) hero.release();
     this.closeOverlays();
   }
 
@@ -356,5 +393,9 @@ export class Pastimes implements CozyPastimes {
     pastimeHud.busy = false;
     pastimeHud.jamming = false;
     pastimeHud.jam = false;
+    pastimeHud.asleep = false;
   }
 }
+
+/** The pose a pastime holds the hero in. */
+const poseOf = (d: Doing): string => (d.kind === 'seat' ? 'seat' : d.kind === 'play' ? 'play' : d.kind === 'gaze' ? 'gaze' : d.kind === 'jam' ? 'strum' : '');

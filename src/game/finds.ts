@@ -24,7 +24,7 @@ export interface FindDef {
 export const FINDS: FindDef[] = [
   { id: 'honey', one: 'Honey', many: 'Honey', places: {}, tint: 0xffc23a },
   { id: 'chanterelle', one: 'Chanterelle', many: 'Chanterelles', places: { forest: 3 }, tint: 0xf4a632 },
-  { id: 'mint', one: 'Wild mint', many: 'Wild mint', places: { forest: 2, garden: 3 }, tint: 0x7ad88a },
+  { id: 'mint', one: 'Wild mint', many: 'Wild mint', places: { forest: 2, dunes: 1 }, tint: 0x7ad88a },
   { id: 'clam', one: 'Clam', many: 'Clams', places: { shore: 3 }, tint: 0xe8c8b4 },
   { id: 'kelp', one: 'Sea kelp', many: 'Sea kelp', places: { shore: 2 }, tint: 0x5aa86a },
   { id: 'salt', one: 'Pink salt', many: 'Pink salt', places: { saltflats: 1 }, tint: 0xffb8c8 },
@@ -33,8 +33,9 @@ export const FINDS: FindDef[] = [
   { id: 'glowpetal', one: 'Glowpetal', many: 'Glowpetals', places: { lumen: 3 }, tint: 0x9ae8ff, glow: true },
   { id: 'lumenberry', one: 'Lumenberry', many: 'Lumenberries', places: { lumen: 2 }, tint: 0x7a8cff, glow: true, when: 'night' },
   { id: 'cloudberry', one: 'Cloudberry', many: 'Cloudberries', places: { island: 1 }, tint: 0xffa860 },
-  { id: 'lotus', one: 'Lotus root', many: 'Lotus roots', places: { garden: 2 }, tint: 0xf0b8c8 },
-  { id: 'glowcap', one: 'Glowcap', many: 'Glowcaps', places: { deep: 1 }, tint: 0x6affc8, glow: true },
+  // Lotus and glowcaps grew in the Sunken Garden and Glimmerdeep, since taken away: the dunes' oases and the Everwood's glowcap groves have them now.
+  { id: 'lotus', one: 'Lotus root', many: 'Lotus roots', places: { dunes: 2, forest: 1 }, tint: 0xf0b8c8 },
+  { id: 'glowcap', one: 'Glowcap', many: 'Glowcaps', places: { forest: 1, lumen: 1 }, tint: 0x6affc8, glow: true },
   { id: 'starsugar', one: 'Star sugar', many: 'Star sugar', places: { starwatch: 1 }, tint: 0xfff2a8, glow: true },
 ];
 

@@ -43,8 +43,8 @@ function canvasOf(px: Uint8ClampedArray): HTMLCanvasElement {
 const terrain = new Map<number, KeptTile>();
 /** Blank paper, by its place in the paper's repeat (see PAPER_REPEAT). */
 const blanks = new Map<number, { px: Uint8ClampedArray; canvas: HTMLCanvasElement }>();
+/** The tiles kept on the device, read in the first time the Everwood's map is made (not at every launch: it can be megabytes). */
 let kept: Map<number, KeptTile> | null = null;
-void loadKept().then((m) => (kept = m));
 
 interface Painter {
   worker: Worker;
@@ -110,6 +110,7 @@ export class TrekMap {
 
   constructor(private live: ForestGen) {
     listener = this;
+    if (!kept) void loadKept().then((m) => (kept = m));
   }
 
   /** Done with: chunks still out with the workers are kept, not shown. */

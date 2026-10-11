@@ -216,6 +216,19 @@ async function token(): Promise<string> {
   return s.idToken;
 }
 
+/**
+ * A fetch with the player's token. A token the cloud turns away though the
+ * clock says it's fresh (the device's clock moved, or it was revoked) is
+ * refreshed and the request tried once more.
+ */
+async function authFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const go = async () => fetch(url, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), Authorization: `Bearer ${await token()}` } });
+  const res = await go();
+  if (res.status !== 401 || !session) return res;
+  session.expires = 0;
+  return go();
+}
+
 const docUrl = (uid: string) =>
   `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/players/${uid}`;
 
@@ -243,7 +256,7 @@ export async function loadCloud(): Promise<CloudSave | null> {
   if (!s) return null;
   let res: Response;
   try {
-    res = await fetch(docUrl(s.uid), { headers: { Authorization: `Bearer ${await token()}` }, cache: 'no-store' });
+    res = await authFetch(docUrl(s.uid), { cache: 'no-store' });
   } catch (e) {
     throw e instanceof CloudError ? e : new CloudError('No connection.');
   }
@@ -273,9 +286,9 @@ export async function writeCloud(data: string, t: number, after: string | null, 
   let res: Response;
   try {
     // keepalive lets a write started as the page is hidden finish, but only for small bodies.
-    res = await fetch(`${docUrl(s.uid)}?${when}`, {
+    res = await authFetch(`${docUrl(s.uid)}?${when}`, {
       method: 'PATCH',
-      headers: { Authorization: `Bearer ${await token()}`, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body,
       keepalive: keepalive && body.length < 60_000,
     });
@@ -331,7 +344,7 @@ export async function loadWorldDoc(id: string): Promise<WorldDoc | null> {
   if (!session) throw new CloudError('Not logged in.');
   let res: Response;
   try {
-    res = await fetch(worldUrl(id), { headers: { Authorization: `Bearer ${await token()}` }, cache: 'no-store' });
+    res = await authFetch(worldUrl(id), { cache: 'no-store' });
   } catch (e) {
     throw e instanceof CloudError ? e : new CloudError('No connection.');
   }
@@ -355,9 +368,9 @@ export async function writeWorldDoc(id: string, fields: Partial<WorldDoc>, keepa
   const body = JSON.stringify({ fields: out });
   let res: Response;
   try {
-    res = await fetch(`${worldUrl(id)}?${mask}`, {
+    res = await authFetch(`${worldUrl(id)}?${mask}`, {
       method: 'PATCH',
-      headers: { Authorization: `Bearer ${await token()}`, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body,
       keepalive: keepalive && body.length < 60_000,
     });

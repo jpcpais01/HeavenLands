@@ -57,6 +57,15 @@ export function buildWanderer(a: Appearance, key: string): WandererSheet {
 /** The texture key for an appearance. */
 export const wandererKey = (a: Appearance): string => `wd_${encodeLook(a)}`;
 
+/** Let go of every wanderer sheet but `keep`'s (textures and animations): each is a few MB on the GPU. */
+export function releaseWanderers(scene: Phaser.Scene, keep: string): void {
+  for (const key of scene.textures.getTextureKeys()) {
+    if (!key.startsWith('wd_') || key === keep || key.endsWith('_e') || key.endsWith('_s')) continue;
+    for (const def of ANIMS) for (const d of ['down', 'up', 'left', 'right']) scene.anims.remove(`${key}_${def.name}_${d}`);
+    for (const k of [key, `${key}_e`, `${key}_s`]) if (scene.textures.exists(k)) scene.textures.remove(k);
+  }
+}
+
 /** Builds and registers an appearance's sheet if it isn't yet; returns its key. */
 export function ensureWanderer(scene: Phaser.Scene, a: Appearance): string {
   const key = wandererKey(a);

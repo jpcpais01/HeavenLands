@@ -238,6 +238,11 @@ export class PauseScene extends Phaser.Scene {
     this.picker?.sync(v.pointer);
   }
 
+  /** The menu is showing (the scene itself runs all through play, for its button). */
+  get menuOpen(): boolean {
+    return this.open;
+  }
+
   private setOpen(open: boolean): void {
     if (open === this.open || this.leaving) return;
     this.open = open;

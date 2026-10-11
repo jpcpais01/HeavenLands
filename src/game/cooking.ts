@@ -18,6 +18,7 @@ import type { BuffDef } from './buffs';
 import { recipeById, type Ingredient, type RecipeDef } from './recipes';
 import { collection } from './collection';
 import { findById, findKey } from './finds';
+import { cozy } from './cozy';
 
 export { RECIPES, recipeById, type Ingredient, type RecipeDef } from './recipes';
 
@@ -117,7 +118,9 @@ export function dishItem(id: string): ItemDef | null {
     use(ctx) {
       const v = ctx.hero.vitals;
       // Only a plain healing dish is refused at full health; one with a buff is always worth eating.
-      if (r.heal && !buff && !r.energy && v.hp >= v.max) {
+      // (In Heaven Lands health is always full: every dish is simply eaten.)
+      const plain = r.heal && !buff && !r.energy;
+      if (plain && v.hp >= v.max && !cozy.on) {
         ctx.pop('FULL', 0xffd35c);
         return false;
       }
@@ -125,6 +128,7 @@ export function dishItem(id: string): ItemDef | null {
       if (r.heal) {
         const got = ctx.heal(Math.round(v.max * r.heal));
         if (got > 0) ctx.pop(`+${got}`, 0x8cff7a);
+        else if (plain) ctx.pop('YUM!', r.tint);
       }
       if (r.energy) ctx.charge(r.energy);
       if (buff) {

@@ -10,6 +10,7 @@ import { GEAR, RARITY, gear, statLines, type GearNews } from '../game/gear';
 import { tileKey } from '../art/invTiles';
 import { InventoryView } from './inventoryView';
 import { PANEL, panelTexture, pixelText } from './widgets';
+import { cozy } from '../game/cozy';
 
 /** Banner: slide in, hold, fade out (ms). */
 const BANNER_IN = 180;
@@ -69,6 +70,13 @@ export class GearHud {
     this.view = new InventoryView(scene, { potions: false, maxCols: 6 });
     this.view.setPosition(PAD, TITLE_H);
     this.root = scene.add.container(0, 0, [this.frame, this.title, this.closeBg, this.closeX, this.view]).setVisible(false).setDepth(50);
+    // Heaven Lands has no gear: no chest button, and its keys open nothing.
+    if (cozy.on) {
+      this.button.setVisible(false);
+      this.chest.setVisible(false);
+      this.count.setVisible(false);
+      return;
+    }
 
     scene.input.keyboard?.on('keydown-I', () => this.toggle());
     scene.input.keyboard?.on('keydown-G', () => this.toggle());
@@ -78,6 +86,7 @@ export class GearHud {
   }
 
   toggle(): void {
+    if (cozy.on) return;
     this.open = !this.open;
     this.root.setVisible(this.open);
     if (this.open) {

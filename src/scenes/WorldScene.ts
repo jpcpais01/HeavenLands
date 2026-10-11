@@ -735,7 +735,7 @@ export class WorldScene extends Phaser.Scene {
       this.scene.launch('forestload');
       this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scene.stop('forestload'));
     }
-    this.showBanner(arena.name);
+    this.showBanner(cozy.placeName?.(arena.id) ?? arena.name);
     // The minimap in the corner (and in the Everwood, the explorer's map; in Heaven Lands' endless lands, a map painted round the hero).
     this.scene.launch('map');
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scene.stop('map'));
@@ -760,8 +760,8 @@ export class WorldScene extends Phaser.Scene {
       if (n >= 0 && n < HOTBAR_SIZE && !pastimeHud.busy) controls.items.push(n);
     });
 
-    // A fresh hotbar and no buffs each run.
-    inventory.reset(STARTING_ITEMS);
+    // A fresh hotbar and no buffs each run (in Heaven Lands no potions: nothing hurts there, and the slots are for dishes).
+    inventory.reset(cozy.on ? [] : STARTING_ITEMS);
     // The dish picked to take along, from the larder (see cooking.ts).
     warmFarm(this);
     syncLunch();
@@ -2410,8 +2410,8 @@ export class WorldScene extends Phaser.Scene {
     controls.ultTap = false;
     // Nothing to fight in Heaven Lands: the hero only walks (its emotes come from its own HUD).
     if (cozy.on) attack = special = ultPressed = false;
-    // Online the world keeps going while the menu is open; the hero just stands.
-    if (session.paused) {
+    // Online the world keeps going while the menu is open; the hero just stands. (And asleep in a bed, nothing stirs them.)
+    if (session.paused || pastimeHud.asleep) {
       mx = my = 0;
       attack = special = ultPressed = false;
     }
@@ -2533,7 +2533,9 @@ export class WorldScene extends Phaser.Scene {
     this.companion?.update(dt, this.hero.x, this.hero.y, this.downT > 0, this.daylight);
     if (controls.netTap) {
       controls.netTap = false;
-      if (this.downT <= 0 && !session.paused && !this.fishing?.tap() && !this.home?.act() && !this.places?.act() && !this.pastimes?.act()) this.critters?.swingNet(this.hero.x, this.hero.y, this.facing.x);
+      // A pastime under way (seated by the stove) takes E first: it's how to get up.
+      const busy = this.pastimes?.engaged ? this.pastimes.act() : false;
+      if (!busy && this.downT <= 0 && !session.paused && !this.fishing?.tap() && !this.home?.act() && !this.places?.act() && !this.pastimes?.act()) this.critters?.swingNet(this.hero.x, this.hero.y, this.facing.x);
     }
     // Heaven Lands' pastimes, after the farm has said what E does here.
     this.pastimes?.update(dt, this.daylight);

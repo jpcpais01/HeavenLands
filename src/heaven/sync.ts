@@ -68,6 +68,15 @@ let busy = false;
 let again = false;
 let lastWrite = 0;
 let lastSent = '';
+/**
+ * When this device's unsent changes began, as of the last time it matched
+ * the cloud (at launch, the changes left from before). Changes made this
+ * visit on top of a save that may be stale don't make it newer than another
+ * device's: only these count when the two are compared.
+ */
+let ownSince = 0;
+/** A cloud save this browser couldn't open: nothing is written over it from here. */
+let unreadable = false;
 const listeners = new Set<() => void>();
 
 function readState(): State {
@@ -150,7 +159,10 @@ async function pack(snap: Record<string, string>): Promise<string> {
 async function unpack(data: string): Promise<Record<string, string>> {
   let json = data.slice(1);
   if (data[0] === 'z') {
-    if (typeof DecompressionStream === 'undefined') throw new CloudError('This browser is too old to open your cloud save.');
+    if (typeof DecompressionStream === 'undefined') {
+      unreadable = true;
+      throw new CloudError('This browser is too old to open your cloud save.');
+    }
     const plain = new Blob([fromBase64(json)]).stream().pipeThrough(new DecompressionStream('gzip'));
     json = await new Response(plain).text();
   }
@@ -186,6 +198,7 @@ async function apply(remote: CloudSave, uid: string): Promise<void> {
     applying = false;
   }
   state = { uid, base: remote.t, dirty: 0 };
+  ownSince = 0;
   keepState();
   known = remote.updateTime;
   lastSent = remote.data;
@@ -203,7 +216,7 @@ function changed(key: string): void {
 }
 
 function schedule(delay = SAVE_DELAY): void {
-  if (!account() || pending || status === 'newer') return;
+  if (!account() || pending || unreadable || status === 'newer') return;
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => void push(), Math.max(delay, lastWrite + MIN_GAP - Date.now()));
   if (status !== 'error') setStatus('saving');
@@ -214,7 +227,7 @@ async function push(hidden = false): Promise<void> {
   if (timer) clearTimeout(timer);
   timer = null;
   const a = account();
-  if (!a || pending || status === 'newer') return;
+  if (!a || pending || unreadable || status === 'newer') return;
   if (busy) {
     again = true;
     return;
@@ -222,11 +235,17 @@ async function push(hidden = false): Promise<void> {
   busy = true;
   setStatus('saving');
   try {
-    // Not checked against the cloud yet this visit (it couldn't be reached at launch): see whether another device has saved since.
-    if (known === undefined) {
+    // Not checked against the cloud yet this visit (it couldn't be reached at launch), or this device never matched the account:
+    // see whether another device has saved since, and never write over a wanderer this device hasn't been given the choice about.
+    if (known === undefined || state.uid !== a.uid) {
       const remote = await loadCloud();
       known = remote?.updateTime ?? null;
-      if (remote?.data && state.uid === a.uid && remote.t > state.base && remote.t >= state.dirty) {
+      if (remote?.data && state.uid !== a.uid) {
+        if (nameIn(snapshot())) await ask(remote);
+        else setStatus('newer');
+        return;
+      }
+      if (remote?.data && remote.t > state.base && remote.t >= ownSince) {
         setStatus('newer');
         return;
       }
@@ -243,6 +262,8 @@ async function push(hidden = false): Promise<void> {
     lastWrite = Date.now();
     state.uid = a.uid;
     if (changes === seen) state.dirty = 0;
+    // In step with the cloud now: whatever changes next is this device's own.
+    ownSince = 0;
     keepState();
     setStatus('saved');
   } catch (e) {
@@ -272,6 +293,7 @@ async function push(hidden = false): Promise<void> {
  * answer is left for the first upload's check.
  */
 export async function startSync(): Promise<void> {
+  ownSince = state.dirty;
   onStored(changed);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden && state.dirty && account()) void push(true);
@@ -281,14 +303,18 @@ export async function startSync(): Promise<void> {
   let late = false;
   const check = (async () => {
     const remote = await loadCloud();
-    if (late) return;
+    // Late, and an upload has looked at the cloud itself since: it has decided.
+    if (late && known !== undefined) return;
     known = remote?.updateTime ?? null;
     if (remote?.username) spellName(remote.username);
     const mine = state.uid === a.uid;
     // Signed in on this device without it ever having matched the account (the app closed before a choice): ask on the title screen.
     if (remote?.data && !mine && nameIn(snapshot())) await ask(remote);
-    else if (remote?.data && (!mine || (remote.t > state.base && remote.t >= state.dirty))) await apply(remote, a.uid);
-    else {
+    else if (remote?.data && (!mine || (remote.t > state.base && remote.t >= ownSince))) {
+      // Too late to lay it in before the game read storage: it's offered instead (status 'newer').
+      if (late) setStatus('newer');
+      else await apply(remote, a.uid);
+    } else {
       // The cloud has nothing newer: send up whatever this device has that it doesn't.
       state.uid = a.uid;
       if (!remote?.data || state.dirty) state.dirty ||= Date.now();
@@ -297,7 +323,7 @@ export async function startSync(): Promise<void> {
       if (state.dirty) schedule();
     }
   })().catch(() => {
-    if (late) return;
+    if (late && known !== undefined) return;
     known = undefined;
     setStatus('error');
     if (state.dirty) schedule(RETRY_MS);
@@ -313,23 +339,31 @@ export async function startSync(): Promise<void> {
  */
 export async function signIn(username: string, password: string, create: boolean): Promise<Choice | null> {
   await logIn(username, password, create);
-  const a = account()!;
-  setStatus('loading');
-  let remote: CloudSave | null = null;
   try {
-    remote = create ? null : await loadCloud();
+    return await afterSignIn(create);
   } catch (e) {
-    // Signed in but the save couldn't be read: don't risk writing over it.
+    // Signed in but the save couldn't be read or laid in: signed out again rather than risk writing over it.
+    pending = null;
+    pendingChoice = null;
+    known = undefined;
     logOut();
     setStatus('off');
     throw e;
   }
+}
+
+async function afterSignIn(create: boolean): Promise<Choice | null> {
+  const a = account()!;
+  setStatus('loading');
+  unreadable = false;
+  const remote = create ? null : await loadCloud();
   known = remote?.updateTime ?? null;
   if (remote?.username) spellName(remote.username);
   const mine = state.uid === a.uid;
   if (!remote?.data || (mine && remote.t <= state.base)) {
     // Nothing up there yet, or this device is as new or newer: this device's save goes up.
     state = { uid: a.uid, base: remote?.t ?? 0, dirty: Date.now() };
+    ownSince = state.dirty;
     keepState();
     void push();
     return null;
@@ -356,9 +390,10 @@ export async function keepCloud(): Promise<void> {
   const remote = pending;
   const a = account();
   if (!remote || !a) return;
+  // Still waiting on the choice until it's laid in: if that fails, nothing has been decided.
+  await apply(remote, a.uid);
   pending = null;
   pendingChoice = null;
-  await apply(remote, a.uid);
   location.reload();
 }
 
@@ -370,6 +405,7 @@ export function keepDevice(): void {
   pending = null;
   pendingChoice = null;
   state = { uid: a.uid, base: remote.t, dirty: Date.now() };
+  ownSince = state.dirty;
   keepState();
   void push();
 }
@@ -383,9 +419,18 @@ export async function loadNewer(): Promise<void> {
   location.reload();
 }
 
+/** Until no upload is running (a few seconds at most). */
+async function settled(): Promise<void> {
+  for (let i = 0; busy && i < 200; i++) await new Promise((done) => setTimeout(done, 50));
+}
+
 /** Send anything waiting up, then sign out. This device keeps its wanderer. */
 export async function signOut(): Promise<void> {
+  // An upload already on its way finishes first (else it would meet a signed-out session halfway).
+  await settled();
   if (!pending && status !== 'newer' && state.dirty && account()) await push().catch(() => {});
+  await settled();
+  again = false;
   pending = null;
   pendingChoice = null;
   known = undefined;

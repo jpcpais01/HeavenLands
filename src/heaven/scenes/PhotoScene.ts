@@ -15,7 +15,7 @@ import { controls } from '../../game/controls';
 import { pixelText } from '../../ui/widgets';
 
 /** The scenes over the world that the camera hides. */
-const HIDDEN = ['ui', 'map', 'pause', 'sound', 'fps'];
+const HIDDEN = ['ui', 'map', 'pause', 'sound', 'fps', 'jam', 'stars'];
 /** The print in the corner: its width as a share of the short side, how long it stays (ms). */
 const PRINT = 0.32;
 const PRINT_MS = 2600;
@@ -33,6 +33,8 @@ export class PhotoScene extends Phaser.Scene {
   private hint!: Phaser.GameObjects.BitmapText;
   private flash!: Phaser.GameObjects.Rectangle;
   private print: Phaser.GameObjects.Container | null = null;
+  /** The print's picture, a texture the size of the screen: let go with the print. */
+  private printKey = '';
   private shots = 0;
   private drawn = '';
 
@@ -66,7 +68,7 @@ export class PhotoScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       if (this.on) this.showOthers(true);
       this.on = false;
-      this.print = null;
+      this.dropPrint();
     });
   }
 
@@ -192,8 +194,7 @@ export class PhotoScene extends Phaser.Scene {
     this.busy = true;
     this.finder.setVisible(false);
     this.hint.setVisible(false);
-    this.print?.destroy();
-    this.print = null;
+    this.dropPrint();
     this.game.renderer.snapshot((img) => {
       this.finder.setVisible(this.on);
       this.hint.setVisible(this.on);
@@ -206,6 +207,13 @@ export class PhotoScene extends Phaser.Scene {
         save(img.src);
       }
     });
+  }
+
+  private dropPrint(): void {
+    this.print?.destroy();
+    this.print = null;
+    if (this.printKey && this.textures.exists(this.printKey)) this.textures.remove(this.printKey);
+    this.printKey = '';
   }
 
   /** The picture drops into the bottom-left corner as a little cream-bordered print, tilts, and slips away. */
@@ -221,6 +229,7 @@ export class PhotoScene extends Phaser.Scene {
       const b = Math.round(5 * D);
       const frame = this.add.rectangle(0, 0, w + b * 2, h + b * 3, CREAM).setStrokeStyle(1 * D, 0xd8c8b0);
       const pic = this.add.image(0, -b / 2, key).setScale(scale);
+      this.printKey = key;
       const print = (this.print = this.add.container(Math.round(18 * D + w / 2), Math.round(height + h), [frame, pic]));
       this.tweens.add({ targets: print, y: Math.round(height - h / 2 - 22 * D), angle: -4, duration: 420, ease: 'Back.easeOut' });
       this.tweens.add({
@@ -230,9 +239,7 @@ export class PhotoScene extends Phaser.Scene {
         delay: PRINT_MS,
         duration: 500,
         onComplete: () => {
-          print.destroy();
-          if (this.print === print) this.print = null;
-          this.textures.remove(key);
+          if (this.print === print) this.dropPrint();
         },
       });
     };

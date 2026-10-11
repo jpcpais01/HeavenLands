@@ -7,12 +7,19 @@ import { CHUNK, type ChunkLayout, type LandGen, type LandProp } from './types';
 
 /** Chunk layouts kept before the oldest are forgotten. */
 const KEEP_LAYOUTS = 400;
-/** The widest a block reaches from its feet (px): props this near a chunk's edge are checked from the next chunk too. */
-const BLOCK_REACH = 32;
+
+/** A chunk's blocks, and the box they all lie in (a big prop's block can reach well into the next chunk). */
+interface Blocks {
+  props: LandProp[];
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
 
 export class LandWorld {
   private layouts = new Map<number, ChunkLayout>();
-  private blocks = new Map<number, LandProp[]>();
+  private blocks = new Map<number, Blocks>();
 
   constructor(readonly gen: LandGen) {}
 
@@ -31,7 +38,18 @@ export class LandWorld {
     }
     l = this.gen.layout(cx, cy);
     this.layouts.set(k, l);
-    this.blocks.set(k, l.props.filter((p) => p.block));
+    const props = l.props.filter((p) => p.block);
+    const box: Blocks = { props, x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    for (const p of props) {
+      const b = p.block!;
+      const bx = p.x + (p.flip ? -(b.ox ?? 0) : (b.ox ?? 0));
+      const by = p.y + (b.oy ?? 0);
+      box.x0 = Math.min(box.x0, bx - b.rx);
+      box.x1 = Math.max(box.x1, bx + b.rx);
+      box.y0 = Math.min(box.y0, by - b.ry);
+      box.y1 = Math.max(box.y1, by + b.ry);
+    }
+    this.blocks.set(k, box);
     if (this.layouts.size > KEEP_LAYOUTS) {
       const old = this.layouts.keys().next().value!;
       this.layouts.delete(old);
@@ -44,17 +62,14 @@ export class LandWorld {
     if (!this.gen.open(x, y)) return false;
     const cx = Math.floor(x / CHUNK);
     const cy = Math.floor(y / CHUNK);
-    const lx = x - cx * CHUNK;
-    const ly = y - cy * CHUNK;
-    const x0 = lx < BLOCK_REACH ? cx - 1 : cx;
-    const x1 = lx > CHUNK - BLOCK_REACH ? cx + 1 : cx;
-    const y0 = ly < BLOCK_REACH ? cy - 1 : cy;
-    const y1 = ly > CHUNK - BLOCK_REACH ? cy + 1 : cy;
-    for (let j = y0; j <= y1; j++) {
-      for (let i = x0; i <= x1; i++) {
+    // This chunk and the eight round it: each one's box says at once whether any of its blocks reach here.
+    for (let j = cy - 1; j <= cy + 1; j++) {
+      for (let i = cx - 1; i <= cx + 1; i++) {
         const k = LandWorld.key(i, j);
         if (!this.layouts.has(k)) this.layout(i, j);
-        for (const p of this.blocks.get(k)!) {
+        const box = this.blocks.get(k)!;
+        if (x < box.x0 || x > box.x1 || y < box.y0 || y > box.y1) continue;
+        for (const p of box.props) {
           const b = p.block!;
           const dx = (x - p.x - (p.flip ? -(b.ox ?? 0) : (b.ox ?? 0))) / b.rx;
           const dy = (y - p.y - (b.oy ?? 0)) / b.ry;

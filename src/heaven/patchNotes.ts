@@ -18,6 +18,21 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    v: 8,
+    date: '2026-10-11',
+    title: 'Little things, put right',
+    notes: [
+      'Cloud saves are safer: a slow or missed check when the game opens can no longer send an older save over a newer one from another device, and an account is never written over before you choose which wanderer to keep.',
+      'No more potions on the hotbar: its slots are for your dishes, and every dish can be eaten now, even plain soups and bread.',
+      'Lotus roots and glowcaps can be found again (lotus by the dunes\' oases and in the Everwood, glowcaps in the Everwood and Lumen Meadow), so the Deep Garden Stir-fry can be cooked. Mint grows in the dunes too.',
+      'Cloudrest and Hearthhome show their own names when you arrive.',
+      'Pastimes: travelling from the map while seated no longer pulls you back to the seat; E always gets you up, even by the stove; nothing stirs you in bed; waking keeps the morning; and Esc closes the lute or the telescope without opening the pause menu.',
+      'The update card waits for a quiet moment instead of showing mid-play, and its keys no longer reach the screen beneath.',
+      'Endless lands: no walking through big things near the edge of an area, swaying trees\' glows and shadows sway with them, and mirrored props stand where they are drawn. Their big maps fill faster.',
+      'I and G no longer open an empty bag, and the title\'s Atlas key is A (M mutes).',
+    ],
+  },
+  {
     v: 7,
     date: '2026-10-11',
     title: 'Friends and building, mended',

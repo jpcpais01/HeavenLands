@@ -7,6 +7,7 @@ import { warmHomeSoon } from '../art/homeArt';
 import { GroundStreamer } from '../world/GroundStreamer';
 import { HOME_GROUND } from '../world/homeGround';
 import { paintStarwatchLoad } from '../heaven/starwatch/art';
+import { cozy } from '../game/cozy';
 
 // A painted arena's loading screen. Its textures (a cave floor the size of
 // the Glimmerdeep, the monsters' sheets, the bosses') used to be built ahead
@@ -404,7 +405,7 @@ export class ArenaLoadScene extends Phaser.Scene {
     parts.push(this.streaks);
     this.pic = this.add.container(0, 0, parts);
 
-    this.title = pixelText(this, 0, 0, this.arena.name, this.look.title, 2);
+    this.title = pixelText(this, 0, 0, cozy.placeName?.(this.arena.id) ?? this.arena.name, this.look.title, 2);
     this.sub = pixelText(this, 0, 0, this.look.sub, this.look.text).setAlpha(0.85);
     this.bar = this.add.graphics();
 
