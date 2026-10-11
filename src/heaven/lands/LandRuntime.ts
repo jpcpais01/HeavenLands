@@ -450,7 +450,8 @@ export class LandRuntime implements CozyLand {
     for (const p of l.props) {
       const sh = this.sheets.get(p.sheet);
       if (!sh) continue;
-      const ox = sh.footX / sh.w;
+      // Flipping mirrors the picture within its frame, so a flipped prop's feet are on the frame's other side.
+      const ox = (p.flip ? sh.w - sh.footX : sh.footX) / sh.w;
       const oy = sh.footY / sh.h;
       const depth = p.y + (p.sortY ?? 0);
       const obj = add.sprite(p.x, p.y, p.sheet, p.frame).setOrigin(ox, oy).setPipeline('Lit').setDepth(depth).setFlipX(!!p.flip);
@@ -461,16 +462,26 @@ export class LandRuntime implements CozyLand {
       }
       const box = { x0: p.x - sh.w, x1: p.x + sh.w, y0: p.y - sh.h - 8, y1: p.y + sh.h };
       st.placed.push({ obj, ...box });
+      const frame = obj.frame.name;
+      let shadow: Phaser.GameObjects.Image | null = null;
+      let glow: Phaser.GameObjects.Sprite | null = null;
       if (p.shadow !== false) {
-        const s = sunShadow(add.image(p.x, p.y, `${p.sheet}_s`, p.frame).setOrigin(ox, oy).setFlipX(!!p.flip));
+        const s = (shadow = sunShadow(add.image(p.x, p.y, `${p.sheet}_s`, frame).setOrigin(ox, oy).setFlipX(!!p.flip)));
         s.setAlpha(Math.max(0, this.shadowAlpha));
         st.shadows.push(s);
         st.placed.push({ obj: s, x0: p.x - sh.h * 1.6, x1: p.x + sh.h * 1.6, y0: p.y - sh.h * 1.6, y1: p.y + sh.h * 1.6 });
       }
       if (sh.glows) {
-        const g = add.sprite(p.x, p.y, `${p.sheet}_e`, p.frame).setOrigin(ox, oy).setBlendMode(Phaser.BlendModes.ADD).setDepth(depth + 0.1).setFlipX(!!p.flip).setAlpha(0.35 + Math.max(0, this.glowAlpha) * 0.65);
+        const g = (glow = add.sprite(p.x, p.y, `${p.sheet}_e`, frame).setOrigin(ox, oy).setBlendMode(Phaser.BlendModes.ADD).setDepth(depth + 0.1).setFlipX(!!p.flip).setAlpha(0.35 + Math.max(0, this.glowAlpha) * 0.65));
         st.glows.push(g);
         st.placed.push({ obj: g, ...box });
+      }
+      // A swaying prop's glow and shadow sway with it (their sheets share its frame names).
+      if (p.anim && (shadow || glow)) {
+        obj.on(Phaser.Animations.Events.ANIMATION_UPDATE, (_a: Phaser.Animations.Animation, f: Phaser.Animations.AnimationFrame) => {
+          shadow?.setFrame(f.textureFrame);
+          glow?.setFrame(f.textureFrame);
+        });
       }
     }
     for (const s of l.life) {
@@ -587,7 +598,11 @@ export class LandRuntime implements CozyLand {
             w.x = nx;
             w.y = ny;
           }
-          if (!def.sideways && Math.abs(dx) > 0.5) w.obj.setFlipX(dx < 0);
+          if (!def.sideways && Math.abs(dx) > 0.5 && w.obj.flipX !== dx < 0) {
+            // Turned round: the feet stay where they stand (the picture mirrors within its frame).
+            const sh = this.sheets.get(def.sheet)!;
+            w.obj.setFlipX(dx < 0).setOrigin((dx < 0 ? sh.w - sh.footX : sh.footX) / sh.w, sh.footY / sh.h);
+          }
           if (blocked || dist < 1 || w.t <= 0) {
             w.mode = 'idle';
             w.t = 900 + Math.random() * 3200;

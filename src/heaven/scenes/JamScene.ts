@@ -130,13 +130,17 @@ export class JamScene extends Phaser.Scene {
     const onKey = (ev: KeyboardEvent) => {
       if (this.scene.isPaused('world')) return;
       if (ev.key === 'Escape' || ev.key.toLowerCase() === 'l') {
-        jamHud.stop = true;
+        // Its own: the pause menu doesn't open on the same Esc, nor the lute start again on a held L.
+        ev.stopPropagation();
+        if (!ev.repeat) jamHud.stop = true;
         return;
       }
       const n = Number(ev.key) - 1;
       if (!ev.repeat && n >= 0 && n < NOTES) this.press(n);
     };
     kb.on('keydown', onKey);
+    // Over the pause scene, so its keys come here first.
+    this.scene.bringToTop();
     this.layout();
     this.scale.on(Phaser.Scale.Events.RESIZE, this.layout, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {

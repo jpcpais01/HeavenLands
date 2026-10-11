@@ -13,8 +13,8 @@ import { profile } from './profile';
 /** How often to look for an update while playing (ms), and how long after starting. */
 const CHECK_EVERY = 10 * 60_000;
 const FIRST_CHECK = 6000;
-/** Scenes the card may open over. */
-const QUIET_SCENES = ['home', 'atlas', 'pause'];
+/** Scenes the card may open over (and the pause menu, while it's open: its scene runs all through play). */
+const QUIET_SCENES = ['home', 'atlas'];
 /** How long Update now waits for the new service worker before reloading anyway (ms). */
 const UPDATE_WAIT = 4000;
 const SEEN_KEY = 'heaven-lands.notesSeen';
@@ -95,7 +95,13 @@ export function watchUpdates(game: Phaser.Game): void {
 
   game.events.on(Phaser.Core.Events.POST_STEP, () => {
     if (!pending || game.scene.isActive('notes')) return;
-    if (!QUIET_SCENES.some((k) => game.scene.isActive(k))) return;
+    // Put off with Later while it was already on its way again: not till a newer one.
+    if (pending.mode === 'coming' && pending.notes[0].v <= putOff) {
+      pending = null;
+      return;
+    }
+    const paused = game.scene.isActive('pause') && (game.scene.getScene('pause') as unknown as { menuOpen?: boolean }).menuOpen === true;
+    if (!paused && !QUIET_SCENES.some((k) => game.scene.isActive(k))) return;
     if (window.bootLoader) return; // Still loading.
     const card = pending;
     pending = null;

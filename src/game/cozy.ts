@@ -64,6 +64,8 @@ export interface CozyPastimes {
   update(dt: number, daylight: number): void;
   /** E or the touch button: true if a pastime took it. */
   act(): boolean;
+  /** A pastime is under way (seated, playing, stargazing, asleep): E is its, before the farm's. */
+  readonly engaged: boolean;
   destroy(): void;
 }
 
@@ -79,6 +81,8 @@ export const pastimeHud = {
   jamming: false,
   /** The lute button (or its key) was pressed: the world starts or ends a jam. */
   jam: false,
+  /** Asleep in a bed: the hero doesn't stir, whatever's pressed. */
+  asleep: false,
 };
 
 /** An endless land's map for the minimap (scenes/MapScene.ts): tiles of `size` map pixels, one map pixel per MAP_CELL px of ground. */

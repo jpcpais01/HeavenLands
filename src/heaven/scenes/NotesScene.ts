@@ -114,6 +114,8 @@ export class NotesScene extends Phaser.Scene {
     const kb = this.input.keyboard;
     kb?.on('keydown-ENTER', () => this.buttons.find((b) => b.primary)?.act());
     kb?.on('keydown-ESC', () => this.buttons[this.buttons.length - 1]?.act());
+    // The card has the keys: none reach the scenes beneath (Enter would also set off the title, Esc resume the world).
+    kb?.on('keydown', (e: KeyboardEvent) => e.stopPropagation());
 
     this.layout();
     this.scale.on(Phaser.Scale.Events.RESIZE, this.layout, this);

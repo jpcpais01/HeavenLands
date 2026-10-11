@@ -15,8 +15,8 @@ import { CHUNK, type GroundCell, type LandGen } from './types';
 const T = CHUNK / MAP_CELL;
 /** Most painted tiles kept (each a 32 px square canvas, 4 KB): enough for the big map zoomed out on a wide screen. */
 const KEEP_TILES = 1200;
-/** Tiles asked for and not yet painted beyond this are forgotten: they'll be asked for again when shown. */
-const MAX_WANTED = 300;
+/** Tiles asked for and not yet painted beyond this are forgotten, the longest asked first: they'll be asked for again when shown. */
+const MAX_WANTED = 600;
 /** How much the ground's slopes, sampled MAP_CELL px apart, move a pixel along its ramp (a fraction of the kind's relief). */
 const MAP_RELIEF = 0.12;
 /** What stands and stops feet (trees, rocks, huts) is drawn this much darker than the ground under it. */
@@ -41,7 +41,14 @@ export class LandMap implements CozyMap {
   tile(tx: number, ty: number): HTMLCanvasElement | null {
     const k = key(tx, ty);
     const t = this.tiles.get(k);
-    if (t) return t;
+    if (t) {
+      // Shown again: the last to be let go.
+      this.tiles.delete(k);
+      this.tiles.set(k, t);
+      return t;
+    }
+    // Asked again: to the back, with the tiles being shown now.
+    this.wanted.delete(k);
     this.wanted.add(k);
     return null;
   }
@@ -64,7 +71,12 @@ export class LandMap implements CozyMap {
       if (n-- <= 0) break;
       this.tiles.delete(old);
     }
-    if (this.wanted.size > MAX_WANTED) this.wanted.clear();
+    // Too many waiting: the ones asked for longest ago (no longer shown) are forgotten, not those on screen now.
+    let over = this.wanted.size - MAX_WANTED;
+    for (const k of this.wanted) {
+      if (over-- <= 0) break;
+      this.wanted.delete(k);
+    }
     if (made) this.version++;
   }
 

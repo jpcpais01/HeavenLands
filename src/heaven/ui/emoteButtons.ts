@@ -80,6 +80,8 @@ export class EmoteButtons implements CozyHud {
     const kb = scene.input.keyboard;
     if (kb) {
       const onKey = (ev: KeyboardEvent) => {
+        // A held key presses once.
+        if (ev.repeat) return;
         const i = KEYS.indexOf(ev.key.toLowerCase());
         if (i >= 0 && i < BUTTONS.length && !this.hidden && !pastimeHud.busy) this.press(BUTTONS[i]);
       };

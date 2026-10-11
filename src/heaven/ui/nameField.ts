@@ -24,7 +24,8 @@ export class NameField {
     // 16px keeps iPhones from zooming the page in on focus; transparent text and caret, the plate draws its own.
     Object.assign(el.style, {
       position: 'fixed',
-      zIndex: '5',
+      // Over the canvas, but under the loading screen, the rotate card and the panels (index.html), so a tap meant for them doesn't open the keyboard.
+      zIndex: '1',
       margin: '0',
       padding: '0',
       border: '0',

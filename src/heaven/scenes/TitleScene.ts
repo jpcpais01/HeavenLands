@@ -10,7 +10,7 @@ import { PixelButton, pixelText } from '../../ui/widgets';
 import { profile } from '../profile';
 import { goPlace } from '../travel';
 import { openFriendsPanel } from '../ui/friendsPanel';
-import { ensureWanderer, W_ORIGIN } from '../art/sheet';
+import { ensureWanderer, releaseWanderers, wandererKey, W_ORIGIN } from '../art/sheet';
 import { CLOUD_KINDS, ISLE_H, ISLE_STAND, ISLE_W, cloudSeaTexture, cloudTextures, glowTexture, isleTexture, skyTexture, sunTexture } from '../art/titleArt';
 import { titleLogo } from '../art/heavenTitle';
 import { HEAVEN_BUTTON, HEAVEN_BUTTON_SOFT } from '../ui/style';
@@ -101,6 +101,8 @@ export class TitleScene extends Phaser.Scene {
     this.sea = this.add.tileSprite(0, 0, 8, 34, cloudSeaTexture(this)).setOrigin(0, 1).setDepth(-2);
     this.glow = this.add.image(0, 0, glowTexture(this)).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.35).setScale(3).setDepth(-6);
     this.isle = this.add.image(0, 0, isleTexture(this)).setOrigin(0.5, 0).setDepth(-5);
+    // Back at the title nothing else is on show: the sheets of looks worn earlier (and friends') are let go.
+    releaseWanderers(this, wandererKey(profile.look));
     this.heroKey = ensureWanderer(this, profile.look);
     this.hero = this.add.sprite(0, 0, this.heroKey, 'idle_down_0').setOrigin(W_ORIGIN.x, W_ORIGIN.y).setDepth(-4);
     this.hero.play(`${this.heroKey}_idle_down`);
@@ -142,7 +144,8 @@ export class TitleScene extends Phaser.Scene {
     });
     const kb = this.input.keyboard;
     kb?.on('keydown-ENTER', go(() => this.leave(() => goPlace(this, 'home'))));
-    kb?.on('keydown-M', go(() => this.leave(() => this.scene.start('atlas'), true)));
+    // A for the Atlas (M is the game's mute, everywhere).
+    kb?.on('keydown-A', go(() => this.leave(() => this.scene.start('atlas'), true)));
     this.time.delayedCall(80, () => window.bootLoader?.done());
     // Signed in on a device whose own wanderer differs from the account's: which to keep is asked first.
     if (sync.status === 'choose') this.time.delayedCall(450, () => this.openAccount());
@@ -233,7 +236,10 @@ export class TitleScene extends Phaser.Scene {
     const cam = this.cameras.main;
     cam.setZoom(this.z).setOrigin(0, 0).setScroll(0, 0);
     const { vw, vh } = this;
+    // A sky for each size the screen has been (the browser's bars coming and going): only the one shown is kept.
+    const was = this.sky.texture.key;
     this.sky.setTexture(skyTexture(this, vw, vh));
+    if (was !== this.sky.texture.key && was.startsWith('hl_sky_')) this.textures.remove(was);
     this.sun.setPosition(Math.round(vw * 0.5), Math.round(vh * 0.7));
     this.sea.setSize(vw, 34).setPosition(0, vh);
     this.sea2.setSize(vw, 34).setPosition(0, vh - 10);

@@ -22,6 +22,7 @@
 import Phaser from 'phaser';
 import { DPR as D } from '../game/display';
 import { build, palette, stopBuilding, type PaletteItem } from '../game/build';
+import { pastimeHud } from '../game/cozy';
 import { partIcon, wallFrameName } from '../art/homeArt';
 import { pixelCanvas } from '../art/canvas';
 import { SECTIONS, SHELVES, partById, type Section, type Shelf } from '../world/homeParts';
@@ -424,7 +425,8 @@ export class BuildHud {
 
   private toggle(): void {
     if (build.on) stopBuilding();
-    else if (build.available) {
+    // Not mid-pastime (asleep, at the telescope, jamming): the tray would come up over it.
+    else if (build.available && !pastimeHud.busy) {
       build.on = true;
       // The critters caught since the tray last opened join its Critters shelf.
       this.lists.delete('critters');

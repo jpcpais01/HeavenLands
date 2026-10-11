@@ -183,7 +183,9 @@ export class RemotePlayer implements Hurtbox {
     if (s.pt !== this.pet?.def.id) this.wearPet(s.pt, s.x, s.y);
     if (s.em && s.em !== was?.em) {
       this.hero.netEmote?.(s.em);
-      this.pet?.react(s.em.split(':')[0]);
+      // The tag is `what.dir.lift.depth:n`: the pet joins in with real emotes, not with sitting, playing or standing up.
+      const what = s.em.split(':')[0].split('.')[0];
+      if (!['idle', 'seat', 'strum', 'play', 'gaze'].includes(what)) this.pet?.react(what);
     }
     this.at = now;
     if (!was) {

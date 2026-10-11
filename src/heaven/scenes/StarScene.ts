@@ -116,11 +116,15 @@ export class StarScene extends Phaser.Scene {
     const kb = this.input.keyboard!;
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') {
+        // Its own: the pause menu doesn't open on the same Esc.
+        ev.stopPropagation();
         if (this.chart) this.toggleChart();
         else starHud.close = true;
       }
     };
     kb.on('keydown', onKey);
+    // Over the pause scene, so its keys come here first.
+    this.scene.bringToTop();
     this.pickConstellation(CONSTELLATIONS.find((c) => !starFound(c.id)) ?? CONSTELLATIONS[Math.floor(Math.random() * CONSTELLATIONS.length)]);
     this.layout();
     this.scale.on(Phaser.Scale.Events.RESIZE, this.layout, this);
@@ -447,7 +451,8 @@ export class StarScene extends Phaser.Scene {
       this.sub.setText(this.picked >= 0 ? 'NOW TAP THE STAR IT JOINS' : 'TAP THE BRIGHT STARS TO JOIN THEM');
     }
     // A long line wraps to fit under the eyepiece.
+    // (Measured at full size: the width read back is the scaled one.)
+    this.sub.setScale(1);
     if (this.sub.width > this.vw - 8) this.sub.setScale((this.vw - 8) / this.sub.width);
-    else this.sub.setScale(1);
   }
 }
