@@ -227,6 +227,7 @@ export function openFriendsPanel(scene: Phaser.Scene, o: FriendsPanelOptions = {
       render();
     });
     here.querySelector('[data-closeroom]')?.addEventListener('click', () => {
+      link?.closeToFriends();
       world?.leaveRoom();
       say('Back to wandering alone.');
       render();

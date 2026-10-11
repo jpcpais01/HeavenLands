@@ -321,13 +321,18 @@ export class NetPlay {
     this.ended = true;
   }
 
-  /** The world is closing: leave the room. */
-  destroy(): void {
+  /** The connection dropped and this carries on alone (a new room needs a new NetPlay). */
+  get over(): boolean {
+    return this.ended;
+  }
+
+  /** The world is closing: leave the room (or, `hangUp` false, leave the session to a newer room). */
+  destroy(hangUp = true): void {
     this.off();
     for (const r of this.remotes.values()) r.destroy();
     this.remotes.clear();
     if (Monster.net) Monster.net = null;
     this.world.ultCaster.onCast = null;
-    session.close();
+    if (hangUp) session.close();
   }
 }

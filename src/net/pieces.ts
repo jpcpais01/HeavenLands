@@ -4,8 +4,10 @@
 
 import { session, type Msg } from './session';
 
-/** The most of the string one message carries. */
-const PIECE = 12000;
+/** The most of the string one message carries (room to spare for JSON's escapes under the server's 16 KB). */
+const PIECE = 10000;
+/** A farm this long or shorter goes in one message (`fs`), longer in pieces (`fsl`). */
+const FARM_INLINE = 6000;
 
 let seq = 0;
 
@@ -20,6 +22,15 @@ export function sendPieces(t: string, s: string, extra: Record<string, unknown> 
     session.send(m, to);
   }
 }
+
+/** The farm, to everyone else or to one player: in one message, or in pieces if it's big. */
+export function sendFarm(s: string, to?: number): void {
+  if (s.length <= FARM_INLINE) session.send({ t: 'fs', s }, to);
+  else sendPieces('fsl', s, {}, to);
+}
+
+/** Small enough to ride in the first piece of a whole place sent to a newcomer. */
+export const farmFits = (s: string): boolean => s.length <= FARM_INLINE;
 
 /** Gathers one sender's pieces; `take` gives the whole string and the first piece once the last one is in. */
 export class Pieces {

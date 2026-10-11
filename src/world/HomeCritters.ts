@@ -168,7 +168,8 @@ export class HomeCritters {
     for (const [k, t] of want) {
       const old = this.released.get(k);
       if (old) {
-        // A wall or the pond may have come over its spot; walls may have made it a room.
+        // A wall or the pond may have come over its spot; walls may have made it a room. (And a layout come whole holds its own object for it, which the eraser looks for.)
+        old.thing = t;
         this.settle(old);
         continue;
       }

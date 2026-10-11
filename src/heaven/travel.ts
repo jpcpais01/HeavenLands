@@ -44,9 +44,14 @@ const me = () => ({ name: profile.name, ...lookFields(profile.look) });
 
 /** Into a place's world, from a menu or from the world itself. */
 function goTo(scene: Phaser.Scene, arena: string): void {
+  // Only Heaven Lands' own places (an id this build doesn't know, or a place since removed, lands at Home).
+  arena = placeById(arena).arena;
   if (inWorld(scene)) scene.moveTo(arena);
   else travel(scene, arena);
 }
+
+/** A join failed because the room is full: someone is there, keeping the world. */
+const roomFull = (e: unknown): boolean => /full/i.test(String((e as Error)?.message ?? ''));
 
 /** Out of whatever room this player is in, before opening another. */
 function leaveRoom(scene: Phaser.Scene): void {
@@ -55,7 +60,7 @@ function leaveRoom(scene: Phaser.Scene): void {
 }
 
 /** Open a room (a new one in `arena`, or a friend's by its code) and go where it plays. Throws with a message to show. */
-export async function playTogether(scene: Phaser.Scene, req: { t: 'create'; arena: string } | { t: 'join'; code: string }): Promise<Joined> {
+export async function playTogether(scene: Phaser.Scene, req: { t: 'create'; arena: string } | { t: 'join'; code: string }, expect?: string): Promise<Joined> {
   if (!session.configured) throw new Error('Playing together needs the game server, which is resting right now.');
   leaveRoom(scene);
   const room = await session.open(req.t === 'create' ? { t: 'create', mode: 'coop', arena: req.arena } : req, me());
@@ -63,6 +68,11 @@ export async function playTogether(scene: Phaser.Scene, req: { t: 'create'; aren
     // The rooms are shared with Myths and Legends: its codes lead nowhere here.
     session.close();
     throw new Error("That code isn't a Heaven Lands room.");
+  }
+  if (expect && room.arena !== expect) {
+    // A world's room code from the cloud, gone and taken since by another room elsewhere.
+    session.close();
+    throw new Error('No room with that code.');
   }
   goTo(scene, room.arena);
   return room;
@@ -93,9 +103,11 @@ export function goPlace(scene: Phaser.Scene, id: string): void {
       clearTimeout(timer);
       gone = true;
       try {
-        await playTogether(scene, { t: 'join', code });
-      } catch {
+        await playTogether(scene, { t: 'join', code }, arena);
+      } catch (e) {
         // The room was gone after all: in alone, and the world opens a room of its own.
+        // (Full: in alone too, but not keeping a second copy of the world in the cloud over theirs.)
+        if (roomFull(e)) worlds.holdOff = true;
         travel(scene, id);
       }
     });
@@ -119,13 +131,19 @@ export async function openWorld(scene: Phaser.Scene, ref: WorldRef): Promise<voi
     worlds.forget(ref.id);
     throw new Error(`${ref.name} isn't sharing that world any more.`);
   }
+  const place = doc.place || ref.place;
+  if (!PLACES.some((p) => p.arena === place)) {
+    worlds.forget(ref.id);
+    throw new Error(`${ref.name}'s world is in a place this version doesn't have.`);
+  }
   const code = liveRoom(doc);
   if (code) {
     try {
-      await playTogether(scene, { t: 'join', code });
+      await playTogether(scene, { t: 'join', code }, doc.place || ref.place);
       return;
-    } catch {
-      // The room has just closed: open the world here instead.
+    } catch (e) {
+      // The room has just closed: open the world here instead. (Not when it's full: a second copy would write over theirs in the cloud.)
+      if (roomFull(e)) throw new Error(`${ref.name}'s world is full right now. Try again in a little while.`);
     }
   }
   leaveRoom(scene);

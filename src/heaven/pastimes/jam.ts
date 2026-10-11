@@ -40,7 +40,8 @@ export class Jam {
   private off: (() => void) | null = null;
 
   constructor(private world: WorldScene) {
-    if (session.active) this.off = session.on((m) => this.receive(m));
+    // Always listening: a room may open here later (Invite friends, a shared world opening itself).
+    this.off = session.on((m) => this.receive(m));
   }
 
   /** Play this player's note at (x, y): heard, seen and sent. */

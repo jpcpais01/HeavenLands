@@ -44,6 +44,8 @@ class Session {
   lost = false;
   /** The pause menu is open: online the world keeps going, but the hero stands still. */
   paused = false;
+  /** Gives up the connection still being made, when a newer one replaces it. */
+  private pending: ((msg: string) => void) | null = null;
 
   get configured(): boolean {
     return !!MP_SERVER;
@@ -63,27 +65,43 @@ class Session {
 
   /** Create a room in `arena` (co-op, or a duel), or join one by its code. */
   open(req: { t: 'create'; mode: Mode; arena: string } | { t: 'join'; code: string }, me: { name: string; hero: string; look: string }): Promise<Joined> {
+    // A connection still being made is given up first, so its timer can't
+    // later hang up on this one.
+    this.pending?.('Cancelled.');
     this.close();
     return new Promise((resolve, reject) => {
       let settled = false;
+      let ws: WebSocket | null = null;
       const fail = (msg: string) => {
         if (settled) return;
         settled = true;
-        this.close();
+        clearTimeout(timer);
+        if (this.pending === fail) this.pending = null;
+        if (this.ws === ws) this.close();
+        else if (ws) {
+          ws.onclose = null;
+          ws.onmessage = null;
+          try {
+            ws.close();
+          } catch {
+            // Already gone.
+          }
+        }
         reject(new Error(msg));
       };
+      this.pending = fail;
       const timer = setTimeout(() => fail("Couldn't reach the server. Try again in a moment."), CONNECT_TIMEOUT);
-      let ws: WebSocket;
+      let sock: WebSocket;
       try {
-        ws = new WebSocket(MP_SERVER);
+        sock = new WebSocket(MP_SERVER);
       } catch {
-        clearTimeout(timer);
         fail("Couldn't reach the server.");
         return;
       }
-      this.ws = ws;
-      ws.onopen = () => ws.send(JSON.stringify({ ...req, ...me }));
-      ws.onmessage = (ev) => {
+      ws = sock;
+      this.ws = sock;
+      sock.onopen = () => sock.send(JSON.stringify({ ...req, ...me }));
+      sock.onmessage = (ev) => {
         let m: Msg;
         try {
           m = JSON.parse(String(ev.data)) as Msg;
@@ -92,11 +110,11 @@ class Session {
         }
         if (!settled) {
           if (m.t === 'error') {
-            clearTimeout(timer);
             fail(String(m.msg ?? 'Something went wrong.'));
           } else if (m.t === 'joined') {
             clearTimeout(timer);
             settled = true;
+            if (this.pending === fail) this.pending = null;
             const j = m as unknown as Joined;
             this.room = j;
             this.lost = false;
@@ -107,10 +125,9 @@ class Session {
         }
         this.receive(m);
       };
-      ws.onclose = () => {
-        clearTimeout(timer);
+      sock.onclose = () => {
         if (!settled) fail("Couldn't reach the server.");
-        else if (this.ws === ws) {
+        else if (this.ws === sock) {
           this.lost = !!this.room;
           this.ws = null;
           this.room = null;

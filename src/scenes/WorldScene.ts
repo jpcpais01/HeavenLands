@@ -206,6 +206,8 @@ export class WorldScene extends Phaser.Scene {
   private stats!: HeroStats;
   /** Online play: the other players, and what is shared with them (null alone). */
   private net: NetPlay | null = null;
+  /** The builds here take the room's messages; false once the room is left, till another is opened here (leaveRoom, goOnline). */
+  listening = true;
   /** Casts the hero's Special (see game/ultimate). */
   private ult!: UltCaster;
   /** The way the hero last walked, for a Special cast with nothing aimed. */
@@ -377,6 +379,7 @@ export class WorldScene extends Phaser.Scene {
 
   create(data: { character?: string; arena?: string }): void {
     // The scene object is reused when a new game starts from the home screen.
+    this.listening = true;
     this.balls = [];
     this.beams = [];
     this.flickers = [];
@@ -809,7 +812,10 @@ export class WorldScene extends Phaser.Scene {
 
   /** A room was just opened here (inviting friends, or a shared world opening itself to them): play on in it, where the hero stands. */
   goOnline(): void {
-    if (this.net || !session.active) return;
+    if (!session.active || (this.net && !this.net.over)) return;
+    // A room that dropped earlier left its NetPlay behind, alone: the new room gets its own (the session is the new room's now).
+    this.net?.destroy(false);
+    this.listening = true;
     const { x, y } = this.hero;
     const [sx, sy] = [this.spawnX, this.spawnY];
     this.net = new NetPlay(this);
@@ -824,6 +830,8 @@ export class WorldScene extends Phaser.Scene {
   /** Leave the room this world plays in (to play on alone, or before opening another); the world's last changes go to the cloud first. */
   leaveRoom(): void {
     this.worldLink?.letGo();
+    // Whatever comes next (another room being joined) isn't for this world's builds.
+    this.listening = false;
     this.net?.destroy();
     this.net = null;
     session.close();

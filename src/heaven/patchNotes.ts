@@ -18,6 +18,20 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    v: 7,
+    date: '2026-10-11',
+    title: 'Friends and building, mended',
+    notes: [
+      'When the friend who opened a shared world leaves, whoever takes over now keeps it saved, so nothing built after is lost.',
+      'A big garden no longer cuts off the host when a friend joins.',
+      'Joining a room from inside a place no longer mixes the old place\'s builds or farm with the new one.',
+      'A full shared world says so, instead of opening a second copy beside it.',
+      'Friends\' lute tunes are heard after inviting them, and a dropped connection can be reopened properly.',
+      'Building: a stroke cut short (Esc, Done) is kept and can be undone; doors no longer vanish after a friend\'s changes; let-out critters can be erased again.',
+      'Lotus can float on any water, crops can\'t be walled or tented over, taking up a pond takes its lily pads, and floors redraw round new walls everywhere.',
+    ],
+  },
+  {
     v: 6,
     date: '2026-10-07',
     title: 'Build anywhere, together',

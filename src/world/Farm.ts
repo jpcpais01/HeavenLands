@@ -62,8 +62,8 @@ export class Farm {
 
   constructor(
     private scene: WorldScene,
-    /** The player's own Home (their farm, saved), or a friend's being visited (shown, not picked). */
-    private owner: boolean,
+    /** The player's own place (their farm, saved), or a friend's being visited; asked each time (the owner may come to their own world as a guest and learn so later). */
+    private mine: () => boolean,
     /** The farm changed: save it and show visitors. */
     private onChange: () => void,
     /** The grid it's on, the Home's or the Everwood's. */
@@ -71,6 +71,7 @@ export class Farm {
     /** Which farm it is in the saved string: 'h' the Home's, 'w' the Everwood's. */
     private at = 'h',
   ) {
+    const owner = mine();
     this.tend = owner;
     warmFarm(scene);
     if (owner) {
@@ -113,7 +114,7 @@ export class Farm {
   adopt(s: string, keep = false): void {
     this.plots = decodeFarm(s).filter((p) => p.at === this.at);
     this.redraw();
-    if (keep && this.owner) {
+    if (keep && this.mine()) {
       const others = decodeFarm(collection.farm).filter((p) => p.at !== this.at);
       collection.saveFarm(encodeFarm([...others, ...this.plots]));
     }
@@ -125,7 +126,7 @@ export class Farm {
   }
 
   private save(): void {
-    if (this.owner) {
+    if (this.mine()) {
       // Keep the other farm's plots (the Home's, or the Everwood's) as they were.
       const others = decodeFarm(collection.farm).filter((p) => p.at !== this.at);
       collection.saveFarm(encodeFarm([...others, ...this.plots]));

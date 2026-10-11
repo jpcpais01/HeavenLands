@@ -5,7 +5,7 @@ import { sound } from '../audio';
 import { TABS, build, stopBuilding } from '../game/build';
 import { collection } from '../game/collection';
 import { CRITTERS, critterById } from '../game/critters';
-import { Pieces, sendPieces } from '../net/pieces';
+import { Pieces, farmFits, sendFarm, sendPieces } from '../net/pieces';
 import { session, type Msg } from '../net/session';
 import type { WorldScene } from '../scenes/WorldScene';
 import type { Clearable, Forest } from './Forest';
@@ -136,6 +136,9 @@ export class PlaceBuild implements RodHost, LinkHost {
   private lastCell: { x: number; y: number } | null = null;
   private hero = { x: 0, y: 0 };
   private pieces = new Pieces();
+  private farmPieces = new Pieces();
+  /** Friends' strokes that came before the builds themselves: laid once they're in. */
+  private early: BuildPatch[] = [];
   private netOff: () => void;
   /** A guest has been sent the builds. */
   private arrived = false;
@@ -186,7 +189,7 @@ export class PlaceBuild implements RodHost, LinkHost {
     };
     this.critters = new HomeCritters(world);
     // The farm's plots are kept by place: the Everwood's as 'w', any other place by its own id.
-    this.farm = new Farm(world, this.link.mine, () => this.farmChanged(), this.land, arena === 'forest' ? 'w' : arena);
+    this.farm = new Farm(world, () => this.link.mine, () => this.farmChanged(), this.land, arena === 'forest' ? 'w' : arena);
     if (initial) this.farm.adopt(initial.farm);
 
     // Everything a Home has, the same here.
@@ -288,6 +291,8 @@ export class PlaceBuild implements RodHost, LinkHost {
       this.mark(null);
       build.pressed = build.released = false;
       this.lastCell = null;
+      // Building ended mid-stroke (Esc, Done, the switch turned off): what was laid so far is kept, sent and undoable all the same.
+      this.endStroke();
       return;
     }
     if (build.undo) {
@@ -440,7 +445,7 @@ export class PlaceBuild implements RodHost, LinkHost {
         // Standing things keep off the place's trunks, rocks and the like (cleared first, in the Everwood); a bridge goes over water or open ground.
         const wx = (x + 0.5) * CELL;
         const wy = (y + 0.5) * CELL;
-        if (!p.flat && (p.water !== 'too' || (p.bridge && this.open(x, y))) && !g.walkable(wx, wy)) return false;
+        if (!p.flat && (!p.water || (p.bridge && this.open(x, y))) && !g.walkable(wx, wy)) return false;
       }
     }
     return true;
@@ -467,7 +472,7 @@ export class PlaceBuild implements RodHost, LinkHost {
     if (pick.layer === 'tent') {
       const e = this.edits;
       if (!e.tentAt(cx, cy) && (e.tents.size >= MAX_TENTS || this.heroIn(cx, cy))) return false;
-      return !e.wallAt(cx, cy) && !e.isPond(cx, cy) && this.open(cx, cy);
+      return !e.wallAt(cx, cy) && !e.isPond(cx, cy) && !this.farm.plotAt(cx, cy) && this.open(cx, cy);
     }
     if (pick.layer === 'thing') {
       const p = partById(pick.id);
@@ -481,7 +486,8 @@ export class PlaceBuild implements RodHost, LinkHost {
     if (!pick || pick.layer !== 'wall' || this.edits.walls.size >= MAX_WALLS) return false;
     // Hangings, doors and critters don't hold a wall up; anything else in the cell does.
     if (this.edits.thingsAt(cx, cy).some((t) => !partById(t.id)?.wall && !partById(t.id)?.door && !partById(t.id)?.critter)) return false;
-    if (this.heroIn(cx, cy) || this.edits.isPond(cx, cy) || this.edits.tentAt(cx, cy)) return false;
+    // Nor over a crop growing (it would grow on inside the wall).
+    if (this.heroIn(cx, cy) || this.edits.isPond(cx, cy) || this.edits.tentAt(cx, cy) || this.farm.plotAt(cx, cy)) return false;
     return this.open(cx, cy) && (this.edits.wallAt(cx, cy) !== 0 || this.ground.walkable((cx + 0.5) * CELL, (cy + 0.5) * CELL));
   }
 
@@ -551,7 +557,6 @@ export class PlaceBuild implements RodHost, LinkHost {
     const built = here.find((t) => partById(t.id)?.tab === tab) ?? here.find((t) => !partById(t.id)?.wall && !partById(t.id)?.door);
     if (built) return built;
     if (e.thingsAt(cx, cy).some((t) => partById(t.id)?.bridge)) return null;
-    if (e.wallAt(cx, cy)) return 'wall';
     return e.cleared.size < MAX_CLEARED ? (this.ground.clearable?.(x, y) ?? null) : null;
   }
 
@@ -560,6 +565,9 @@ export class PlaceBuild implements RodHost, LinkHost {
     if (!what) return false;
     if (what === 'floor') {
       this.edits.floors.delete(cellKey(cx, cy));
+      // A pond taken up takes its lily pads with it.
+      this.edits.things = this.edits.things.filter((t) => !(partById(t.id)?.water === 'only' && t.x === cx && t.y === cy));
+      this.touchCells(cx, cy, 1);
     } else if (what === 'roof') {
       this.edits.roofs.delete(cellKey(cx, cy));
     } else if (what === 'tent') {
@@ -640,6 +648,12 @@ export class PlaceBuild implements RodHost, LinkHost {
     this.committed(change);
   }
 
+  private forgetStrokes(): void {
+    this.undoStack = [];
+    this.before = null;
+    build.canUndo = false;
+  }
+
   private undo(): void {
     const back = this.undoStack.pop();
     build.canUndo = this.undoStack.length > 0;
@@ -701,6 +715,8 @@ export class PlaceBuild implements RodHost, LinkHost {
   /** Make what's built here these: stood up again whole, and whatever was cleared or put back goes or returns. */
   private apply(n: ForestEdits): void {
     const e = this.edits;
+    // Strokes made on the old copy can't be undone over the new one.
+    this.forgetStrokes();
     const was = new Set(e.cleared);
     e.things = n.things;
     e.walls = n.walls;
@@ -718,31 +734,46 @@ export class PlaceBuild implements RodHost, LinkHost {
   /** The farm changed (sown, picked, pulled up): to the room, and kept like the builds. */
   private farmChanged(): void {
     this.link.changed();
-    if (session.active) session.send({ t: 'fs', s: this.farm.encoded() });
+    if (session.active) sendFarm(this.farm.encoded());
   }
 
   // ---------------------------------------------------------------- Online
 
   private receive(m: Msg): void {
+    // The room was left (another being joined): nothing more of it belongs here.
+    if (!this.world.listening) return;
     switch (m.t) {
-      case 'wq':
-        // Someone just came: the builds, the farm and the critters for the jar shelves.
-        if (session.isHost) sendPieces('wl', this.edits.encode(), { c: this.caught.join(','), fm: this.farm.encoded() }, m.f);
+      case 'wq': {
+        // Someone just came: the builds, the farm and the critters for the jar shelves (a big farm after, in pieces).
+        if (!session.isHost || !this.arrived) return;
+        const fm = this.farm.encoded();
+        sendPieces('wl', this.edits.encode(), { c: this.caught.join(','), ...(farmFits(fm) ? { fm } : {}) }, m.f);
+        if (!farmFits(fm)) sendFarm(fm, m.f);
         return;
+      }
       case 'wl': {
-        if (session.isHost) return;
+        // Taken until the builds are in, even by one the room passed to meanwhile.
+        if (session.isHost && this.arrived) return;
         const got = this.pieces.take(m);
         if (!got) return;
         if (typeof got.first.c === 'string') this.caught = got.first.c ? got.first.c.split(',').filter((id) => critterById(id)) : [];
         this.apply(ForestEdits.decode(got.s));
         if (typeof got.first.fm === 'string') this.farm.adopt(got.first.fm, this.link.mine);
         this.arrived = true;
+        for (const p of this.early.splice(0)) this.lay(p);
         if (this.link.mine) saveLocal(this.arena, this.edits.encode());
         return;
       }
       case 'bp': {
         const p = readPatch(m.p);
         if (p) this.received(p);
+        return;
+      }
+      case 'fsl': {
+        const got = this.farmPieces.take(m);
+        if (!got) return;
+        this.farm.adopt(got.s, this.link.mine);
+        this.link.changed();
         return;
       }
       case 'bpl': {
@@ -767,11 +798,22 @@ export class PlaceBuild implements RodHost, LinkHost {
 
   /** A friend's stroke: laid here too, and kept like one of this player's own. */
   private received(p: BuildPatch): void {
+    // Before the builds are in, it waits (the builds sent may not have it yet).
+    if (!this.arrived) {
+      this.early.push(p);
+      return;
+    }
     this.lay(p);
     this.keep();
   }
 
+  ready(): boolean {
+    return this.arrived;
+  }
+
   destroy(): void {
+    // Left mid-stroke: what was laid so far is saved and sent before the world lets go.
+    this.endStroke();
     this.link.destroy();
     this.view.destroy();
     this.critters.destroy();
