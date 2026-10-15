@@ -28,11 +28,17 @@ export function setHomeMask(m: HomeMask | null): void {
   mask = m;
 }
 
+/** What else stops feet on the plot as it moves (shut secret doors, see secretDoor.ts). */
+let blocker: ((x: number, y: number) => boolean) | null = null;
+export function setHomeBlocker(f: ((x: number, y: number) => boolean) | null): void {
+  blocker = f;
+}
+
 let grid: ColliderGrid | null = null;
 
 export function homeWalkable(x: number, y: number): boolean {
   if (x < 10 || y < 10 || x > HOME_W - 10 || y > HOME_H - 16) return false;
-  if (inPlotPx(x, y)) return !mask?.blocked(x - PLOT_X, y - PLOT_Y);
+  if (inPlotPx(x, y)) return !mask?.blocked(x - PLOT_X, y - PLOT_Y) && !blocker?.(x, y);
   if (homeRoofDepth(x, y) > -9) return false;
   grid ??= new ColliderGrid(homeScenery().colliders);
   return !grid.hits(x, y);

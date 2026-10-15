@@ -45,6 +45,10 @@ export class HomeLayout {
   /** Tents: wall and roof in one (see houses.ts). */
   tent = new Uint8Array(N);
   things: Thing[] = [];
+  /** The houses' upper floors (see upstairs.ts): their floors, their own walls, and what stands on them. */
+  upFloor = new Uint8Array(N);
+  upWall = new Uint8Array(N);
+  upThings: Thing[] = [];
 
   clone(): HomeLayout {
     const l = new HomeLayout();
@@ -53,6 +57,9 @@ export class HomeLayout {
     l.roof.set(this.roof);
     l.tent.set(this.tent);
     l.things = this.things.map((t) => ({ ...t }));
+    l.upFloor.set(this.upFloor);
+    l.upWall.set(this.upWall);
+    l.upThings = this.upThings.map((t) => ({ ...t }));
     return l;
   }
 
@@ -111,6 +118,8 @@ export class HomeLayout {
       // In a house's doorway, one to a doorway.
       const v = this.wallAt(cx, cy);
       if (!v || wallKind(v) !== 'door' || !WALLS[wallMat(v)]?.house) return false;
+      // A secret bookcase stands against a wall's face: only in a wall running east-west.
+      if (part.secret === 'shelf' && !doorAcross(this.wallMask(cx, cy))) return false;
       return !this.things.some((t) => t.x === cx && t.y === cy && partById(t.id)?.door);
     }
     if (part.wall) {
@@ -145,39 +154,61 @@ export class HomeLayout {
 
   // ---- Saving
 
-  /** The whole layout as a short string: `h1|floors|walls|roofs|things|tents`, each grid run-length coded; a thing is `id.x.y` and `.f` if mirrored, `.r<n>` if turned. (Saved before tents, it ends at the things.) */
+  /**
+   * The whole layout as a short string: `h1|floors|walls|roofs|things|tents`,
+   * each grid run-length coded; a thing is `id.x.y` and `.f` if mirrored,
+   * `.r<n>` if turned. (Saved before tents, it ends at the things.) A home
+   * with an upper floor adds `|floors;walls;things` for it.
+   */
   encode(): string {
-    const things = this.things.map((t) => `${t.id}.${t.x.toString(36)}.${t.y.toString(36)}${t.flip ? '.f' : ''}${t.turn || partById(t.id)?.sideways ? `.r${t.turn}` : ''}`).join(',');
-    return `h1|${runs(this.floor)}|${runs(this.wall)}|${runs(this.roof)}|${things}|${runs(this.tent)}`;
+    const list = (things: Thing[]) => things.map((t) => `${t.id}.${t.x.toString(36)}.${t.y.toString(36)}${t.flip ? '.f' : ''}${t.turn || partById(t.id)?.sideways ? `.r${t.turn}` : ''}`).join(',');
+    const base = `h1|${runs(this.floor)}|${runs(this.wall)}|${runs(this.roof)}|${list(this.things)}|${runs(this.tent)}`;
+    const up = this.upThings.length > 0 || this.upFloor.some((v) => v > 0) || this.upWall.some((v) => v > 0);
+    return up ? `${base}|${runs(this.upFloor)};${runs(this.upWall)};${list(this.upThings)}` : base;
   }
 
   /** A layout from `encode`, or null if the string isn't one. Unknown parts and values are dropped. */
   static decode(s: string | null | undefined): HomeLayout | null {
     if (!s || !s.startsWith('h1|')) return null;
     const parts = s.split('|');
-    if (parts.length !== 5 && parts.length !== 6) return null;
+    if (parts.length < 5 || parts.length > 7) return null;
     const l = new HomeLayout();
     if (!unruns(parts[1], l.floor, FLOORS.length) || !unruns(parts[2], l.wall, (WALLS.length + 1) * 4 - 1) || !unruns(parts[3], l.roof, 4)) return null;
     if (parts[5] !== undefined && !unruns(parts[5], l.tent, TENTS.length)) return null;
-    // Wall values from the packing: a known material and kind.
-    for (let i = 0; i < N; i++) {
-      const v = l.wall[i];
-      if (v && (wallMat(v) < 0 || wallMat(v) >= WALLS.length || (v & 3) === 3)) l.wall[i] = 0;
+    const things = (list: string, into: Thing[]) => {
+      for (const item of list ? list.split(',') : []) {
+        const [id, xs, ys, ...rest] = item.split('.');
+        const p = partById(id);
+        const x = parseInt(xs, 36);
+        const y = parseInt(ys, 36);
+        // The stairwell is only ever shown, never kept.
+        if (!p || id === 'stairwell') continue;
+        const f = rest.includes('f');
+        const r = rest.find((k) => k[0] === 'r');
+        // Saved before it could turn: a side-on part kept its side (and a mirrored one faced left).
+        const turn = !p.turns ? 0 : r ? parseInt(r.slice(1), 10) & 3 : p.sideways ? (f ? 3 : 1) : 0;
+        const e = extent(p, turn);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !inPlot(x, y) || !inPlot(x + e.w - 1, y + e.h - 1)) continue;
+        if (l.things.length + l.upThings.length >= MAX_THINGS) break;
+        into.push({ id, x, y, flip: f && !!p.flip, turn });
+      }
+    };
+    things(parts[4], l.things);
+    // The upper floors: a bad one is dropped, the ground floor kept.
+    if (parts[6] !== undefined) {
+      const [floors = '', walls = '', ups = ''] = parts[6].split(';');
+      if (unruns(floors, l.upFloor, FLOORS.length) && unruns(walls, l.upWall, (WALLS.length + 1) * 4 - 1)) things(ups, l.upThings);
+      else {
+        l.upFloor.fill(0);
+        l.upWall.fill(0);
+      }
     }
-    for (const item of parts[4] ? parts[4].split(',') : []) {
-      const [id, xs, ys, ...rest] = item.split('.');
-      const p = partById(id);
-      const x = parseInt(xs, 36);
-      const y = parseInt(ys, 36);
-      if (!p) continue;
-      const f = rest.includes('f');
-      const r = rest.find((k) => k[0] === 'r');
-      // Saved before it could turn: a side-on part kept its side (and a mirrored one faced left).
-      const turn = !p.turns ? 0 : r ? parseInt(r.slice(1), 10) & 3 : p.sideways ? (f ? 3 : 1) : 0;
-      const e = extent(p, turn);
-      if (!Number.isFinite(x) || !Number.isFinite(y) || !inPlot(x, y) || !inPlot(x + e.w - 1, y + e.h - 1)) continue;
-      if (l.things.length >= MAX_THINGS) break;
-      l.things.push({ id, x, y, flip: f && !!p.flip, turn });
+    // Wall values from the packing: a known material and kind.
+    for (const a of [l.wall, l.upWall]) {
+      for (let i = 0; i < N; i++) {
+        const v = a[i];
+        if (v && (wallMat(v) < 0 || wallMat(v) >= WALLS.length || (v & 3) === 3)) a[i] = 0;
+      }
     }
     return l;
   }
@@ -242,6 +273,15 @@ const DECK_H_PAD = 8;
  * doorways), the pond, and the footprints of things that stand in the way.
  * One byte a pixel, rebuilt whenever the layout changes.
  */
+/** What stops feet on a staircase (or its well) whose cell corner is grid px (x, y): its upper cell, and its rails down the lower one. */
+export function stairStops(x: number, y: number): { x0: number; y0: number; x1: number; y1: number }[] {
+  return [
+    { x0: x, y0: y, x1: x + CELL, y1: y + CELL + 2 },
+    { x0: x, y0: y + CELL, x1: x + 2, y1: y + CELL * 2 },
+    { x0: x + CELL - 2, y0: y + CELL, x1: x + CELL, y1: y + CELL * 2 },
+  ];
+}
+
 export class HomeMask {
   readonly data = new Uint8Array(PLOT_W * PLOT_H);
 
@@ -299,14 +339,33 @@ export class HomeMask {
     }
     for (const t of l.things) {
       const p = partById(t.id);
-      if (!p || p.block === 'none' || p.wall) continue;
+      if (!p) continue;
       const x = t.x * CELL;
       const y = t.y * CELL;
+      // A staircase (and its well upstairs) is walked onto from the south: its far end and its rails stop feet.
+      if (p.stairs || p.id === 'stairwell') {
+        const [a, b, c] = stairStops(x, y);
+        fill(a.x0, a.y0, a.x1, a.y1);
+        fill(b.x0, b.y0, b.x1, b.y1);
+        fill(c.x0, c.y0, c.x1, c.y1);
+        continue;
+      }
+      if (p.block === 'none' || p.wall) continue;
       const e = extent(p, t.turn);
       const w = e.w * CELL;
       const h = e.h * CELL;
       if (p.block === 'full') fill(x + 1, y + Math.min(4, h / 4), x + w - 1, y + h - 2);
       else fill(x + w / 2 - 4, y + h - 8, x + w / 2 + 4, y + h - 2);
+    }
+  }
+
+  /** Feet keep to the cells `fn` keeps (upstairs: the storey's rooms); every other cell stops them. */
+  keep(fn: (cx: number, cy: number) => boolean): void {
+    for (let cy = 0; cy < ROWS; cy++) {
+      for (let cx = 0; cx < COLS; cx++) {
+        if (fn(cx, cy)) continue;
+        for (let y = cy * CELL; y < (cy + 1) * CELL; y++) this.data.fill(1, y * PLOT_W + cx * CELL, y * PLOT_W + (cx + 1) * CELL);
+      }
     }
   }
 

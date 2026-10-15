@@ -27,6 +27,7 @@ import { rouse } from '../game/rest';
 import { Companion } from '../game/Companion';
 import { petById } from '../game/pets';
 import { cozy } from '../game/cozy';
+import { seesStorey } from '../world/upstairs';
 
 /** A player's state, sent many times a second. Aim fields are absent when nothing is aimed at. */
 export interface HeroState {
@@ -55,6 +56,8 @@ export interface HeroState {
   pt?: string;
   /** The emote they last made (Heaven Lands), tagged so a repeat of the same one still plays. */
   em?: string;
+  /** Up a house's stairs (see world/upstairs.ts): which stairs; left out on the ground. */
+  up?: number;
 }
 
 /** Their hero is too far from where they say it is: it jumps there instead of gliding. */
@@ -263,14 +266,17 @@ export class RemotePlayer implements Hurtbox {
     if (pet) asGhost(() => pet.update(dt, h.x, h.y, !!s.dn, daylight));
 
     this.fade = s.dn ? Math.max(0, this.fade - dt / 700) : 1;
-    h.alpha = this.fade;
+    // On another floor of a house than this player: not seen (see world/upstairs.ts).
+    const seen = seesStorey(h.x, h.y, s.up ?? 0);
+    pet?.setHidden(!seen);
+    h.alpha = seen ? this.fade : 0;
     if (this.tint > 0) {
       this.tint -= dt;
       if (this.tint <= 0) h.sprite.clearTint();
     }
     if (!cozy.on) this.bar.update(dt, snap(h.x), snap(h.y) - 34, s.dn ? 0 : s.hp, s.mh, s.br);
     this.tag
-      .setVisible(this.fade > 0.05)
+      .setVisible(seen && this.fade > 0.05)
       .setAlpha(this.fade * 0.9)
       .setPosition(snap(h.x), snap(h.y) - (cozy.on ? 45 : 37));
 

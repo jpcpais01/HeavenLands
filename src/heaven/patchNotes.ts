@@ -18,6 +18,16 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    v: 12,
+    date: '2026-10-15',
+    title: 'Upstairs, and secret doors',
+    notes: [
+      'New Staircase in Build / Stairs: set it inside a house and walk up it to a whole second floor. Lay floors, build walls and furnish it like downstairs; the doorways out become windows up there, and the stairs come up through a railed well. Walk back onto the well to go down.',
+      'Friends see you only on the floor you are on, and everything upstairs saves and shows for them like the rest of your builds. Works in your Home and everywhere else you build.',
+      'Two secret doors in Build / Walls, hung in a house doorway like a door: the Hidden door looks just like the wall around it and sinks into the floor when you lean on it, and the Secret bookcase rolls aside. Both close again behind you.',
+    ],
+  },
+  {
     v: 11,
     date: '2026-10-15',
     title: 'Juice, TV and a tablet',

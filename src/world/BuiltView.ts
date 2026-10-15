@@ -15,6 +15,7 @@ import { ForestFloors } from './ForestFloors';
 import { CELL, PLOT_X, PLOT_Y, doorAcross, type Thing } from './homeLayout';
 import { WALLS, extent, partById, wallKind, wallMat, type PartDef } from './homeParts';
 import { RoofView } from './RoofView';
+import { SecretSet } from './secretDoor';
 import { Swing, hangGate } from './swing';
 
 // What the player has built in a place on the open grid (the Everwood, an
@@ -95,6 +96,8 @@ interface Chunk {
   treeShadows: Img[];
   trees: Tree[];
   jars: { jar: Sprite; glow: Sprite }[];
+  /** Its secret doors' keys (see secretDoor.ts). */
+  secrets: string[];
 }
 
 export class BuiltView {
@@ -104,6 +107,9 @@ export class BuiltView {
   private bridges: BridgeView;
   private roofs: RoofView;
   private shownVer = -1;
+  private shownOf: ForestEdits | null = null;
+  /** The secret doors hung in the chunks stood up (see secretDoor.ts). */
+  private secrets: SecretSet;
   private daylight = -1;
   /** Fishing rods built here, by their key (see PlaceBuild.rods), to take out of their pails. */
   private rodSprites = new Map<string, { sprite: Sprite; shadow: Img | null; frame: string; flip: boolean }>();
@@ -122,6 +128,12 @@ export class BuiltView {
     this.floors = new ForestFloors(world, adopt);
     this.bridges = new BridgeView(world);
     this.roofs = new RoofView(world);
+    this.secrets = new SecretSet(world);
+  }
+
+  /** Does a shut secret door stop feet at (x, y)? */
+  blocks(x: number, y: number): boolean {
+    return this.secrets.blocks(x, y);
   }
 
   /** Stand chunk (cx, cy) up again on the next frame: something was built or taken down in it. */
@@ -174,7 +186,7 @@ export class BuiltView {
     if (this.chunks.has(key)) return;
     const ccx = Math.floor(key / 4096);
     const ccy = key % 4096;
-    const ch: Chunk = { placed: [], lights: [], lamps: [], gates: [], walls: [], doors: [], hangings: [], shadows: [], treeShadows: [], trees: [], jars: [] };
+    const ch: Chunk = { placed: [], lights: [], lamps: [], gates: [], walls: [], doors: [], hangings: [], shadows: [], treeShadows: [], trees: [], jars: [], secrets: [] };
     this.chunks.set(key, ch);
     const e = this.edits();
     const add = this.world.add;
@@ -182,6 +194,16 @@ export class BuiltView {
       const part = partById(t.id);
       // Bridges and roofs are stood up whole (see `update`); critters live their own lives (HomeCritters).
       if (!part || part.bridge || part.critter) continue;
+      if (part.secret) {
+        // Hung while its doorway is still a house's (a bookcase only against a wall running east-west).
+        const v = e.wallAt(t.x, t.y);
+        const mask = e.wallMask(t.x, t.y);
+        if (!v || wallKind(v) !== 'door' || !WALLS[wallMat(v)]?.house || (part.secret === 'shelf' && !doorAcross(mask))) continue;
+        const k = `${t.id}@${t.x},${t.y}`;
+        this.secrets.add({ key: k, t, kind: part.secret, wall: v, mask });
+        ch.secrets.push(k);
+        continue;
+      }
       if (part.door) {
         this.standDoor(ch, t);
         continue;
@@ -311,6 +333,7 @@ export class BuiltView {
     this.chunks.delete(key);
     for (const p of ch.placed) p.obj.destroy();
     for (const l of ch.lights) this.world.lights.removeLight(l);
+    for (const k of ch.secrets) this.secrets.remove(k);
   }
 
   // ---------------------------------------------------------------- each frame
@@ -318,8 +341,10 @@ export class BuiltView {
   /** `d` is the eased daylight (0 night .. 1 day); `others` the other wanderers here, whom doors and gates open for too. */
   update(time: number, dt: number, d: number, hero: { x: number; y: number; alive: boolean }, view: Phaser.Geom.Rectangle, others: readonly { x: number; y: number }[] = []): void {
     const e = this.edits();
-    if (e.version !== this.shownVer) {
+    // A new set of builds (upstairs or down, see upstairs.ts) is a change too, whatever its count.
+    if (e.version !== this.shownVer || e !== this.shownOf) {
       this.shownVer = e.version;
+      this.shownOf = e;
       this.floors.sync(e);
       this.bridges.sync(e.bridges);
       // Roofs over the houses, chimneys over their hearths, and the tents' cloth.
@@ -373,6 +398,10 @@ export class BuiltView {
     const walkers = hero.alive ? [hero, ...others] : others;
     const swayReady = treeSwayReady(this.world);
     const k = Math.min(1, dt / 120);
+    this.secrets.update(dt, walkers, hero, (cx, cy) => {
+      const ch = this.chunks.get(Math.floor((cx * CELL) / CHUNK) * 4096 + Math.floor((cy * CELL) / CHUNK));
+      return ch?.walls.find((w) => w.cx === cx && w.cy === cy)?.cut ?? 0;
+    });
     for (const ch of this.chunks.values()) {
       for (const p of ch.placed) p.obj.setVisible(p.x1 > vx0 && p.x0 < vx1 && p.y1 > vy0 && p.y0 < vy1);
       for (const g of ch.gates) g.update(dt, walkers, hero);
@@ -461,6 +490,7 @@ export class BuiltView {
     this.floors.destroy();
     this.bridges.destroy();
     this.roofs.destroy();
+    this.secrets.destroy();
     this.rodSprites.clear();
   }
 }

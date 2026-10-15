@@ -2776,6 +2776,65 @@ export class Sfx {
     for (let i = 0; i < 6; i++) this.burstNoise(out, t + 0.06 + i * (0.03 + i * 0.008), 'bandpass', rand(1400, 2200), 900, 6, 0.12 - i * 0.012, 0.02);
   }
 
+  /**
+   * A secret door (see world/secretDoor.ts). A hidden door of stone grinds:
+   * a low rumble of rock on rock, gravelly, sinking in pitch as the wall goes
+   * down into the floor (rising as it comes back up), ending in a soft thud.
+   * A bookcase rumbles aside on hidden runners: a hollow wooden roll, a click
+   * of the catch first, books knocking together, a knock at the end.
+   */
+  secretDoor(t: number, pan: number, stone: boolean, opening: boolean): void {
+    const ctx = this.m.ctx;
+    const out = this.out(pan, 0.55, 0.35);
+    const dur = stone ? 0.62 : 0.5;
+    if (stone) {
+      // The grind: a filtered noise bed swept down (or up), with a slow judder of gravel through it.
+      const g = gain(ctx, 0, filter(ctx, 'lowpass', 900, 0.7, out));
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.32, t + 0.08);
+      g.gain.setValueAtTime(0.32, t + dur - 0.12);
+      g.gain.linearRampToValueAtTime(0, t + dur);
+      const o = osc(ctx, 'sawtooth', opening ? 62 : 44, g);
+      sweep(o.frequency, t, opening ? 62 : 44, opening ? 40 : 60, dur);
+      o.start(t);
+      o.stop(t + dur + 0.05);
+      for (let i = 0; i < 14; i++) this.burstNoise(out, t + 0.03 + (i / 14) * (dur - 0.08) + rand(-0.01, 0.01), 'bandpass', rand(500, 1300), 300, 2.5, rand(0.08, 0.16), 0.04, true);
+      // Settling: a dull thud of stone meeting stone.
+      this.chirp(out, t + dur, 'sine', 120, 50, 0.3, 0.14);
+      this.burstNoise(out, t + dur, 'lowpass', 700, 200, 0.8, 0.22, 0.1, true);
+      return;
+    }
+    // The catch, then the case rolling on its runners.
+    this.burstNoise(out, t, 'bandpass', 3000, 2600, 8, 0.16, 0.02);
+    const g = gain(ctx, 0, filter(ctx, 'bandpass', 260, 1.2, out));
+    g.gain.setValueAtTime(0, t + 0.05);
+    g.gain.linearRampToValueAtTime(0.26, t + 0.12);
+    g.gain.setValueAtTime(0.26, t + dur - 0.1);
+    g.gain.linearRampToValueAtTime(0, t + dur);
+    const o = osc(ctx, 'triangle', 96, g);
+    sweep(o.frequency, t + 0.05, 96, opening ? 82 : 108, dur);
+    o.start(t + 0.05);
+    o.stop(t + dur + 0.05);
+    for (let i = 0; i < 8; i++) this.burstNoise(out, t + 0.08 + i * ((dur - 0.12) / 8) + rand(0, 0.02), 'bandpass', rand(700, 1100), 500, 4, rand(0.06, 0.1), 0.03, true);
+    // Books knocking together, and the case coming to rest against its stop.
+    for (let i = 0; i < 3; i++) this.chirp(out, t + rand(0.1, dur - 0.1), 'sine', rand(380, 520), rand(240, 320), 0.07, 0.05);
+    this.chirp(out, t + dur, 'sine', 190, 80, 0.32, 0.1);
+    this.burstNoise(out, t + dur, 'lowpass', 1200, 300, 0.8, 0.2, 0.06, true);
+  }
+
+  /** Going up or down a house's stairs: a run of quick wooden footfalls, climbing in pitch going up and falling going down. */
+  stairs(t: number, up: boolean): void {
+    const out = this.out(0, 0.5, 0.25);
+    for (let i = 0; i < 5; i++) {
+      const at = t + i * 0.085 + rand(-0.008, 0.008);
+      const f = (up ? 150 + i * 16 : 214 - i * 16) * rand(0.96, 1.04);
+      this.chirp(out, at, 'sine', f, f * 0.55, 0.22 - (up ? 0 : i * 0.02), 0.07);
+      this.burstNoise(out, at, 'bandpass', rand(1400, 2000), 900, 3, 0.07, 0.025);
+    }
+    // A board creaks somewhere in the run.
+    this.chirp(out, t + rand(0.1, 0.3), 'sawtooth', rand(150, 170), rand(200, 220), 0.025, 0.12);
+  }
+
   /** A Home door shutting: a round wooden knock against the frame, and the latch dropping. */
   doorShut(t: number, pan: number, level: number): void {
     const out = this.out(pan, 0.6 * level, 0.3);

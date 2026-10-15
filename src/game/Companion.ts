@@ -509,6 +509,13 @@ export class Companion {
     this.shards = this.shards.filter((s) => s.life > 0);
   }
 
+  /** Out of sight (a friend's, on another floor of a house: see world/upstairs.ts), or back in it. */
+  setHidden(on: boolean): void {
+    if (this.body.visible === !on) return;
+    for (const o of [this.body, this.glowLayer, this.shadow, this.castShadow]) o.setVisible(!on);
+    this.light.visible = !on;
+  }
+
   destroy(): void {
     this.gone = true;
     this.bubble?.destroy();

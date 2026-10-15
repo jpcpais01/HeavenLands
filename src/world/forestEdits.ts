@@ -11,7 +11,7 @@
 // room online. Plain data: no Phaser.
 
 import { Bridges, Deck } from './bridge';
-import { CELL, DOOR_HW, doorAcross, wallBoxes, type Thing } from './homeLayout';
+import { CELL, DOOR_HW, doorAcross, stairStops, wallBoxes, type Thing } from './homeLayout';
 import { FLOORS, ROOFS, TENTS, WALLS, extent, partById, wallKind, wallMat, type PartDef } from './homeParts';
 import { findHousesIn, houseKey, tentStops, type House } from './houses';
 
@@ -47,6 +47,10 @@ export class ForestEdits {
   roofs = new Map<number, number>();
   tents = new Map<number, number>();
   cleared = new Set<number>();
+  /** The houses' upper floors (see upstairs.ts): their floors and own walls by cell, and what stands on them. */
+  upFloors = new Map<number, number>();
+  upWalls = new Map<number, number>();
+  upThings: Thing[] = [];
   /** The houses and tents the roofs and tents make, and which is over each cell; rebuilt by `index`. */
   houses: House[] = [];
   private houseIds = new Map<number, number>();
@@ -117,6 +121,8 @@ export class ForestEdits {
     const v = this.wallAt(cx, cy);
     if (!v || !WALLS[wallMat(v)]?.house) return false;
     const mine = (t: Thing) => t !== skip && t.x === cx && t.y === cy;
+    // A secret bookcase stands against a wall's face: only in a wall running east-west.
+    if (part.door && part.secret === 'shelf' && !doorAcross(this.wallMask(cx, cy))) return false;
     if (part.door) return wallKind(v) === 'door' && !this.thingsAt(cx, cy).some((t) => mine(t) && partById(t.id)?.door);
     return wallKind(v) === 'wall' && !this.wallAt(cx, cy + 1) && !this.thingsAt(cx, cy).some((t) => mine(t) && partById(t.id)?.wall);
   }
@@ -218,10 +224,16 @@ export class ForestEdits {
     if (h?.tent && tentStops(h, x, y)) return true;
     for (const t of this.cover.get(cellKey(cx, cy)) ?? []) {
       const p = partById(t.id);
-      if (!p || p.block === 'none' || p.wall) continue;
-      const e = extent(p, t.turn);
+      if (!p) continue;
       const px = x - t.x * CELL;
       const py = y - t.y * CELL;
+      // A staircase, or its well upstairs: walked onto from the south (see HomeMask).
+      if (p.stairs || p.id === 'stairwell') {
+        if (stairStops(0, 0).some((b) => px >= b.x0 && px < b.x1 && py >= b.y0 && py < b.y1)) return true;
+        continue;
+      }
+      if (p.block === 'none' || p.wall) continue;
+      const e = extent(p, t.turn);
       const w = e.w * CELL;
       const h = e.h * CELL;
       if (p.block === 'full' ? px > 1 && px < w - 1 && py > Math.min(4, h / 4) && py < h - 2 : px > w / 2 - 4 && px < w / 2 + 4 && py > h - 8 && py < h - 2) return true;
@@ -236,28 +248,39 @@ export class ForestEdits {
     const things = this.things.map((t) => `${t.id}.${t.x.toString(36)}.${t.y.toString(36)}${t.flip ? '.f' : ''}${t.turn ? `.r${t.turn}` : ''}`).join(',');
     const cleared = [...this.cleared].map((k) => k.toString(36)).join(',');
     const cellsOf = (m: Map<number, number>) => [...m].map(([k, v]) => `${Math.floor(k / 65536).toString(36)}.${(k % 65536).toString(36)}.${v.toString(36)}`).join(',');
-    return `w1|${things}|${cellsOf(this.walls)}|${cleared}|${cellsOf(this.floors)}|${cellsOf(this.roofs)}|${cellsOf(this.tents)}`;
+    const base = `w1|${things}|${cellsOf(this.walls)}|${cleared}|${cellsOf(this.floors)}|${cellsOf(this.roofs)}|${cellsOf(this.tents)}`;
+    if (!this.upThings.length && !this.upFloors.size && !this.upWalls.size) return base;
+    // The upper floors after: `floors;walls;things`.
+    const ups = this.upThings.map((t) => `${t.id}.${t.x.toString(36)}.${t.y.toString(36)}${t.flip ? '.f' : ''}${t.turn ? `.r${t.turn}` : ''}`).join(',');
+    return `${base}|${cellsOf(this.upFloors)};${cellsOf(this.upWalls)};${ups}`;
   }
 
   /** Changes from `encode` (an empty set for anything that isn't one). Unknown parts and values are dropped. */
   static decode(s: string | null | undefined): ForestEdits {
     const e = new ForestEdits();
     if (!s || !s.startsWith('w1|')) return e;
-    const [, things = '', walls = '', cleared = '', floors = '', roofs = '', tents = ''] = s.split('|');
-    for (const item of things ? things.split(',') : []) {
-      const [id, xs, ys, ...rest] = item.split('.');
-      const p = partById(id);
-      const x = parseInt(xs, 36);
-      const y = parseInt(ys, 36);
-      if (!p || !Number.isFinite(x) || !Number.isFinite(y) || e.things.length >= MAX_THINGS) continue;
-      const r = rest.find((k) => k[0] === 'r');
-      e.things.push({ id, x, y, flip: rest.includes('f') && !!p.flip, turn: p.turns && r ? parseInt(r.slice(1), 10) & 3 : 0 });
-    }
-    for (const item of walls ? walls.split(',') : []) {
-      const [x, y, v] = item.split('.').map((n) => parseInt(n, 36));
-      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(v) || !knownWall(v) || e.walls.size >= MAX_WALLS) continue;
-      e.walls.set(cellKey(x, y), v);
-    }
+    const [, things = '', walls = '', cleared = '', floors = '', roofs = '', tents = '', up = ''] = s.split('|');
+    const thingsOf = (list: string, into: Thing[]) => {
+      for (const item of list ? list.split(',') : []) {
+        const [id, xs, ys, ...rest] = item.split('.');
+        const p = partById(id);
+        const x = parseInt(xs, 36);
+        const y = parseInt(ys, 36);
+        // The stairwell is only ever shown, never kept.
+        if (!p || id === 'stairwell' || !Number.isFinite(x) || !Number.isFinite(y) || e.things.length + e.upThings.length >= MAX_THINGS) continue;
+        const r = rest.find((k) => k[0] === 'r');
+        into.push({ id, x, y, flip: rest.includes('f') && !!p.flip, turn: p.turns && r ? parseInt(r.slice(1), 10) & 3 : 0 });
+      }
+    };
+    thingsOf(things, e.things);
+    const wallsOf = (list: string, into: Map<number, number>) => {
+      for (const item of list ? list.split(',') : []) {
+        const [x, y, v] = item.split('.').map((n) => parseInt(n, 36));
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(v) || !knownWall(v) || e.walls.size + e.upWalls.size >= MAX_WALLS) continue;
+        into.set(cellKey(x, y), v);
+      }
+    };
+    wallsOf(walls, e.walls);
     const layer = (list: string, into: Map<number, number>, kinds: number, max: number) => {
       for (const item of list ? list.split(',') : []) {
         const [x, y, v] = item.split('.').map((n) => parseInt(n, 36));
@@ -268,6 +291,12 @@ export class ForestEdits {
     layer(floors, e.floors, FLOORS.length, MAX_FLOORS);
     layer(roofs, e.roofs, ROOFS.length, MAX_ROOFS);
     layer(tents, e.tents, TENTS.length, MAX_TENTS);
+    if (up) {
+      const [upFloors = '', upWalls = '', upThings = ''] = up.split(';');
+      layer(upFloors, e.upFloors, FLOORS.length, MAX_FLOORS);
+      wallsOf(upWalls, e.upWalls);
+      thingsOf(upThings, e.upThings);
+    }
     for (const k of cleared ? cleared.split(',') : []) {
       const n = parseInt(k, 36);
       if (Number.isFinite(n) && e.cleared.size < MAX_CLEARED) e.cleared.add(n);

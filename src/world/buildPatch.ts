@@ -7,7 +7,8 @@ import type { Thing } from './homeLayout';
 // undergrowth cleared or put back. Whoever builds (the room's host, or a
 // friend allowed to) sends the change of each stroke to everyone, who all
 // lay it on their own copy; laying one twice changes nothing more. Undo lays
-// a stroke's change backwards. Plain data: no Phaser.
+// a stroke's change backwards. Things on a house's upper floor (see
+// upstairs.ts) are keyed with a leading `^`. Plain data: no Phaser.
 
 export interface BuildPatch {
   /** Cells: [layer, cell, value]. */
@@ -30,12 +31,16 @@ export interface BuildSnap {
 /** What a patch is laid on. */
 export interface PatchTarget {
   setCell(layer: string, cell: number, v: number): void;
-  addThing(t: Thing): void;
-  /** Take up one thing like this; false if there was none. */
+  /** `up`: on a house's upper floor. */
+  addThing(t: Thing, up: boolean): void;
+  /** Take up one thing like this (`^` before an upstairs one's key); false if there was none. */
   removeThing(key: string): boolean;
   hasThing(key: string): boolean;
   clear?(foot: number, on: boolean): void;
 }
+
+/** An upstairs thing's key starts with this. */
+export const UP = '^';
 
 /** A thing as one short string: `id.x.y`, `.f` mirrored, `.r<n>` turned, all base 36 (the edits' own saved form). */
 export const thingKey = (t: Thing): string => `${t.id}.${t.x.toString(36)}.${t.y.toString(36)}${t.flip ? '.f' : ''}${t.turn ? `.r${t.turn}` : ''}`;
@@ -51,13 +56,15 @@ export function parseThing(key: string): Thing | null {
   return { id, x, y, flip: rest.includes('f') && !!p.flip, turn: p.turns && r ? parseInt(r.slice(1), 10) & 3 : 0 };
 }
 
-export function snapOf(layers: Record<string, Iterable<[number, number]>>, things: Thing[], cleared?: Iterable<number>): BuildSnap {
+export function snapOf(layers: Record<string, Iterable<[number, number]>>, things: Thing[], cleared?: Iterable<number>, upThings: Thing[] = []): BuildSnap {
   const cells = new Map<string, number>();
   for (const [layer, list] of Object.entries(layers)) for (const [k, v] of list) if (v) cells.set(`${layer}:${k}`, v);
   const counted = new Map<string, number>();
-  for (const t of things) {
-    const k = thingKey(t);
-    counted.set(k, (counted.get(k) ?? 0) + 1);
+  for (const [list, pre] of [[things, ''], [upThings, UP]] as const) {
+    for (const t of list) {
+      const k = pre + thingKey(t);
+      counted.set(k, (counted.get(k) ?? 0) + 1);
+    }
   }
   return { cells, things: counted, cleared: new Set(cleared ?? []) };
 }
@@ -93,8 +100,9 @@ export function applyPatch(t: PatchTarget, p: BuildPatch): void {
   for (const [layer, cell, v] of p.c ?? []) if (Number.isFinite(cell) && Number.isFinite(v)) t.setCell(String(layer), cell, v);
   for (const k of p.a ?? []) {
     if (t.hasThing(k)) continue;
-    const th = parseThing(k);
-    if (th) t.addThing(th);
+    const up = k.startsWith(UP);
+    const th = parseThing(up ? k.slice(UP.length) : k);
+    if (th) t.addThing(th, up);
   }
   for (const k of p.ca ?? []) t.clear?.(k, true);
   for (const k of p.cr ?? []) t.clear?.(k, false);

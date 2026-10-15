@@ -7,7 +7,7 @@ import { JAR_SPOTS } from '../art/homeProps';
 import { CRITTER_H, CRITTER_OX, CRITTER_OY, CRITTER_W } from '../art/critters';
 import { pixelCanvas } from '../art/canvas';
 import { sound } from '../audio';
-import { TABS, build, stopBuilding } from '../game/build';
+import { TABS, build, stopBuilding, trayChanged } from '../game/build';
 import { BLOCKED, FITS, Hold, footprint, lookGhost, markHeld } from './buildCursor';
 import { collection } from '../game/collection';
 import { CRITTERS, critterById } from '../game/critters';
@@ -17,13 +17,16 @@ import { sway, treeSwayReady } from '../game/treeSway';
 import { Pieces, farmFits, sendFarm, sendPieces } from '../net/pieces';
 import { session, type Msg } from '../net/session';
 import type { WorldScene } from '../scenes/WorldScene';
-import { HOME_SPAWN, homeWalkable, setHomeMask } from './homeGround';
+import { HOME_SPAWN, homeWalkable, setHomeBlocker, setHomeMask } from './homeGround';
 import { Farm } from './Farm';
 import { HomeCritters } from './HomeCritters';
 import { BridgeView } from './BridgeView';
 import { RoofView } from './RoofView';
 import type { BuildLand } from './buildLand';
-import { applyPatch, diff, readPatch, snapOf, thingKey, type BuildPatch, type BuildSnap } from './buildPatch';
+import { UP, applyPatch, diff, readPatch, snapOf, thingKey, type BuildPatch, type BuildSnap } from './buildPatch';
+import { houseKey } from './houses';
+import { SecretSet } from './secretDoor';
+import { UP_TABS, composeHome, findStorey, groundView, landingOf, liftHome, nearStorey, onStairs, onStorey, stairsId, standNear, storeyView, upstairsAllows, upstairsCell, type Storey } from './upstairs';
 import { WorldLink, type LinkHost } from './worldLink';
 import { treeLeaves } from './Scenery';
 import { Swing, hangGate } from './swing';
@@ -50,6 +53,8 @@ const STUB = 6;
 const PATCH_MAX = 11000;
 /** How far round the hero the build cursor must keep, px, so no wall goes down on them. */
 const HERO_R = 6;
+/** After taking the stairs, this long (ms) before they can be taken again. */
+const CLIMB_COOL = 600;
 /** ms between leaves or petals dropping from the trees planted here. */
 const LEAF_MS = 1500;
 /** What each planted tree drops. */
@@ -122,7 +127,16 @@ let uid = 0;
  * lets them (see worldLink.ts); the day and night are shared.
  */
 export class Home implements LinkHost {
+  /** The home as it's kept (both floors of its houses), and as it's shown: the same, or from upstairs (see upstairs.ts). */
+  data: HomeLayout;
   layout: HomeLayout;
+  /** The upper floor the hero has climbed to, and the stairs' name (0 on the ground). */
+  private storey: Storey | null = null;
+  private upKey = 0;
+  private climbing = false;
+  private climbCool = 0;
+  /** The secret doors hung here (see secretDoor.ts). */
+  private secrets: SecretSet;
   /** Whose home this is, who may build, and the cloud's copy (see worldLink.ts). */
   readonly link: WorldLink;
   private shown = new HomeLayout();
@@ -163,8 +177,10 @@ export class Home implements LinkHost {
   private critters: HomeCritters;
   /** Bridges over the pond, stood up whole (see bridge.ts). */
   private bridges: BridgeView;
-  /** The plot as the critters and the farm see it (see buildLand.ts). */
-  private land: BuildLand = this.makeLand();
+  /** The plot as the critters see it (the ground floor), as the farm does (stoves on whichever floor shows), and as the pastimes do (what shows) (see buildLand.ts). */
+  private land: BuildLand = this.makeLand('ground');
+  private farmLand: BuildLand = this.makeLand('farm');
+  private shownLand: BuildLand = this.makeLand('shown');
   /** A visitor has been sent the home at least once (its keeper has it from the start). */
   private arrived = false;
   /** The crops on the garden beds, and the stoves and pots to cook at. */
@@ -178,7 +194,10 @@ export class Home implements LinkHost {
     // Online, the room's host keeps the home (theirs, or a friend's opened while they're away); everyone else visits.
     this.link = new WorldLink(scene, 'home', this);
     const initial = this.link.initial;
-    this.layout = !this.link.keeper ? new HomeLayout() : initial ? (HomeLayout.decode(initial.data) ?? starterHome()) : (HomeLayout.decode(collection.home) ?? starterHome());
+    this.data = !this.link.keeper ? new HomeLayout() : initial ? (HomeLayout.decode(initial.data) ?? starterHome()) : (HomeLayout.decode(collection.home) ?? starterHome());
+    this.layout = this.data;
+    this.secrets = new SecretSet(scene, PLOT_X, PLOT_Y);
+    setHomeBlocker((x, y) => this.secrets.blocks(x, y));
     if (this.link.mine) this.caught = CRITTERS.filter((c) => collection.critterCount(c.id) > 0).map((c) => c.id);
     else if (initial) this.caught = initial.caught.split(',').filter((id) => critterById(id));
     this.arrived = this.link.keeper;
@@ -195,7 +214,7 @@ export class Home implements LinkHost {
     this.cursor = add.graphics().setDepth(9000).setVisible(false);
     this.ghost = add.image(0, 0, 'home', 'chimney').setAlpha(0.6).setDepth(9001).setVisible(false);
     this.critters = new HomeCritters(scene);
-    this.farm = new Farm(scene, () => this.link.mine, () => this.farmChanged(), this.land);
+    this.farm = new Farm(scene, () => this.link.mine, () => this.farmChanged(), this.farmLand);
     if (initial) this.farm.adopt(initial.farm);
     this.bridges = new BridgeView(scene, PLOT_X, PLOT_Y);
     this.roofView = new RoofView(scene, PLOT_X, PLOT_Y);
@@ -223,9 +242,9 @@ export class Home implements LinkHost {
     return this.link.keeper;
   }
 
-  /** The plot as the things built on it are seen by others (see buildLand.ts). */
+  /** The plot as the things built on it are seen by others: whatever floor the hero is on (see buildLand.ts). */
   get buildLand(): BuildLand {
-    return this.land;
+    return this.shownLand;
   }
 
   /** Where a visit starts: the foot of the plot, or the nearest open ground to it. */
@@ -240,24 +259,26 @@ export class Home implements LinkHost {
     return HOME_SPAWN;
   }
 
-  private makeLand(): BuildLand {
+  /** `ground`: the ground floor alone; `shown`: whatever floor shows; `farm`: the ground floor's beds, with the stoves of the floor that shows. */
+  private makeLand(kind: 'ground' | 'shown' | 'farm'): BuildLand {
     const home = this;
+    const grid = () => (kind === 'shown' ? this.layout : this.data);
     return {
       ox: PLOT_X,
       oy: PLOT_Y,
       get things() {
-        return home.layout.things;
+        return kind === 'ground' ? home.data.things : home.layout.things;
       },
-      floorAt: (cx, cy) => this.layout.floorAt(cx, cy),
-      wallAt: (cx, cy) => this.layout.wallAt(cx, cy),
-      isWater: (cx, cy) => this.layout.isWater(cx, cy),
-      thingsAt: (cx, cy) => this.layout.thingsAt(cx, cy),
+      floorAt: (cx, cy) => grid().floorAt(cx, cy),
+      wallAt: (cx, cy) => grid().wallAt(cx, cy),
+      isWater: (cx, cy) => this.data.isWater(cx, cy),
+      thingsAt: (cx, cy) => grid().thingsAt(cx, cy),
       // Off the plot is no house's and not out of doors either, so the critters keep to the plot.
       houseAt: (cx, cy) => (inPlot(cx, cy) ? this.houseAt[cellIndex(cx, cy)] : -2),
       walkable: (x, y) => homeWalkable(x, y),
       waterCells: () => {
         const out: { x: number; y: number }[] = [];
-        for (let cy = 0; cy < ROWS; cy++) for (let cx = 0; cx < COLS; cx++) if (this.layout.isWater(cx, cy)) out.push({ x: cx, y: cy });
+        for (let cy = 0; cy < ROWS; cy++) for (let cx = 0; cx < COLS; cx++) if (this.data.isWater(cx, cy)) out.push({ x: cx, y: cy });
         return out;
       },
     };
@@ -267,9 +288,17 @@ export class Home implements LinkHost {
 
   /** Bring what's drawn up to date with the layout: only what changed is redrawn. */
   private refresh(all = false): void {
+    // Upstairs, what was just built is kept in the upper floor, and the view composed from it again.
+    if (this.storey) {
+      liftHome(this.layout, this.data, this.storey);
+      this.layout = composeHome(this.data, this.storey);
+    }
     const l = this.layout;
     const old = this.shown;
     this.mask = new HomeMask(l);
+    // Upstairs, feet keep to the storey's rooms (and the walls round them stop them as ever).
+    const s = this.storey;
+    if (s) this.mask.keep((cx, cy) => s.cells.has(houseKey(cx, cy)) || l.wallAt(cx, cy) > 0);
     setHomeMask(this.mask);
     this.rodSpots = null;
     const found = findHouses(l);
@@ -374,7 +403,8 @@ export class Home implements LinkHost {
   private refreshRoofs(): void {
     const l = this.layout;
     const chimneys = [];
-    for (const t of l.things) {
+    // Hearths on either floor have their chimney.
+    for (const t of [...this.data.things, ...this.data.upThings]) {
       const p = partById(t.id);
       if (!p?.chimney) continue;
       chimneys.push({ house: this.houseAt[cellIndex(t.x, t.y)], x: (t.x + p.w / 2) * CELL, y: t.y * CELL + 5 });
@@ -390,7 +420,16 @@ export class Home implements LinkHost {
   private refreshThings(): void {
     const l = this.layout;
     // Critters aren't stood up as things: they live their own lives (HomeCritters). Bridges are stood up whole.
-    const want = new Map(l.things.filter((t) => !partById(t.id)?.critter && !partById(t.id)?.bridge).map((t) => [Home.keyOf(t), t]));
+    // Secret doors are their own (secretDoor.ts), hung while their doorway is still a house's.
+    const want = new Map(l.things.filter((t) => !partById(t.id)?.critter && !partById(t.id)?.bridge && !partById(t.id)?.secret).map((t) => [Home.keyOf(t), t]));
+    this.secrets.sync(
+      l.things.flatMap((t) => {
+        const kind = partById(t.id)?.secret;
+        const v = l.wallAt(t.x, t.y);
+        if (!kind || !v || wallKind(v) !== 'door' || !WALLS[wallMat(v)]?.house || (kind === 'shelf' && !doorAcross(l.wallMask(t.x, t.y)))) return [];
+        return [{ key: Home.keyOf(t), t, kind, wall: l.wallAt(t.x, t.y), mask: l.wallMask(t.x, t.y) }];
+      }),
+    );
     this.bridges.sync(l.bridges());
     for (const [k, p] of this.placed) {
       if (want.has(k)) continue;
@@ -672,6 +711,8 @@ export class Home implements LinkHost {
     }
 
     this.swingDoors(dt, [this.hero, ...others]);
+    this.secrets.update(dt, [this.hero, ...others], this.hero, (x, y) => (inPlot(x, y) ? (this.walls.get(cellIndex(x, y))?.cut ?? 0) : 0));
+    this.climbStep(dt, heroX, heroY);
     this.critters.update(dt, heroX, heroY, d, this.scene.cameras.main.worldView);
     this.farm.update(dt, heroX, heroY, d);
 
@@ -699,6 +740,78 @@ export class Home implements LinkHost {
       near = Math.min(near, Math.hypot(p.light.x - x, p.light.y - y));
     }
     return near;
+  }
+
+  // ---------------------------------------------------------------- Upstairs (see upstairs.ts)
+
+  /** Work out the storey the hero is on from the home as kept, and the view of it. Back on the ground if its stairs or house went. */
+  private recompose(): void {
+    const k = this.upKey;
+    let s: Storey | null = null;
+    const t = k ? this.data.things.find((t) => partById(t.id)?.stairs && stairsId(t) === k) : undefined;
+    if (t) {
+      const { houses, at } = findHouses(this.data);
+      const h = inPlot(t.x, t.y) ? houses[at[cellIndex(t.x, t.y)]] : undefined;
+      if (h && !h.tent && h.has(t.x, t.y + 1)) s = findStorey(this.data, h, t);
+    }
+    if (!s) this.upKey = 0;
+    const was = this.storey;
+    this.storey = s;
+    this.layout = s ? composeHome(this.data, s) : this.data;
+    // What friends online are seen against, and the critters below, out of sight under the rooms above.
+    const under = s ? (x: number, y: number) => s.cells.has(houseKey(Math.floor((x - PLOT_X) / CELL), Math.floor((y - PLOT_Y) / CELL))) : null;
+    storeyView.up = s ? s.id : 0;
+    storeyView.covers = under ?? (() => false);
+    this.critters.hide = under;
+    if (!!was !== !!s) this.storeyChanged();
+  }
+
+  /** Up or down: the tray offers what may be built on this floor. */
+  private storeyChanged(): void {
+    const up = !!this.storey;
+    build.tabs = up ? [...UP_TABS] : TABS.map((t) => t.id);
+    build.allow = up ? upstairsAllows : null;
+    trayChanged();
+  }
+
+  /** Feet far enough onto a staircase take it: up from the ground floor, down from the storey. */
+  private climbStep(dt: number, x: number, y: number): void {
+    if (this.climbing) return;
+    // Gone from the house some other way: back on the ground.
+    const hx = Math.floor((x - PLOT_X) / CELL);
+    const hy = Math.floor((y - PLOT_Y) / CELL);
+    if (this.storey && !nearStorey(this.storey, hx, hy)) {
+      this.upKey = 0;
+      this.recompose();
+      this.refresh();
+      return;
+    }
+    if (this.climbCool > 0) {
+      this.climbCool -= dt;
+      return;
+    }
+    const s = this.storey;
+    const t = s ? s.stairs : this.data.things.find((t) => partById(t.id)?.stairs && onStairs(t, x, y, PLOT_X, PLOT_Y));
+    if (!t || !onStairs(t, x, y, PLOT_X, PLOT_Y)) return;
+    const up = !s;
+    this.climbing = true;
+    sound.stairs(up);
+    this.scene.climb(
+      () => {
+        // The stairs may have gone while the screen dimmed.
+        if (up && !this.data.things.includes(t)) return null;
+        this.upKey = up ? stairsId(t) : 0;
+        this.recompose();
+        if (up && !this.storey) return null;
+        this.refresh();
+        const at = landingOf(t, PLOT_X, PLOT_Y);
+        return standNear(t, at.x, at.y, PLOT_X, PLOT_Y, homeWalkable);
+      },
+      () => {
+        this.climbing = false;
+        this.climbCool = CLIMB_COOL;
+      },
+    );
   }
 
   // ---------------------------------------------------------------- Building
@@ -801,6 +914,12 @@ export class Home implements LinkHost {
     const pick = build.pick;
     if (!pick || !inPlot(cx, cy)) return false;
     const i = cellIndex(cx, cy);
+    // Upstairs: floors on the storey's rooms, walls of its own between them (the ground floor's stand up here too); nothing else is laid in strokes.
+    const s = this.storey;
+    if (s) {
+      if (pick.layer === 'floor') return s.cells.has(houseKey(cx, cy));
+      if (pick.layer !== 'wall' || !upstairsCell(s, cx, cy) || this.data.wallAt(cx, cy)) return false;
+    }
     if (pick.layer === 'seed') return this.farm.canSow(cx, cy, pick.id);
     if (pick.layer === 'thing') {
       const p = partById(pick.id);
@@ -862,6 +981,17 @@ export class Home implements LinkHost {
 
   /** What the eraser would take at a cell in this tab: a thing of the tab (or any), or the tab's layer. */
   private eraseTarget(cx: number, cy: number): 'floor' | 'wall' | 'roof' | 'tent' | 'crop' | Thing | null {
+    const what = this.eraseAny(cx, cy);
+    const s = this.storey;
+    if (!s || !what) return what;
+    // Upstairs, only what's the storey's own: its floors (back to the boards), its walls, what stands on it.
+    if (what === 'floor') return s.cells.has(houseKey(cx, cy)) ? what : null;
+    if (what === 'wall') return s.cells.has(houseKey(cx, cy)) && !this.data.wallAt(cx, cy) ? what : null;
+    if (typeof what === 'object') return onStorey(what, s) ? what : null;
+    return null;
+  }
+
+  private eraseAny(cx: number, cy: number): 'floor' | 'wall' | 'roof' | 'tent' | 'crop' | Thing | null {
     const l = this.layout;
     const i = cellIndex(cx, cy);
     const tab = build.tab;
@@ -936,7 +1066,34 @@ export class Home implements LinkHost {
   private canPut(p: PartDef, fx: number, fy: number, turn: number): boolean {
     if (!this.layout.canPlace(p, fx, fy, turn) || this.onHero(p, fx, fy, turn)) return false;
     const e = extent(p, turn);
+    const s = this.storey;
+    if (s) {
+      // Upstairs: on the storey's rooms (a hanging facing into them, a door in their doorways), clear of the stairwell and the step off it.
+      if (p.stairs) return false;
+      if (p.wall) return s.cells.has(houseKey(fx, fy + 1));
+      if (p.door) return s.cells.has(houseKey(fx, fy));
+      for (let y = fy; y < fy + e.h; y++) for (let x = fx; x < fx + e.w; x++) if (!upstairsCell(s, x, y)) return false;
+      return true;
+    }
+    if (p.stairs && !this.stairsFit(fx, fy)) return false;
+    // Nothing that stands in the way goes on the step off a staircase.
+    if (!p.flat && p.block !== 'none' && !p.wall && !p.door && !p.critter) {
+      for (const t of this.data.things) if (partById(t.id)?.stairs && t.x >= fx && t.x < fx + e.w && t.y + 2 >= fy && t.y + 2 < fy + e.h) return false;
+    }
     return !!(p.wall || p.door || p.critter) || !this.farm.covers(fx, fy, e.w, e.h);
+  }
+
+  /**
+   * Can a staircase go with its foot's top at (fx, fy)? All of it indoors in
+   * one house (not a tent), the step off its foot indoors too and clear,
+   * and no other staircase in the house.
+   */
+  private stairsFit(fx: number, fy: number): boolean {
+    if (!inPlot(fx, fy + 2)) return false;
+    const h = this.houseAt[cellIndex(fx, fy)];
+    if (h < 0 || this.houses[h]?.tent || this.houseAt[cellIndex(fx, fy + 1)] !== h || this.houseAt[cellIndex(fx, fy + 2)] !== h) return false;
+    if (this.layout.wallAt(fx, fy + 2) || this.layout.thingsAt(fx, fy + 2).some((t) => { const q = partById(t.id); return !!q && !q.flat && q.block !== 'none' && !q.wall && !q.door && !q.critter; })) return false;
+    return !this.layout.things.some((t) => partById(t.id)?.stairs && this.houseAt[cellIndex(t.x, t.y)] === h);
   }
 
   private placeThing(p: PartDef, fx: number, fy: number, turn: number): boolean {
@@ -948,9 +1105,10 @@ export class Home implements LinkHost {
   }
 
   private snap(): BuildSnap {
-    const l = this.layout;
+    const l = this.data;
     const cells = (a: Uint8Array) => [...a].map((v, i): [number, number] => [i, v]);
-    return snapOf({ f: cells(l.floor), w: cells(l.wall), r: cells(l.roof), t: cells(l.tent) }, l.things);
+    // The upper floors' cells as layers of their own (F, W), and their things keyed `^`.
+    return snapOf({ f: cells(l.floor), w: cells(l.wall), r: cells(l.roof), t: cells(l.tent), F: cells(l.upFloor), W: cells(l.upWall) }, l.things, undefined, l.upThings);
   }
 
   /** A stroke is over: keep its change backwards for undo, then save it and send it. */
@@ -984,26 +1142,32 @@ export class Home implements LinkHost {
 
   /** Lay a change on the layout and draw it again. */
   private lay(p: BuildPatch): void {
-    const l = this.layout;
-    const layers: Record<string, Uint8Array> = { f: l.floor, w: l.wall, r: l.roof, t: l.tent };
+    const l = this.data;
+    const layers: Record<string, Uint8Array> = { f: l.floor, w: l.wall, r: l.roof, t: l.tent, F: l.upFloor, W: l.upWall };
+    const listOf = (key: string): [Thing[], string] => (key.startsWith(UP) ? [l.upThings, key.slice(UP.length)] : [l.things, key]);
     applyPatch(
       {
         setCell: (layer, i, v) => {
           const a = layers[layer];
           if (a && i >= 0 && i < a.length) a[i] = v;
         },
-        addThing: (t) => {
-          if (inPlot(t.x, t.y)) l.things.push(t);
+        addThing: (t, up) => {
+          if (inPlot(t.x, t.y)) (up ? l.upThings : l.things).push(t);
         },
         removeThing: (key) => {
-          const i = l.things.findIndex((t) => thingKey(t) === key);
-          if (i >= 0) l.things.splice(i, 1);
+          const [list, k] = listOf(key);
+          const i = list.findIndex((t) => thingKey(t) === k);
+          if (i >= 0) list.splice(i, 1);
           return i >= 0;
         },
-        hasThing: (key) => l.things.some((t) => thingKey(t) === key),
+        hasThing: (key) => {
+          const [list, k] = listOf(key);
+          return list.some((t) => thingKey(t) === k);
+        },
       },
       p,
     );
+    this.recompose();
     this.refresh();
   }
 
@@ -1018,7 +1182,7 @@ export class Home implements LinkHost {
 
   /** The home changed: into this player's save if it's theirs, and to the cloud a little later if it's shared. */
   private keep(): void {
-    if (this.link.mine) collection.saveHome(this.layout.encode());
+    if (this.link.mine) collection.saveHome(this.data.encode());
     this.link.changed();
   }
 
@@ -1031,7 +1195,7 @@ export class Home implements LinkHost {
   // ---------------------------------------------------------------- The world (see worldLink.ts)
 
   state(): { data: string; farm: string; caught: string } {
-    return { data: this.layout.encode(), farm: this.farm.encoded(), caught: this.caught.join(',') };
+    return { data: this.data.encode(), farm: this.farm.encoded(), caught: this.caught.join(',') };
   }
 
   localT(): number {
@@ -1043,7 +1207,8 @@ export class Home implements LinkHost {
     const l = HomeLayout.decode(data);
     if (!l) return;
     this.forgetStrokes();
-    this.layout = l;
+    this.data = l;
+    this.recompose();
     this.refresh();
     this.farm.adopt(farm, true);
     if (this.link.mine) collection.saveHome(data);
@@ -1059,7 +1224,7 @@ export class Home implements LinkHost {
         // Someone just came: the home, the farm, the critters for the jar shelves and the time of day.
         if (this.owner && this.arrived) {
           const fm = this.farm.encoded();
-          sendPieces('hl', this.layout.encode(), { c: this.caught.join(','), ...(farmFits(fm) ? { fm } : {}), dn: daynight.phase, da: daynight.auto, dl: Math.round(daynight.left) }, m.f);
+          sendPieces('hl', this.data.encode(), { c: this.caught.join(','), ...(farmFits(fm) ? { fm } : {}), dn: daynight.phase, da: daynight.auto, dl: Math.round(daynight.left) }, m.f);
           if (!farmFits(fm)) sendFarm(fm, m.f);
         }
         break;
@@ -1077,12 +1242,13 @@ export class Home implements LinkHost {
         const l = HomeLayout.decode(got.s);
         if (!l) break;
         this.forgetStrokes();
-        this.layout = l;
+        this.data = l;
+        this.recompose();
         this.arrived = true;
         for (const p of this.early.splice(0)) this.lay(p);
         this.refresh();
         if (typeof f.fm === 'string') this.farm.adopt(f.fm, this.link.mine);
-        if (this.link.mine) collection.saveHome(this.layout.encode());
+        if (this.link.mine) collection.saveHome(this.data.encode());
         break;
       }
       case 'bp': {
@@ -1154,6 +1320,9 @@ export class Home implements LinkHost {
     this.netOff?.();
     this.netOff = null;
     setHomeMask(null);
+    setHomeBlocker(null);
+    groundView();
+    this.secrets.destroy();
     daynight.follower = false;
     build.available = build.home = false;
     stopBuilding();
