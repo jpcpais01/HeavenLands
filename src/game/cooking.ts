@@ -15,15 +15,18 @@ import { FISH, fishById, type FishDef } from './fish';
 import { cropById } from './farm';
 import { HOTBAR_SIZE, MAX_STACK, inventory, type ItemDef } from './items';
 import type { BuffDef } from './buffs';
-import { recipeById, type Ingredient, type RecipeDef } from './recipes';
+import { RECIPES, recipeById, type Ingredient, type RecipeDef } from './recipes';
 import { collection } from './collection';
 import { findById, findKey } from './finds';
 import { cozy } from './cozy';
 
 export { RECIPES, recipeById, type Ingredient, type RecipeDef } from './recipes';
 
-/** The kitchen open now: the stove indoors or the pot over a fire (its counter shows which). Set by the world. */
-export const cookHud = { station: 'stove' as 'stove' | 'fire' };
+/** The kitchen open now: the stove indoors, the pot over a fire, or the juice press (its counter shows which). Set by the world. */
+export const cookHud = { station: 'stove' as 'stove' | 'fire' | 'juicer' };
+
+/** The recipes made at a station: the juice press makes the juices, the stove and the pot everything else. */
+export const bookFor = (station: 'stove' | 'fire' | 'juicer'): RecipeDef[] => RECIPES.filter((r) => (r.at === 'juicer') === (station === 'juicer'));
 
 /** Pantry keys. */
 export const seedKey = (crop: string): string => `seed.${crop}`;

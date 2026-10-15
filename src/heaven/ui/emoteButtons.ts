@@ -1,9 +1,11 @@
 // The emote buttons on Heaven Lands' play HUD, where Myths has its ability
 // buttons: wave, cheer, dance, sit and a heart, then hug, bow, clap and a sky
-// lantern, and the lute for a jam (see pastimes/jam.ts). On a touch screen
-// they fan round the bottom-right corner under the thumb, the first five in
-// an outer arc and the rest in a smaller inner one; with a mouse they're a
-// small row in that corner, with their keys (4 to 9, 0, -, = and L) on them.
+// lantern, the lute for a jam (see pastimes/jam.ts) and the tablet (see
+// ui/screenPanel.ts). On a touch screen they fan round the bottom-right
+// corner under the thumb, the first five in an outer arc and the rest in a
+// smaller inner one, the tablet over the outer arc's top; with a mouse
+// they're two small rows in that corner, with their keys (4 to 9, 0, -, =,
+// L and T) on them.
 
 import Phaser from 'phaser';
 import { DPR as D } from '../../game/display';
@@ -19,18 +21,18 @@ const OUTER = 5;
 /** The inner arc's buttons are this much of the outer's size. */
 const INNER_SIZE = 0.75;
 /** Each emote's key, in order. */
-const KEYS = ['4', '5', '6', '7', '8', '9', '0', '-', '=', 'l'];
+const KEYS = ['4', '5', '6', '7', '8', '9', '0', '-', '=', 'l', 't'];
 /** ms a pressed button stays sunk. */
 const PRESS_MS = 160;
 const FILL = 0x2a1f33;
 const RING = 0xffe2b0;
 const LIT = 0xffc861;
 
-/** The buttons: the emotes, then the lute. */
-type Button = Emote | 'jam';
-const BUTTONS: Button[] = [...EMOTES, 'jam'];
+/** The buttons: the emotes, then the lute and the tablet. */
+type Button = Emote | 'jam' | 'pad';
+const BUTTONS: Button[] = [...EMOTES, 'jam', 'pad'];
 
-/** 12 x 12 icons: a waving hand, a burst, a note, a cushion, a heart, arms round a heart, a bowing figure, palms meeting, a lantern, a lute. */
+/** 12 x 12 icons: a waving hand, a burst, a note, a cushion, a heart, arms round a heart, a bowing figure, palms meeting, a lantern, a lute, a tablet. */
 const ICONS: Record<Button, string[]> = {
   wave: ['.....w.w....', '....w.ww.w..', '...ww.ww.ww.', '...ww.ww.ww.', '.w.wwwwwwww.', '.wwwwwwwwww.', '..wwwwwwwww.', '..wwwwwwww..', '...wwwwwww..', '....wwwww...', '....wwwww...', '............'],
   cheer: ['.....y......', '.y...y...y..', '..y..y..y...', '...y.w.y....', '....www.....', 'yyywwwwwyyy.', '....www.....', '...y.w.y....', '..y..y..y...', '.y...y...y..', '.....y......', '............'],
@@ -41,9 +43,10 @@ const ICONS: Record<Button, string[]> = {
   hug: ['............', '...rr..rr...', '..rrrrrrrr..', '..rwrrrrrr..', 'w.rrrrrrrr.w', 'ww.rrrrrr.ww', '.ww.rrrr.ww.', '..ww.rr.ww..', '...wwwwww...', '....wwww....', '............', '............'],
   bow: ['............', '............', '............', '..www.......', '..wwwwwww...', '..wwwwwwwww.', '..ww....www.', '..ww.....w..', '..ww........', '..ww........', '.wwww.......', '............'],
   clap: ['.y........y.', '..y..ww..y..', '....wwww....', 'y..wwwwww..y', '...wwwwww...', '...wwwwww...', '...wwwwww...', '....wwww....', '....wwww....', '.....ww.....', '............', '............'],
+  pad: ['............', '............', '.wwwwwwwwww.', '.wssssssssw.', '.wsssssyssw.', '.wssssyyysw.', '.wsggsssssw.', '.wgggggsggw.', '.wggggggggw.', '.wwwwwwwwww.', '............', '............'],
   lantern: ['....oooo....', '...oyyyyo...', '..oyyyyyyo..', '..oyyGyyyo..', '..oyyGGyyo..', '...oyyyyo...', '...oyyyyo...', '....oooo....', '.....GG.....', '.....y......', '............', '............'],
 };
-const PAL: Record<string, string> = { w: '#fff6e4', y: '#ffd66b', p: '#f2a8c4', r: '#ff7aa2', o: '#f0884a', G: '#fff4c8', b: '#b8703a', l: '#f2b86c', h: '#4a2a18', n: '#d89a58' };
+const PAL: Record<string, string> = { s: '#8ab4f0', g: '#9ad870', w: '#fff6e4', y: '#ffd66b', p: '#f2a8c4', r: '#ff7aa2', o: '#f0884a', G: '#fff4c8', b: '#b8703a', l: '#f2b86c', h: '#4a2a18', n: '#d89a58' };
 
 function iconArt(scene: Phaser.Scene): void {
   if (scene.textures.exists('hl_emoteicons')) return;
@@ -115,8 +118,11 @@ export class EmoteButtons implements CozyHud {
     const cx = width - R * 0.55;
     const cy = height - R * 0.55;
     const r = Math.round(R * 0.4);
-    const inner = BUTTONS.length - OUTER;
-    return BUTTONS.map((_e, i) => {
+    // The inner arc holds the rest but the tablet, which sits over the outer arc's top.
+    const inner = BUTTONS.length - OUTER - 1;
+    const top = { x: Math.round(cx), y: Math.round(cy - R * FAN) };
+    return BUTTONS.map((e, i) => {
+      if (e === 'pad') return { x: top.x, y: Math.round(top.y - r - r * INNER_SIZE - 6 * D), r: Math.round(r * INNER_SIZE) };
       const outer = i < OUTER;
       const a = Math.PI + (outer ? i / (OUTER - 1) : (i - OUTER) / (inner - 1)) * (Math.PI / 2);
       const reach = R * (outer ? FAN : FAN_IN);
@@ -127,6 +133,7 @@ export class EmoteButtons implements CozyHud {
   private press(e: Button): void {
     // The lute starts (or ends) a jam; the rest are emotes.
     if (e === 'jam') pastimeHud.jam = true;
+    else if (e === 'pad') pastimeHud.pad = true;
     else emoteHud.want = e;
     this.pressed.set(e, this.scene.time.now);
   }
@@ -149,7 +156,7 @@ export class EmoteButtons implements CozyHud {
     const now = this.scene.time.now;
     const spots = this.spots();
     const sunk = BUTTONS.map((e) => now - (this.pressed.get(e) ?? -1e9) < PRESS_MS);
-    const state = `${hidden} ${controls.mouse} ${emoteHud.playing} ${pastimeHud.jamming} ${sunk.join()} ${spots.map((s) => `${s.x},${s.y},${s.r}`).join(' ')}`;
+    const state = `${hidden} ${controls.mouse} ${emoteHud.playing} ${pastimeHud.jamming} ${pastimeHud.tablet} ${sunk.join()} ${spots.map((s) => `${s.x},${s.y},${s.r}`).join(' ')}`;
     for (const o of this.icons) o.setVisible(!hidden);
     // The keys only mean something with a keyboard.
     for (const k of this.keys) k.setVisible(!hidden && controls.mouse);
@@ -159,7 +166,7 @@ export class EmoteButtons implements CozyHud {
     const g = this.g.clear();
     spots.forEach((s, i) => {
       const e = BUTTONS[i];
-      const on = e === 'jam' ? pastimeHud.jamming : emoteHud.playing === e;
+      const on = e === 'jam' ? pastimeHud.jamming : e === 'pad' ? pastimeHud.tablet : emoteHud.playing === e;
       const r = sunk[i] ? s.r * 0.9 : s.r;
       g.fillStyle(FILL, on ? 0.7 : 0.45);
       g.fillCircle(s.x, s.y, r);

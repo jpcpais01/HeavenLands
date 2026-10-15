@@ -18,6 +18,16 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    v: 11,
+    date: '2026-10-15',
+    title: 'Juice, TV and a tablet',
+    notes: [
+      'New Juice press in Furniture / Kitchen: walk up and press E to make ten juices from your crops and finds, each a little boost to your step.',
+      'New Television in Furniture / Living room: sit on a seat facing it, or stand in front, and press E to watch YouTube. Paste a link or pick a radio channel; friends sat nearby see what you put on.',
+      'A tablet to carry everywhere: the new tablet button (or T) opens Videos, a pixel Sketchbook you can save as a picture, and Sky, which tells the time of day, the next shower and the next meteor shower.',
+    ],
+  },
+  {
     v: 10,
     date: '2026-10-15',
     title: 'Lazy mornings',

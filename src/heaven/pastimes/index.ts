@@ -13,6 +13,13 @@
 //   constellations and keep them in a star chart (stars.ts, scenes/StarScene.ts).
 // - Beehives fill with honey (hives.ts), and good things lie about each
 //   place to be foraged (forage.ts), both for the kitchen's new dishes.
+// - Watching the television: E at it sits the wanderer on the best seat
+//   facing it (or on the floor in front) and switches it on: real YouTube
+//   (ui/screenPanel.ts); sat on a seat facing one, E switches it on from
+//   there. Closing it leaves them sat. Friends see the screen lit and get
+//   what's put on (screens.ts).
+// - The tablet, taken out anywhere from its button (or T): videos, a
+//   sketchbook and the sky, the wanderer looking down at it as they use it.
 
 import Phaser from 'phaser';
 import { sound } from '../../audio';
@@ -30,6 +37,9 @@ import { ForageField, type Find } from './forage';
 import { Hives } from './hives';
 import { Jam, jamHud, type Instrument } from './jam';
 import { findSpots, reachOf, type Spot } from './spots';
+import { Screens } from './screens';
+import { openScreen, type Clip, type ScreenHandle } from '../ui/screenPanel';
+import { CELL } from '../../world/homeLayout';
 
 /** How often the built things are looked over again for seats and the rest, ms. */
 const SPOTS_MS = 500;
@@ -46,6 +56,13 @@ const DARK_MS = 1400;
 const WAKE_MS = 1300;
 /** Moved this far off a pastime's spot (travelled away: a campfire on the map), it ends there, nowhere else, px. */
 const LEFT = 24;
+/** A seat faces a television when it's turned toward it, this far either side of its width and this many cells in front, px. */
+const TV_SIDE = 12;
+const TV_FAR = 7 * CELL;
+/** With no seat, the floor in front of the television this far below it, px. */
+const TV_FLOOR = 12;
+/** E's label over a television stands clear of its aerials, px above its footprint. */
+const TV_LABEL = 38;
 
 type Doing =
   | { kind: 'seat'; spot: Spot; from: { x: number; y: number } }
@@ -54,12 +71,15 @@ type Doing =
   | { kind: 'lie'; spot: Spot; from: { x: number; y: number } }
   | { kind: 'jam' }
   // `tucked`: seen asleep in the bed (else, a bed turned away, hidden in it).
-  | { kind: 'sleep'; spot: Spot; from: { x: number; y: number }; t: number; zT: number; woke: boolean; tucked: boolean };
+  | { kind: 'sleep'; spot: Spot; from: { x: number; y: number }; t: number; zT: number; woke: boolean; tucked: boolean }
+  | { kind: 'watch'; spot: Spot; tv: Spot; from: { x: number; y: number }; pose: 'seat' | 'sit' }
+  | { kind: 'pad' };
 
 type Near = { spot: Spot } | { find: Find } | { honey: string; spot: Spot } | null;
 
-const ICONS: Record<string, string> = { seat: 'icon_sit', bed: 'icon_sleep', piano: 'icon_music', harp: 'icon_music', telescope: 'icon_stars' };
-const LABELS: Record<string, string> = { seat: 'E: SIT', bed: 'E: SLEEP', piano: 'E: PLAY', harp: 'E: PLAY', telescope: 'E: STARGAZE' };
+const PHASE_NAMES: Record<string, string> = { morning: 'Morning', day: 'Daytime', sunset: 'Sunset', night: 'Night' };
+const ICONS: Record<string, string> = { seat: 'icon_sit', bed: 'icon_sleep', piano: 'icon_music', harp: 'icon_music', telescope: 'icon_stars', tv: 'icon_tv' };
+const LABELS: Record<string, string> = { seat: 'E: SIT', bed: 'E: SLEEP', piano: 'E: PLAY', harp: 'E: PLAY', telescope: 'E: STARGAZE', tv: 'E: WATCH TV' };
 
 export class Pastimes implements CozyPastimes {
   private spots: Spot[] = [];
@@ -72,6 +92,11 @@ export class Pastimes implements CozyPastimes {
   private label: Phaser.GameObjects.BitmapText;
   private labelFor = '';
   private daylight = 1;
+  private screens: Screens;
+  /** The television or the tablet open over the game. */
+  private screen: ScreenHandle | null = null;
+  /** Sat on a seat facing a television: E switches it on. */
+  private seatTv: Spot | null = null;
 
   constructor(
     private world: WorldScene,
@@ -82,6 +107,8 @@ export class Pastimes implements CozyPastimes {
     this.hives = at.land ? new Hives(world, at.arena, at.owner) : null;
     const field = at.arena === 'home' ? null : new ForageField(world, at.arena);
     this.forage = field?.any ? field : null;
+    this.screens = new Screens(world);
+    this.screens.onFollow = (clip, at) => this.screen?.follow(clip, at);
     this.label = world.add.bitmapText(0, 0, 'pixel', '').setLetterSpacing(-1).setOrigin(0.5, 1).setDepth(10002).setVisible(false);
   }
 
@@ -101,6 +128,7 @@ export class Pastimes implements CozyPastimes {
     }
     this.hives?.update(dt, daylight, this.world.viewRect);
     this.forage?.update(dt, daylight);
+    this.screens.update(dt, this.spots, this.at.land);
 
     if (pastimeHud.jam) {
       pastimeHud.jam = false;
@@ -108,14 +136,21 @@ export class Pastimes implements CozyPastimes {
       // (The farm's E nearby doesn't stop the lute: it has its own button.)
       else if (!this.doing && !build.on && !fishHud.active) this.startJam();
     }
+    if (pastimeHud.pad) {
+      pastimeHud.pad = false;
+      if (this.doing?.kind === 'pad') this.stop();
+      else if (!this.doing && !build.on && !fishHud.active) this.startPad(hero);
+    }
     this.follow(hero, dt, daylight);
 
     pastimeHud.busy = !!this.doing && this.doing.kind !== 'seat' && this.doing.kind !== 'lie';
     pastimeHud.asleep = this.doing?.kind === 'sleep' && !this.doing.woke;
     pastimeHud.jamming = this.doing?.kind === 'jam' || this.doing?.kind === 'play';
+    pastimeHud.tablet = this.doing?.kind === 'pad';
     this.near = this.doing || !this.free() ? null : this.lookAround(hero.x, hero.y);
+    this.seatTv = this.doing?.kind === 'seat' ? this.tvFacing(this.doing.spot) : null;
     const n = this.near;
-    pastimeHud.near = !n ? '' : 'find' in n ? `find_${n.find.def.id}` : 'honey' in n ? 'find_honey' : ICONS[n.spot.kind];
+    pastimeHud.near = this.seatTv ? ICONS.tv : !n ? '' : 'find' in n ? `find_${n.find.def.id}` : 'honey' in n ? 'find_honey' : ICONS[n.spot.kind];
     // Lying in bed by night, the touch button sleeps (by day, walking off gets up).
     if (this.lying() === 'sleep') pastimeHud.near = 'icon_sleep';
     this.showLabel();
@@ -195,8 +230,13 @@ export class Pastimes implements CozyPastimes {
     const hero = this.hero;
     if (!hero) return false;
     if (this.doing) {
-      // E again: stand up, get out of bed, put the lute away, step away from the telescope. Asleep, nothing stirs.
       const d = this.doing;
+      // Sat facing a television: E switches it on from the seat.
+      if (d.kind === 'seat' && this.seatTv) {
+        this.watch(hero, this.seatTv, d.spot, d.from);
+        return true;
+      }
+      // E again: stand up, get out of bed, put the lute away, step away from the telescope. Asleep, nothing stirs.
       if (d.kind === 'lie' && this.lying() === 'sleep') this.doze(hero, d.spot, d.from);
       else if (d.kind !== 'sleep') this.stop();
       return true;
@@ -237,6 +277,9 @@ export class Pastimes implements CozyPastimes {
         starHud.close = false;
         this.world.scene.launch('stars');
         return true;
+      case 'tv':
+        this.watch(hero, s, this.bestSeat(s), from);
+        return true;
       case 'bed':
         // A bed facing us: in and tucked up, any time of day (sleep is a second E, by night).
         if (s.rest) {
@@ -271,6 +314,100 @@ export class Pastimes implements CozyPastimes {
     jamHud.stop = false;
     jamHud.open = true;
     this.world.scene.launch('jam');
+  }
+
+  // ---------------------------------------------------------------- Screens
+
+  /** A free seat turned toward the television, the nearest its middle and closest in front. */
+  private bestSeat(tv: Spot): Spot | null {
+    const friends = this.world.netPlay?.targets() ?? [];
+    const cx = (tv.x0 + tv.x1) / 2;
+    let best: Spot | null = null;
+    let score = Infinity;
+    for (const s of this.spots) {
+      if (s.kind !== 'seat' || this.tvFacing(s) !== tv) continue;
+      if (friends.some((t) => Math.hypot(t.x - s.x, t.y - s.y) < TAKEN)) continue;
+      const sc = Math.abs(s.x - cx) * 1.5 + (s.y - tv.y1);
+      if (sc < score) {
+        score = sc;
+        best = s;
+      }
+    }
+    return best;
+  }
+
+  /** The television a seat looks at: one in front of it, the way it faces (sat with their back to us). */
+  private tvFacing(seat: Spot): Spot | null {
+    if (seat.dir !== 'up') return null;
+    let best: Spot | null = null;
+    for (const s of this.spots) {
+      if (s.kind !== 'tv') continue;
+      if (seat.x < s.x0 - TV_SIDE || seat.x > s.x1 + TV_SIDE) continue;
+      const d = seat.y - s.y1;
+      if (d < 4 || d > TV_FAR) continue;
+      if (!best || d < seat.y - best.y1) best = s;
+    }
+    return best;
+  }
+
+  /** Sit down before the television (on `seat`, else on the floor in front) and switch it on. */
+  private watch(hero: Wanderer, tv: Spot, seat: Spot | null, from: { x: number; y: number }): void {
+    let spot: Spot;
+    if (seat) {
+      if (this.doing?.kind !== 'seat' || this.doing.spot !== seat) {
+        this.place(hero, seat);
+        hero.hold('seat', seat.dir, seat.lift, seat.depth);
+        sound.sitDown(this.world.pan(seat.x));
+      }
+      spot = seat;
+    } else {
+      // Cross-legged on the floor where they stand, if that's in front of it; else just in front.
+      const x = Phaser.Math.Clamp(hero.x, tv.x0 + 2, tv.x1 - 2);
+      const y = hero.y > tv.y1 + 4 ? hero.y : tv.y1 + TV_FLOOR;
+      spot = { ...tv, kind: 'seat', key: `${tv.key}:floor`, x, y, dir: 'up', lift: 0, depth: 0 };
+      this.place(hero, spot);
+      hero.hold('sit', 'up');
+    }
+    this.doing = { kind: 'watch', spot, tv, from, pose: seat ? 'seat' : 'sit' };
+    this.screens.watch(tv);
+    const shared = this.screens.sharedNear(hero.x, hero.y);
+    this.openScreen('tv', shared);
+  }
+
+  /** The tablet out of the bag: held up at the chest, its screen over the game. */
+  private startPad(hero: Wanderer): void {
+    hero.hold('tablet', 'down');
+    this.doing = { kind: 'pad' };
+    this.openScreen('pad', null);
+  }
+
+  private openScreen(kind: 'tv' | 'pad', shared: { clip: Clip; at: number } | null): void {
+    const handle: ScreenHandle = openScreen({
+      kind,
+      shared,
+      onPlay: (clip) => kind === 'tv' && this.screens.playing(clip),
+      onPlaying: (on) => {
+        sound.setHush(on);
+        if (!on && kind === 'tv') this.screens.playing(null);
+      },
+      phase: () => PHASE_NAMES[daynight.enabled ? daynight.phase : 'night'],
+      onClose: () => {
+        if (this.screen !== handle) return;
+        this.screen = null;
+        this.screenClosed();
+      },
+    });
+    this.screen = handle;
+  }
+
+  /** The screen was closed from itself: off the television they stay sat; the tablet goes away. */
+  private screenClosed(): void {
+    const d = this.doing;
+    if (d?.kind === 'watch') {
+      this.screens.watch(null);
+      if (d.pose === 'seat') this.doing = { kind: 'seat', spot: d.spot, from: d.from };
+      else this.stop();
+    } else if (d?.kind === 'pad') this.stop();
   }
 
   /** Feet onto the seat (or the stool at the keys). */
@@ -380,6 +517,11 @@ export class Pastimes implements CozyPastimes {
   }
 
   private closeOverlays(): void {
+    const screen = this.screen;
+    this.screen = null;
+    screen?.close();
+    this.screens.watch(null);
+    sound.setHush(false);
     const sc = this.world.scene;
     if (sc.isActive('jam')) sc.stop('jam');
     if (sc.isActive('stars')) sc.stop('stars');
@@ -396,6 +538,17 @@ export class Pastimes implements CozyPastimes {
 
   /** Over what E would do, with a keyboard (as the farm's). */
   private showLabel(): void {
+    const tv = this.seatTv;
+    if (tv) {
+      const text = controls.mouse ? LABELS.tv : '';
+      if (text !== this.labelFor) {
+        this.labelFor = text;
+        this.label.setText(text).setTint(0xffe8c0);
+      }
+      this.label.setVisible(!!text);
+      this.label.setPosition(Math.round((tv.x0 + tv.x1) / 2), Math.round(tv.y0 - TV_LABEL + Math.sin(this.world.time.now * 0.004) * 1.5));
+      return;
+    }
     const n = this.near;
     const d = this.doing;
     const lying = this.lying();
@@ -408,7 +561,7 @@ export class Pastimes implements CozyPastimes {
     const spot = d?.kind === 'lie' ? d.spot : n && 'spot' in n ? n.spot : null;
     if (!text || (!spot && !(n && 'find' in n))) return;
     const x = n && 'find' in n ? n.find.x : (spot!.x0 + spot!.x1) / 2;
-    const y = n && 'find' in n ? n.find.y - 16 : spot!.y0 - 22;
+    const y = n && 'find' in n ? n.find.y - 16 : spot!.y0 - (spot!.kind === 'tv' ? TV_LABEL : 22);
     this.label.setPosition(Math.round(x), Math.round(y + Math.sin(this.world.time.now * 0.004) * 1.5));
   }
 
@@ -418,15 +571,18 @@ export class Pastimes implements CozyPastimes {
     this.jam.destroy();
     this.hives?.destroy();
     this.forage?.destroy();
+    this.screens.destroy();
     this.label.destroy();
     pastimeHud.near = '';
     pastimeHud.busy = false;
     pastimeHud.jamming = false;
     pastimeHud.jam = false;
     pastimeHud.asleep = false;
+    pastimeHud.tablet = false;
+    pastimeHud.pad = false;
   }
 }
 
 /** The pose a pastime holds the hero in. */
-const POSE_OF: Record<Doing['kind'], string> = { seat: 'seat', play: 'play', gaze: 'gaze', jam: 'strum', lie: 'lie', sleep: 'doze' };
-const poseOf = (d: Doing): string => POSE_OF[d.kind];
+const POSE_OF: Record<Exclude<Doing['kind'], 'watch'>, string> = { seat: 'seat', play: 'play', gaze: 'gaze', jam: 'strum', lie: 'lie', sleep: 'doze', pad: 'tablet' };
+const poseOf = (d: Doing): string => (d.kind === 'watch' ? d.pose : POSE_OF[d.kind]);

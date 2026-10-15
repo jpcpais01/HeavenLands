@@ -1,7 +1,7 @@
 // Where the pastimes happen among the things built (the Home's plot, the
 // Everwood's builds): every seat's places to sit (a bench or a sofa seats
-// two, side by side), beds to lie in and sleep in, the piano and the harp to play, the
-// telescope, the beehives. Worked out from the grid's things whenever they
+// two, side by side), beds to lie in and sleep in, the piano and the harp
+// to play, the telescope, the beehives, the television. Worked out from the grid's things whenever they
 // change, in world positions: where the hero sits or stands, which way they
 // face, how high a seat lifts them and how they sort against the thing.
 
@@ -11,7 +11,7 @@ import { CELL, type Thing } from '../../world/homeLayout';
 import { extent, partById } from '../../world/homeParts';
 import type { Dir } from '../Wanderer';
 
-export type SpotKind = 'seat' | 'bed' | 'piano' | 'harp' | 'telescope' | 'hive';
+export type SpotKind = 'seat' | 'bed' | 'piano' | 'harp' | 'telescope' | 'hive' | 'tv';
 
 export interface Spot {
   kind: SpotKind;
@@ -127,6 +127,7 @@ export function findSpots(land: BuildLand): Spot[] {
     else if (t.id === 'harp') at('harp', t.flip ? x0 - 3 : x1 + 3, y1 - 3, t.flip ? 'right' : 'left');
     else if (t.id === 'telescope') at('telescope', cx + (t.flip ? -2 : 2), y1 + 3, 'up');
     else if (t.id === 'beehive') at('hive', cx, y1 + 4, 'up');
+    else if (t.id === 'tv') at('tv', cx, y1 + 4, 'up');
   }
   return out;
 }

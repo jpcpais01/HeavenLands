@@ -45,6 +45,8 @@ export interface Pose {
   lute?: boolean;
   /** Lying in bed: only the head and shoulders show above the covers' turned-down edge, hands resting on it. */
   bed?: boolean;
+  /** A tablet held up at the chest (the wanderer's own, see pastimes). */
+  tablet?: boolean;
 }
 
 export interface Kit {

@@ -8,11 +8,12 @@ import { BLOOM_ART, BLOOM_TURNS } from '../src/art/homeBloom';
 import { GARDEN_ART, GARDEN_TURNS } from '../src/art/homeGarden';
 import { HOUSE_ART, HOUSE_TURNS } from '../src/art/homeHouse';
 import { TRIM_ART, TRIM_TURNS } from '../src/art/homeTrim';
+import { GADGET_ART } from '../src/art/homeGadgets';
 import { encodePNG } from './png';
 
 const out = process.argv[2] ?? 'home.png';
 const S = Number(process.argv[3] ?? 4);
-const LATER: Record<string, PropArt> = { ...YARD_ART, ...ROOM_ART, ...BLOOM_ART, ...GARDEN_ART, ...HOUSE_ART, ...TRIM_ART };
+const LATER: Record<string, PropArt> = { ...YARD_ART, ...ROOM_ART, ...BLOOM_ART, ...GARDEN_ART, ...HOUSE_ART, ...TRIM_ART, ...GADGET_ART };
 const ART: Record<string, PropArt> = { ...PROP_ART, ...LATER };
 const TURNS = { ...PROP_TURNS, ...YARD_TURNS, ...ROOM_TURNS, ...BLOOM_TURNS, ...GARDEN_TURNS, ...HOUSE_TURNS, ...TRIM_TURNS };
 const ids = process.argv[4] ? process.argv[4].split(',') : Object.keys(LATER);
