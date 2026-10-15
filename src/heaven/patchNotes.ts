@@ -18,6 +18,15 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    v: 9,
+    date: '2026-10-15',
+    title: 'See it before you build it',
+    notes: [
+      'On phones and tablets a piece no longer goes down the moment you lift your finger: it waits as a see-through ghost, green where it fits and red where it doesn\'t. Drag it about, turn it, then tap the tick to build it (or the ghost again), or the cross to put it back.',
+      'The build cursor is clearer everywhere: the ghost breathes softly and its footprint has crisp corners.',
+    ],
+  },
+  {
     v: 8,
     date: '2026-10-11',
     title: 'Little things, put right',
