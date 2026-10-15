@@ -373,6 +373,8 @@ export class BuildHud {
   private cellGap = 0;
   private iconScale = 1;
   private drawn = '';
+  /** The tray's offer this was made for (see `trayChanged`). */
+  private trayVer = build.trayVer;
 
   /** `onOpen` lets go of the controls held when build mode starts. */
   constructor(
@@ -729,6 +731,14 @@ export class BuildHud {
 
   update(_dt: number): void {
     if (build.on && !build.available) stopBuilding();
+    // Up or down the stairs: other things may be built there, so the shelves are made again and their picks start over.
+    if (this.trayVer !== build.trayVer) {
+      this.trayVer = build.trayVer;
+      this.lists.clear();
+      this.picked.clear();
+      this.scrolls.clear();
+      if (build.on) this.sync(true);
+    }
     if (!build.on) {
       this.drag = null;
       this.hoverSection = -1;
@@ -761,7 +771,7 @@ export class BuildHud {
     const picked = this.picked.get(this.shelf.id) ?? 1;
     this.placeIcons(list);
 
-    const state = `${build.tabs.join()} ${this.scene.scale.width} ${this.scene.scale.height} ${build.available} ${build.home} ${on} ${this.shelf.id} ${list.length} ${picked} ${this.hover} ${this.hoverSection} ${Math.round(this.scroll)} ${build.canUndo} ${twist} ${lit} ${this.nameRect.width} ${this.twistBtn.rect.width} ${this.pillsOwnRow}`;
+    const state = `${build.trayVer} ${build.tabs.join()} ${this.scene.scale.width} ${this.scene.scale.height} ${build.available} ${build.home} ${on} ${this.shelf.id} ${list.length} ${picked} ${this.hover} ${this.hoverSection} ${Math.round(this.scroll)} ${build.canUndo} ${twist} ${lit} ${this.nameRect.width} ${this.twistBtn.rect.width} ${this.pillsOwnRow}`;
     if (state === this.drawn) return;
     this.drawn = state;
     const g = this.g.clear();

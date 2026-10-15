@@ -21,6 +21,7 @@ import { BLOOM_ART, BLOOM_TURNS } from './homeBloom';
 import { GARDEN_ART, GARDEN_TURNS } from './homeGarden';
 import { HOUSE_ART, HOUSE_TURNS } from './homeHouse';
 import { TRIM_ART, TRIM_TURNS } from './homeTrim';
+import { SECRET_SHELF, STAIRS_ART, secretCase, secretCaseIcon, secretWallIcon } from './homeStairs';
 import { DOOR_OX, DOOR_OY, DOOR_STEP, DOOR_STEPS, DOOR_WAYS, doorArt, doorFrame, doorIcon } from './homeDoor';
 import { GATE_MATS, GATE_WAYS, gateFrames } from './homeGate';
 import { TREE_SWAY_FPS, TREE_SWAY_FRAMES } from './trees';
@@ -29,7 +30,7 @@ import { CELL, PLOT_X, PLOT_Y, type Thing } from '../world/homeLayout';
 import { FLOORS, ROOFS, TENTS, WALLS, extent, partById } from '../world/homeParts';
 
 /** Every placed thing's drawing by part id, and the turning ones' other views (homeYard.ts, homeRoom.ts, homeBloom.ts, homeGarden.ts, homeHouse.ts and homeTrim.ts hold the later pieces). */
-export const PROP_ART: Record<string, PropArt> = { ...FIRST_ART, ...YARD_ART, ...ROOM_ART, ...BLOOM_ART, ...GARDEN_ART, ...HOUSE_ART, ...TRIM_ART };
+export const PROP_ART: Record<string, PropArt> = { ...FIRST_ART, ...YARD_ART, ...ROOM_ART, ...BLOOM_ART, ...GARDEN_ART, ...HOUSE_ART, ...TRIM_ART, ...STAIRS_ART };
 export const PROP_TURNS: Record<string, { side: PropArt; back: PropArt }> = { ...FIRST_TURNS, ...YARD_TURNS, ...ROOM_TURNS, ...BLOOM_TURNS, ...GARDEN_TURNS, ...HOUSE_TURNS, ...TRIM_TURNS };
 
 /** How wide the sheet is; it grows downward as frames are packed. */
@@ -115,6 +116,16 @@ function homeTasks(list: Entry[]): (() => void)[] {
     // The door's picture for the palette (mirrored: hinged on the right).
     frame('p:door:0', doorIcon(0));
     frame('p:door:m0', doorIcon(1));
+  });
+  // The secret doors: the bookcase that slides aside (and its mirror), and both doors' pictures for the tray (see homeStairs.ts).
+  tasks.push(() => {
+    const c = secretCase();
+    add(`${SECRET_SHELF}:0`, c);
+    add(`${SECRET_SHELF}:m0`, c.mirrored());
+    const icon = secretCaseIcon();
+    add('p:secretshelf:0', icon);
+    add('p:secretshelf:m0', icon.mirrored());
+    add('p:secretwall:0', secretWallIcon());
   });
   // The door: every way it hangs and every step of its swing; and the garden gates, on the same steps (world/swing.ts).
   for (const way of DOOR_WAYS) for (let hinge = 0; hinge < 2; hinge++) tasks.push(() => {
@@ -219,7 +230,7 @@ export const glows = (frame: string): boolean => glowing.has(frame) || glowing.h
 
 /** A wall cell's frame on the sheet. */
 export const wallFrameName = (mat: number, frame: string): string => `w:${WALLS[mat].id}:${frame}`;
-export { wallFrameH, CHIMNEY_W, CHIMNEY_H, DOOR_OX, DOOR_OY };
+export { wallFrameH, CHIMNEY_W, CHIMNEY_H, DOOR_OX, DOOR_OY, SECRET_SHELF };
 
 /** How a placed thing is drawn. */
 export interface ThingLook {
@@ -262,6 +273,10 @@ export function thingFoot(t: Thing): { x: number; y: number } {
 export function thingLook(t: Thing): ThingLook {
   const p = partById(t.id)!;
   const foot = thingFoot(t);
+  if (p.secret) {
+    // As it looks shut, filling its doorway (the world hangs it: see world/secretDoor.ts).
+    return { key: 'home', frame: `p:${t.id}:${t.flip && p.flip ? 'm' : ''}0`, glow: null, anim: null, flipX: false, sway: null, x: PLOT_X + t.x * CELL, y: PLOT_Y + t.y * CELL - DOOR_OY, ox: 0, oy: 0 };
+  }
   if (p.door) {
     // Shut, face on, standing in its doorway (the world swings it: see world/Home.ts).
     return { key: 'home', frame: t.flip ? 'p:door:m0' : 'p:door:0', glow: 'home_e', anim: null, flipX: false, sway: null, x: PLOT_X + t.x * CELL, y: PLOT_Y + t.y * CELL - DOOR_OY, ox: 0, oy: 0 };

@@ -718,6 +718,16 @@ class GameSound {
     this.fx('doorOpen', 'doorOpen', [pan, level], 0);
   }
 
+  /** A secret door opening or shutting: a hidden door of stone grinding, or a bookcase rolling aside. */
+  secretDoor(pan = 0, stone = true, opening = true): void {
+    this.fx('secretDoor', 'secretDoor', [pan, stone, opening], 0);
+  }
+
+  /** Footfalls up (or down) a house's stairs. */
+  stairs(up = true): void {
+    this.fx('stairs', 'stairs', [up]);
+  }
+
   doorShut(pan = 0, level = 1): void {
     this.fx('doorShut', 'doorShut', [pan, level], 0);
   }

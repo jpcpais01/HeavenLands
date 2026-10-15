@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { thingLook, warmHome } from '../art/homeArt';
 import { CRITTER_H, CRITTER_OX, CRITTER_OY, CRITTER_W } from '../art/critters';
 import { sound } from '../audio';
-import { TABS, build, stopBuilding } from '../game/build';
+import { TABS, build, stopBuilding, trayChanged } from '../game/build';
 import { collection } from '../game/collection';
 import { CRITTERS, critterById } from '../game/critters';
 import { Pieces, farmFits, sendFarm, sendPieces } from '../net/pieces';
@@ -12,7 +12,7 @@ import type { Clearable, Forest } from './Forest';
 import { CHUNK } from './forestGen';
 import { Deck } from './bridge';
 import { footOn, type BuildLand } from './buildLand';
-import { applyPatch, diff, readPatch, snapOf, thingKey, type BuildPatch, type BuildSnap, type PatchTarget } from './buildPatch';
+import { UP, applyPatch, diff, readPatch, snapOf, thingKey, type BuildPatch, type BuildSnap, type PatchTarget } from './buildPatch';
 import { BuiltView } from './BuiltView';
 import { Farm } from './Farm';
 import type { RodHost } from './Fishing';
@@ -21,6 +21,7 @@ import { HomeCritters } from './HomeCritters';
 import { ForestEdits, MAX_CLEARED, MAX_FLOORS, MAX_ROOFS, MAX_TENTS, MAX_THINGS, MAX_WALLS, cellKey, wardReach } from './forestEdits';
 import { CELL, PLOT_X, PLOT_Y, type Thing } from './homeLayout';
 import { FISH_REACH, FLOORS, MAX_CRITTERS, extent, partById, type PartDef } from './homeParts';
+import { UP_TABS, composeEdits, findStorey, groundView, landingOf, liftEdits, nearStorey, onStairs, onStorey, stairsId, standNear, storeyView, upstairsAllows, upstairsCell, type Storey } from './upstairs';
 import { WorldLink, type LinkHost } from './worldLink';
 
 // Building anywhere: in the Everwood, on every endless land and in every
@@ -41,6 +42,8 @@ import { WorldLink, type LinkHost } from './worldLink';
 
 /** How many strokes can be undone. */
 const UNDO_MAX = 30;
+/** After taking a house's stairs, this long (ms) before they can be taken again. */
+const CLIMB_COOL = 600;
 /** How far round the hero the cursor must keep, px, so nothing goes down on them. */
 const HERO_R = 6;
 /** A change bigger than this goes in pieces. */
@@ -113,9 +116,18 @@ export function forestGround(forest: Forest): BuildGround {
 }
 
 export class PlaceBuild implements RodHost, LinkHost {
+  /** What's built as it's kept (both floors of its houses), and as it's shown: the same, or from upstairs (see upstairs.ts). */
   readonly edits: ForestEdits;
-  /** The place as the critters, the farm and fishing see it (see buildLand.ts). */
+  private shown: ForestEdits;
+  /** The upper floor the hero has climbed to, and its stairs' name (0 on the ground). */
+  private storey: Storey | null = null;
+  private upKey = 0;
+  private climbing = false;
+  private climbCool = 0;
+  /** The place as fishing and the pastimes see it (whatever floor shows), as the critters do (the ground floor) and as the farm does (the ground's beds, the stoves of the floor that shows) (see buildLand.ts). */
   readonly land: BuildLand;
+  private groundLand: BuildLand;
+  private farmLand: BuildLand;
   /** What's built, as it stands in the world. */
   readonly view: BuiltView;
   /** Whose world this is, who may build, and the cloud's copy (see worldLink.ts). */
@@ -158,38 +170,25 @@ export class PlaceBuild implements RodHost, LinkHost {
     const keeper = this.link.keeper;
     const initial = this.link.initial;
     this.edits = keeper ? ForestEdits.decode(initial ? initial.data : loadLocal(arena).data) : new ForestEdits();
+    this.shown = this.edits;
     if (forest) {
       const gen = forest.gen;
       gen.cleared = this.edits.cleared;
-      gen.built = (x, y) => this.edits.blocks(x, y);
+      gen.built = (x, y) => this.shown.blocks(x, y);
       gen.bridged = (x, y) => this.edits.bridges.at(x, y) === Deck.Walk;
       forest.edits = this.edits;
     }
     if (this.link.mine) this.caught = CRITTERS.filter((c) => collection.critterCount(c.id) > 0).map((c) => c.id);
     else if (initial) this.caught = initial.caught.split(',').filter((id) => critterById(id));
     this.arrived = keeper;
-    this.view = new BuiltView(world, adopt, () => this.edits, () => this.caught, open);
+    this.view = new BuiltView(world, adopt, () => this.shown, () => this.caught, open);
 
-    const e = this.edits;
-    const g = ground;
-    this.land = {
-      ox: 0,
-      oy: 0,
-      get things() {
-        return e.things;
-      },
-      floorAt: (cx, cy) => e.floorAt(cx, cy),
-      wallAt: (cx, cy) => e.wallAt(cx, cy),
-      // A pond laid, or the place's own deep water.
-      isWater: (cx, cy) => e.isPond(cx, cy) || g.cell((cx + 0.5) * CELL, (cy + 0.5) * CELL) === 2,
-      thingsAt: (cx, cy) => e.thingsAt(cx, cy),
-      houseAt: (cx, cy) => e.houseAt(cx, cy),
-      walkable: (x, y) => this.feet(x, y),
-      waterCells: () => [...e.floors.keys()].filter((k) => FLOORS[e.floors.get(k)! - 1]?.water).map((k) => ({ x: Math.floor(k / 65536), y: k % 65536 })),
-    };
+    this.land = this.makeLand('shown');
+    this.groundLand = this.makeLand('ground');
+    this.farmLand = this.makeLand('farm');
     this.critters = new HomeCritters(world);
     // The farm's plots are kept by place: the Everwood's as 'w', any other place by its own id.
-    this.farm = new Farm(world, () => this.link.mine, () => this.farmChanged(), this.land, arena === 'forest' ? 'w' : arena);
+    this.farm = new Farm(world, () => this.link.mine, () => this.farmChanged(), this.farmLand, arena === 'forest' ? 'w' : arena);
     if (initial) this.farm.adopt(initial.farm);
 
     // Everything a Home has, the same here.
@@ -207,10 +206,43 @@ export class PlaceBuild implements RodHost, LinkHost {
     if (!keeper) session.send({ t: 'wq' });
   }
 
-  /** Can feet stand at (x, y), what's built considered? (In the Everwood its ground already counts them.) */
+  /** What's built as it shows: the ground floor, or the house's rooms from upstairs. */
+  get showing(): ForestEdits {
+    return this.shown;
+  }
+
+  /** `ground`: the ground floor alone; `shown`: whatever floor shows; `farm`: the ground floor's beds, with the stoves of the floor that shows. */
+  private makeLand(kind: 'ground' | 'shown' | 'farm'): BuildLand {
+    const at = () => (kind === 'shown' ? this.shown : this.edits);
+    const stood = () => (kind === 'ground' ? this.edits : this.shown);
+    const g = this.ground;
+    return {
+      ox: 0,
+      oy: 0,
+      get things() {
+        return stood().things;
+      },
+      floorAt: (cx, cy) => at().floorAt(cx, cy),
+      wallAt: (cx, cy) => at().wallAt(cx, cy),
+      // A pond laid, or the place's own deep water.
+      isWater: (cx, cy) => this.edits.isPond(cx, cy) || g.cell((cx + 0.5) * CELL, (cy + 0.5) * CELL) === 2,
+      thingsAt: (cx, cy) => stood().thingsAt(cx, cy),
+      houseAt: (cx, cy) => this.edits.houseAt(cx, cy),
+      walkable: (x, y) => this.feet(x, y),
+      waterCells: () => [...this.edits.floors.keys()].filter((k) => FLOORS[this.edits.floors.get(k)! - 1]?.water).map((k) => ({ x: Math.floor(k / 65536), y: k % 65536 })),
+    };
+  }
+
+  /** Can feet stand at (x, y), what's built considered? (In the Everwood its ground already counts them.) Upstairs, only on the storey's rooms. */
   feet(x: number, y: number): boolean {
+    if (this.view.blocks(x, y)) return false;
+    const s = this.storey;
+    if (s) {
+      const k = cellKey(Math.floor(x / CELL), Math.floor(y / CELL));
+      return (s.cells.has(k) || this.shown.walls.has(k)) && !this.shown.blocks(x, y);
+    }
     if (this.ground.ownFeet) return this.ground.walkable(x, y);
-    const e = this.edits;
+    const e = this.shown;
     if (e.bridges.at(x, y) === Deck.Walk) return !e.blocks(x, y);
     return this.ground.walkable(x, y) && !e.blocks(x, y);
   }
@@ -226,9 +258,10 @@ export class PlaceBuild implements RodHost, LinkHost {
     if (this.edits.version !== this.shownVer) {
       this.shownVer = this.edits.version;
       this.rodSpots = null;
-      this.critters.sync(this.land, build.on);
+      this.critters.sync(this.groundLand, build.on);
       this.farm.sync();
     }
+    this.climbStep(dt, heroX, heroY);
     this.view.update(time, dt, daylight, { x: heroX, y: heroY, alive: true }, this.world.cameras.main.worldView, others);
     this.critters.update(dt, heroX, heroY, daylight, this.world.cameras.main.worldView);
     this.farm.update(dt, heroX, heroY, daylight);
@@ -413,7 +446,10 @@ export class PlaceBuild implements RodHost, LinkHost {
       const px = s === n ? this.world.cameras.main.getWorldPoint(build.pointer.x, build.pointer.y) : { x: (x + 0.5) * CELL, y: (y + 0.5) * CELL };
       if (erase ? this.eraseAt(x, y, px.x, px.y) : this.paintAt(x, y)) changed = true;
     }
-    if (changed) this.edits.index();
+    if (changed) {
+      this.shown.index();
+      this.settle();
+    }
   }
 
   /** Is the open ground at the middle of cell (cx, cy)? Not in water (the place's, or a pond laid) unless `water` allows it. */
@@ -421,21 +457,33 @@ export class PlaceBuild implements RodHost, LinkHost {
     const c = this.ground.cell((cx + 0.5) * CELL, (cy + 0.5) * CELL);
     // Not on a cliff, its lip or its foot, nor out over the sky: things there would hang in the air or stand in the rock.
     if (c < 0) return false;
-    const pond = this.edits.isPond(cx, cy);
+    const pond = this.shown.isPond(cx, cy);
     const wet = pond || c > 0;
     return water === 'only' ? pond || c === 2 : water === 'too' || !wet;
   }
 
   private canPlace(p: PartDef, fx: number, fy: number, turn: number): boolean {
-    if (this.edits.things.length >= MAX_THINGS) return false;
+    if (this.edits.things.length + this.edits.upThings.length >= MAX_THINGS) return false;
+    const s = this.storey;
+    // Upstairs: on the storey's rooms (a hanging facing into them, a door in their doorways), clear of the stairwell and the step off it.
+    if (s && p.stairs) return false;
     // A door hangs in a house's doorway, a hanging on a house wall's face.
-    if (p.door || p.wall) return this.edits.fitsWall(p, fx, fy);
-    if (p.critter && this.edits.critterCount() >= MAX_CRITTERS) return false;
+    if (p.door || p.wall) return this.shown.fitsWall(p, fx, fy) && (!s || s.cells.has(cellKey(fx, p.wall ? fy + 1 : fy)));
+    if (p.critter && this.shown.critterCount() >= MAX_CRITTERS) return false;
     if (this.onHero(p, fx, fy, turn)) return false;
     const { w, h } = extent(p, turn);
-    if (this.edits.occupied(p, fx, fy, w, h)) return false;
+    if (this.shown.occupied(p, fx, fy, w, h)) return false;
     // Not over a crop growing (a critter can wander among them).
-    if (!p.critter && this.farm.covers(fx, fy, w, h)) return false;
+    if (!p.critter && !s && this.farm.covers(fx, fy, w, h)) return false;
+    if (s) {
+      for (let y = fy; y < fy + h; y++) for (let x = fx; x < fx + w; x++) if (!upstairsCell(s, x, y)) return false;
+      return true;
+    }
+    if (p.stairs && !this.stairsFit(fx, fy)) return false;
+    // Nothing that stands in the way goes on the step off a staircase.
+    if (!p.flat && p.block !== 'none' && !p.critter) {
+      for (const t of this.edits.things) if (partById(t.id)?.stairs && t.x >= fx && t.x < fx + w && t.y + 2 >= fy && t.y + 2 < fy + h) return false;
+    }
     const g = this.ground;
     // All on one level.
     const level = g.level((fx + 0.5) * CELL, (fy + 0.5) * CELL);
@@ -451,11 +499,29 @@ export class PlaceBuild implements RodHost, LinkHost {
     return true;
   }
 
+  /**
+   * Can a staircase go with its top at (fx, fy)? All of it indoors in one
+   * house (not a tent), the step off its foot indoors too and clear, and no
+   * other staircase in the house.
+   */
+  private stairsFit(fx: number, fy: number): boolean {
+    const e = this.edits;
+    const h = e.houseAt(fx, fy);
+    if (h < 0 || e.houses[h]?.tent || e.houseAt(fx, fy + 1) !== h || e.houseAt(fx, fy + 2) !== h) return false;
+    const stops = (t: Thing) => {
+      const q = partById(t.id);
+      return !!q && !q.flat && q.block !== 'none' && !q.wall && !q.door && !q.critter;
+    };
+    if (e.wallAt(fx, fy + 2) || e.thingsAt(fx, fy + 2).some(stops)) return false;
+    return !e.things.some((t) => partById(t.id)?.stairs && e.houseAt(t.x, t.y) === h);
+  }
+
   private placeThing(p: PartDef, fx: number, fy: number, turn: number): void {
     if (!this.canPlace(p, fx, fy, turn)) return;
-    this.edits.things.push({ id: p.id, x: fx, y: fy, flip: build.flip && !!p.flip, turn });
-    this.edits.index();
+    this.shown.things.push({ id: p.id, x: fx, y: fy, flip: build.flip && !!p.flip, turn });
+    this.shown.index();
     this.touchCells(fx, fy, 1);
+    this.settle();
     // A critter is let out with its own sparkle and chirp (HomeCritters).
     if (!p.critter) sound.thud(0);
   }
@@ -464,13 +530,20 @@ export class PlaceBuild implements RodHost, LinkHost {
   private canPaint(cx: number, cy: number): boolean {
     const pick = build.pick;
     if (!pick) return false;
+    // Upstairs: floors on the storey's rooms, walls of its own between them (the ground floor's stand up here too); nothing else is laid in strokes.
+    const s = this.storey;
+    if (s) {
+      if (pick.layer === 'floor') return s.cells.has(cellKey(cx, cy)) && (this.shown.floorAt(cx, cy) > 0 || this.shown.floors.size < MAX_FLOORS);
+      if (pick.layer !== 'wall' || !upstairsCell(s, cx, cy) || this.edits.wallAt(cx, cy) || this.shown.walls.size >= MAX_WALLS) return false;
+      return !this.shown.thingsAt(cx, cy).some((t) => !partById(t.id)?.wall && !partById(t.id)?.door && !partById(t.id)?.critter) && !this.heroIn(cx, cy);
+    }
     if (pick.layer === 'floor') return this.canFloor(cx, cy);
     if (pick.layer === 'seed') return this.farm.canSow(cx, cy, pick.id);
     // A roof goes over anything; it's walked under.
-    if (pick.layer === 'roof') return this.edits.roofAt(cx, cy) > 0 || this.edits.roofs.size < MAX_ROOFS;
+    if (pick.layer === 'roof') return this.shown.roofAt(cx, cy) > 0 || this.shown.roofs.size < MAX_ROOFS;
     // A tent is its own walls: on open ground, not over walls or water, nor on the hero (its hem would hold them).
     if (pick.layer === 'tent') {
-      const e = this.edits;
+      const e = this.shown;
       if (!e.tentAt(cx, cy) && (e.tents.size >= MAX_TENTS || this.heroIn(cx, cy))) return false;
       return !e.wallAt(cx, cy) && !e.isPond(cx, cy) && !this.farm.plotAt(cx, cy) && this.open(cx, cy);
     }
@@ -483,18 +556,18 @@ export class PlaceBuild implements RodHost, LinkHost {
 
   private canWall(cx: number, cy: number): boolean {
     const pick = build.pick;
-    if (!pick || pick.layer !== 'wall' || this.edits.walls.size >= MAX_WALLS) return false;
+    if (!pick || pick.layer !== 'wall' || this.shown.walls.size >= MAX_WALLS) return false;
     // Hangings, doors and critters don't hold a wall up; anything else in the cell does.
-    if (this.edits.thingsAt(cx, cy).some((t) => !partById(t.id)?.wall && !partById(t.id)?.door && !partById(t.id)?.critter)) return false;
+    if (this.shown.thingsAt(cx, cy).some((t) => !partById(t.id)?.wall && !partById(t.id)?.door && !partById(t.id)?.critter)) return false;
     // Nor over a crop growing (it would grow on inside the wall).
-    if (this.heroIn(cx, cy) || this.edits.isPond(cx, cy) || this.edits.tentAt(cx, cy) || this.farm.plotAt(cx, cy)) return false;
-    return this.open(cx, cy) && (this.edits.wallAt(cx, cy) !== 0 || this.ground.walkable((cx + 0.5) * CELL, (cy + 0.5) * CELL));
+    if (this.heroIn(cx, cy) || this.shown.isPond(cx, cy) || this.shown.tentAt(cx, cy) || this.farm.plotAt(cx, cy)) return false;
+    return this.open(cx, cy) && (this.shown.wallAt(cx, cy) !== 0 || this.ground.walkable((cx + 0.5) * CELL, (cy + 0.5) * CELL));
   }
 
   /** A floor goes on open dry ground; a pond only where nothing stands that would end up in it, and not round the hero. */
   private canFloor(cx: number, cy: number): boolean {
     const v = build.pick!.value;
-    const e = this.edits;
+    const e = this.shown;
     if (!e.floorAt(cx, cy) && e.floors.size >= MAX_FLOORS) return false;
     if (this.ground.cell((cx + 0.5) * CELL, (cy + 0.5) * CELL) !== 0) return false;
     if (!FLOORS[v - 1]?.water) return true;
@@ -504,7 +577,7 @@ export class PlaceBuild implements RodHost, LinkHost {
   /** Lay the stroke's pick on cell (cx, cy). */
   private paintAt(cx: number, cy: number): boolean {
     const pick = build.pick!;
-    const e = this.edits;
+    const e = this.shown;
     if (!this.canPaint(cx, cy)) return false;
     if (pick.layer === 'floor') {
       if (e.floorAt(cx, cy) === pick.value) return false;
@@ -538,9 +611,20 @@ export class PlaceBuild implements RodHost, LinkHost {
     return true;
   }
 
-  /** What the eraser takes at cell (cx, cy), pointer at (x, y): something built there, else the place's own tree or undergrowth under the pointer. */
+  /** What the eraser takes at cell (cx, cy), pointer at (x, y). Upstairs, only what's the storey's own: its floors (back to the boards), its walls, what stands on it. */
   private eraseTarget(cx: number, cy: number, x: number, y: number): 'floor' | 'roof' | 'tent' | 'crop' | 'wall' | Thing | Clearable | null {
-    const e = this.edits;
+    const what = this.eraseAny(cx, cy, x, y);
+    const s = this.storey;
+    if (!s || !what) return what;
+    if (what === 'floor') return s.cells.has(cellKey(cx, cy)) ? what : null;
+    if (what === 'wall') return s.cells.has(cellKey(cx, cy)) && !this.edits.wallAt(cx, cy) ? what : null;
+    if (typeof what === 'object' && 'id' in what) return onStorey(what, s) ? what : null;
+    return null;
+  }
+
+  /** Something built at cell (cx, cy), else the place's own tree or undergrowth under the pointer at (x, y). */
+  private eraseAny(cx: number, cy: number, x: number, y: number): 'floor' | 'roof' | 'tent' | 'crop' | 'wall' | Thing | Clearable | null {
+    const e = this.shown;
     const tab = build.tab;
     // The layers' tabs take only their own: floors, roofs, tents, crops.
     if (tab === 'floor') return e.floorAt(cx, cy) ? 'floor' : null;
@@ -564,30 +648,30 @@ export class PlaceBuild implements RodHost, LinkHost {
     const what = this.eraseTarget(cx, cy, x, y);
     if (!what) return false;
     if (what === 'floor') {
-      this.edits.floors.delete(cellKey(cx, cy));
+      this.shown.floors.delete(cellKey(cx, cy));
       // A pond taken up takes its lily pads with it.
-      this.edits.things = this.edits.things.filter((t) => !(partById(t.id)?.water === 'only' && t.x === cx && t.y === cy));
+      this.shown.things = this.shown.things.filter((t) => !(partById(t.id)?.water === 'only' && t.x === cx && t.y === cy));
       this.touchCells(cx, cy, 1);
     } else if (what === 'roof') {
-      this.edits.roofs.delete(cellKey(cx, cy));
+      this.shown.roofs.delete(cellKey(cx, cy));
     } else if (what === 'tent') {
-      this.edits.tents.delete(cellKey(cx, cy));
+      this.shown.tents.delete(cellKey(cx, cy));
     } else if (what === 'crop') {
       this.farm.uproot(cx, cy);
       return false;
     } else if (what === 'wall') {
-      this.edits.walls.delete(cellKey(cx, cy));
+      this.shown.walls.delete(cellKey(cx, cy));
       this.checkDecor();
       this.touchCells(cx, cy, 1);
     } else if ('of' in what) {
-      this.edits.cleared.add(what.of);
+      this.shown.cleared.add(what.of);
       if (this.marked === what.obj) this.marked = null;
       this.ground.cleared?.(what.of);
       // A puff of leaves (or grit) where it stood.
       this.world.debris(what.tree ? [0x5f9a4b, 0x8fbf5a, 0x6b4a2a] : [0x8a7a5a, 0x6f8f4a], what.x, what.y - (what.tree ? 30 : 6), what.tree ? 14 : 6, what.y + 20, what.tree ? 'spores' : 'burst');
       sound.puff(0);
     } else {
-      this.edits.things = this.edits.things.filter((t) => t !== what);
+      this.shown.things = this.shown.things.filter((t) => t !== what);
       this.touchCells(what.x, what.y, 3);
       sound.puff(0);
     }
@@ -596,7 +680,7 @@ export class PlaceBuild implements RodHost, LinkHost {
 
   /** Hangings stay only on house walls whose face shows, and doors in house doorways (as in a Home). */
   private checkDecor(): void {
-    const e = this.edits;
+    const e = this.shown;
     const gone = e.things.filter((t) => {
       const p = partById(t.id);
       return (p?.wall || p?.door) && !e.fitsWall(p, t.x, t.y, t);
@@ -627,11 +711,87 @@ export class PlaceBuild implements RodHost, LinkHost {
     return false;
   }
 
+  // ---------------------------------------------------------------- Upstairs (see upstairs.ts)
+
+  /** A change made upstairs is kept in the upper floors, and the view composed from them again. */
+  private settle(): void {
+    const s = this.storey;
+    if (!s) return;
+    liftEdits(this.shown, this.edits, s);
+    this.edits.index();
+    this.recompose();
+  }
+
+  /** Work out the storey the hero is on from what's kept, and the view of it. Back on the ground if its stairs or house went. */
+  private recompose(): void {
+    const e = this.edits;
+    const k = this.upKey;
+    let s: Storey | null = null;
+    const t = k ? e.things.find((t) => partById(t.id)?.stairs && stairsId(t) === k) : undefined;
+    if (t) {
+      const h = e.houses[e.houseAt(t.x, t.y)];
+      if (h && !h.tent && h.has(t.x, t.y + 1)) s = findStorey(e, h, t);
+    }
+    if (!s) this.upKey = 0;
+    const was = this.storey;
+    this.storey = s;
+    this.shown = s ? composeEdits(e, s) : e;
+    // What friends online are seen against, and the critters below, out of sight under the rooms above.
+    const under = s ? (x: number, y: number) => s.cells.has(cellKey(Math.floor(x / CELL), Math.floor(y / CELL))) : null;
+    storeyView.up = s ? s.id : 0;
+    storeyView.covers = under ?? (() => false);
+    this.critters.hide = under;
+    // Up or down (or the rooms changed round the hero): everything stood up again from the floor that shows.
+    if (was?.id !== s?.id || (s && was && s.cells.size !== was.cells.size)) this.view.touchAll();
+    if (!!was !== !!s) {
+      build.tabs = s ? [...UP_TABS] : TABS.map((t) => t.id);
+      build.allow = s ? upstairsAllows : null;
+      trayChanged();
+    }
+  }
+
+  /** Feet far enough onto a staircase take it: up from the ground floor, down from the storey. */
+  private climbStep(dt: number, x: number, y: number): void {
+    if (this.climbing) return;
+    // Gone from the house some other way (a journey across the map): back on the ground.
+    if (this.storey && !nearStorey(this.storey, Math.floor(x / CELL), Math.floor(y / CELL))) {
+      this.upKey = 0;
+      this.recompose();
+      return;
+    }
+    if (this.climbCool > 0) {
+      this.climbCool -= dt;
+      return;
+    }
+    const s = this.storey;
+    const t = s ? s.stairs : this.edits.thingsAt(Math.floor(x / CELL), Math.floor(y / CELL)).find((t) => partById(t.id)?.stairs);
+    if (!t || !onStairs(t, x, y, 0, 0)) return;
+    const up = !s;
+    this.climbing = true;
+    sound.stairs(up);
+    this.world.climb(
+      () => {
+        // The stairs may have gone while the screen dimmed.
+        if (up && !this.edits.things.includes(t)) return null;
+        this.upKey = up ? stairsId(t) : 0;
+        this.recompose();
+        if (up && !this.storey) return null;
+        const at = landingOf(t, 0, 0);
+        return standNear(t, at.x, at.y, 0, 0, (px, py) => this.feet(px, py));
+      },
+      () => {
+        this.climbing = false;
+        this.climbCool = CLIMB_COOL;
+      },
+    );
+  }
+
   // ---------------------------------------------------------------- Changes
 
   private snap(): BuildSnap {
     const e = this.edits;
-    return snapOf({ w: e.walls, f: e.floors, r: e.roofs, t: e.tents }, e.things, e.cleared);
+    // The upper floors' cells as layers of their own (F, W), and their things keyed `^`.
+    return snapOf({ w: e.walls, f: e.floors, r: e.roofs, t: e.tents, F: e.upFloors, W: e.upWalls }, e.things, e.cleared, e.upThings);
   }
 
   /** A stroke is over: keep its change backwards for undo, then save it and send it. */
@@ -665,7 +825,8 @@ export class PlaceBuild implements RodHost, LinkHost {
   /** Lay a change on what's built here, and stand up again what it touched. */
   private lay(p: BuildPatch): void {
     const e = this.edits;
-    const layers: Record<string, Map<number, number>> = { w: e.walls, f: e.floors, r: e.roofs, t: e.tents };
+    const layers: Record<string, Map<number, number>> = { w: e.walls, f: e.floors, r: e.roofs, t: e.tents, F: e.upFloors, W: e.upWalls };
+    const listOf = (key: string): [Thing[], string] => (key.startsWith(UP) ? [e.upThings, key.slice(UP.length)] : [e.things, key]);
     const target: PatchTarget = {
       setCell: (layer, k, v) => {
         const m = layers[layer];
@@ -674,18 +835,22 @@ export class PlaceBuild implements RodHost, LinkHost {
         else m.delete(k);
         this.touchCells(Math.floor(k / 65536), k % 65536, 1);
       },
-      addThing: (t) => {
-        e.things.push(t);
+      addThing: (t, up) => {
+        (up ? e.upThings : e.things).push(t);
         this.touchCells(t.x, t.y, 3);
       },
       removeThing: (key) => {
-        const i = e.things.findIndex((t) => thingKey(t) === key);
+        const [list, k] = listOf(key);
+        const i = list.findIndex((t) => thingKey(t) === k);
         if (i < 0) return false;
-        const [t] = e.things.splice(i, 1);
+        const [t] = list.splice(i, 1);
         this.touchCells(t.x, t.y, 3);
         return true;
       },
-      hasThing: (key) => e.things.some((t) => thingKey(t) === key),
+      hasThing: (key) => {
+        const [list, k] = listOf(key);
+        return list.some((t) => thingKey(t) === k);
+      },
       clear: (k, on) => {
         if (on === e.cleared.has(k)) return;
         if (on) e.cleared.add(k);
@@ -695,6 +860,7 @@ export class PlaceBuild implements RodHost, LinkHost {
     };
     applyPatch(target, p);
     e.index();
+    this.recompose();
   }
 
   /** A change made here (a stroke, or an undo): saved if the world is this player's, to the cloud if it's shared, and to the room. */
@@ -723,11 +889,15 @@ export class PlaceBuild implements RodHost, LinkHost {
     e.floors = n.floors;
     e.roofs = n.roofs;
     e.tents = n.tents;
+    e.upFloors = n.upFloors;
+    e.upWalls = n.upWalls;
+    e.upThings = n.upThings;
     e.cleared.clear();
     for (const k of n.cleared) e.cleared.add(k);
     e.index();
     for (const k of was) if (!e.cleared.has(k)) this.ground.cleared?.(k);
     for (const k of e.cleared) if (!was.has(k)) this.ground.cleared?.(k);
+    this.recompose();
     this.view.touchAll();
   }
 
@@ -819,6 +989,7 @@ export class PlaceBuild implements RodHost, LinkHost {
     this.critters.destroy();
     this.farm.destroy();
     this.netOff();
+    groundView();
     build.available = false;
     build.tabs = TABS.map((t) => t.id);
     build.allow = null;

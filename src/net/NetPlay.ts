@@ -24,6 +24,7 @@ import { snap } from '../game/display';
 import { cozy } from '../game/cozy';
 import { MARKS } from '../world/islandLayout';
 import { RemotePlayer, type HeroState } from './Remote';
+import { storeyView } from '../world/upstairs';
 import { session, type Msg, type PeerInfo } from './session';
 
 /** How often this player's state goes out, and the host's monsters, in ms. */
@@ -224,6 +225,7 @@ export class NetPlay {
       ...(gear.dress ? { ds: gear.dress } : {}),
       ...(this.world.petWorn ? { pt: this.world.petWorn } : {}),
       ...(h.emoteTag ? { em: h.emoteTag } : {}),
+      ...(storeyView.up ? { up: storeyView.up } : {}),
     };
     this.attackHeld = this.specialHeld = false;
     session.send(s as unknown as Msg);

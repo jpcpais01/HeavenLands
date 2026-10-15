@@ -46,6 +46,8 @@ export const SHELVES: Shelf[] = [
   { id: 'fences', name: 'Fences', section: 'build', tab: 'wall' },
   { id: 'roofs', name: 'Roofs', section: 'build', tab: 'roof' },
   { id: 'tents', name: 'Tents', section: 'build', tab: 'tent' },
+  // Stairs are things (the furniture tab's eraser takes them), shelved with the house's structure.
+  { id: 'stairs', name: 'Stairs', section: 'build', tab: 'furniture' },
   { id: 'trees', name: 'Trees', section: 'garden', tab: 'garden' },
   { id: 'flowers', name: 'Flowers', section: 'garden', tab: 'garden' },
   { id: 'water', name: 'Water', section: 'garden', tab: 'garden' },
@@ -229,6 +231,15 @@ export interface PartDef {
   cook?: 'stove' | 'fire';
   /** A bridge's cell: laid in strokes like a wall, joined with its neighbours into one bridge that shapes itself (see bridge.ts). */
   bridge?: boolean;
+  /** A staircase in a house: it climbs to the house's upper floor, built and furnished like the one below (see upstairs.ts). */
+  stairs?: boolean;
+  /**
+   * A secret door, hung in a house's doorway like a door: shut, it looks like
+   * the wall itself (`wall`: the panel sinks into the floor) or a bookcase
+   * against it (`shelf`: it slides aside), and it opens for whoever leans on
+   * it for a moment (see secretDoor.ts).
+   */
+  secret?: 'wall' | 'shelf';
 }
 
 /** How many cells from a fishing rod the water may be. */
@@ -237,6 +248,13 @@ export const FISH_REACH = 3;
 export const PARTS: PartDef[] = [
   // Walls: a door for a house's doorway, after the walls themselves on their tab.
   { id: 'door', name: 'Oak door', tab: 'wall', shelf: 'walls', w: 1, h: 1, block: 'none', flip: true, door: true },
+  { id: 'secretwall', name: 'Hidden door', tab: 'wall', shelf: 'walls', w: 1, h: 1, block: 'none', door: true, secret: 'wall' },
+  // Mirrored, it slides away west.
+  { id: 'secretshelf', name: 'Secret bookcase', tab: 'wall', shelf: 'walls', w: 1, h: 1, block: 'none', flip: true, door: true, secret: 'shelf' },
+
+  // Stairs up to a house's upper floor; and, up there, the well they come up through (never on the tray: no shelf).
+  { id: 'stairs', name: 'Staircase', tab: 'furniture', shelf: 'stairs', w: 1, h: 2, block: 'none', stairs: true },
+  { id: 'stairwell', name: 'Stairwell', tab: 'furniture', shelf: '', w: 1, h: 2, block: 'none' },
 
   // Garden
   { id: 'oak', name: 'Oak tree', tab: 'garden', shelf: 'trees', w: 1, h: 1, block: 'post' },

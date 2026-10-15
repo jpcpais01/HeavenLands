@@ -83,7 +83,14 @@ export const build = {
   canUndo: false,
   /** The friends panel asked for (the world opens it). */
   friends: false,
+  /** Counts each change to what the tray offers mid-visit (up or down the stairs): the tray makes its shelves again. */
+  trayVer: 0,
 };
+
+/** What the tray offers changed (`tabs` or `allow`, mid-visit): its shelves are made again. */
+export function trayChanged(): void {
+  build.trayVer++;
+}
 
 /** Leave build mode (the world closes, or the HUD's Done). */
 export function stopBuilding(): void {

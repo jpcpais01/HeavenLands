@@ -146,6 +146,8 @@ export class HomeCritters {
   private heroSpeed = 0;
   /** Dark enough for the moths to go to the lamps. */
   private dark = false;
+  /** Where they can't be seen from (the ground floor's rooms, from upstairs; see upstairs.ts). */
+  hide: ((x: number, y: number) => boolean) | null = null;
 
   constructor(private scene: WorldScene) {}
 
@@ -345,7 +347,7 @@ export class HomeCritters {
       }
     }
     b.shown = Phaser.Math.Clamp(b.shown + (awake ? dt : -dt) / FADE, 0, 1);
-    const on = b.shown > 0 && b.x > view.x - VIEW_PAD && b.x < view.right + VIEW_PAD && b.y > view.y - VIEW_PAD && b.y < view.bottom + VIEW_PAD + HOVER;
+    const on = b.shown > 0 && !this.hide?.(b.x, b.y) && b.x > view.x - VIEW_PAD && b.x < view.right + VIEW_PAD && b.y > view.y - VIEW_PAD && b.y < view.bottom + VIEW_PAD + HOVER;
     if (on !== b.onScreen) {
       b.onScreen = on;
       for (const o of [b.body, b.glow, b.shadow, b.halo]) o?.setVisible(on);

@@ -76,6 +76,8 @@ const MAX_GEM_STONES = 24;
 const CREEP = 0.4;
 /** Only the first few landing gems tink, so a hoard doesn't drown the fight's own sounds. */
 const GEM_TINKS = 7;
+/** How long the screen dims going up or down a house's stairs, ms. */
+const CLIMB_FADE = 220;
 
 /** Star dust's colours, as it lands and is picked up. */
 const DUST_SHARDS = [0xffffff, 0xe0ccff, 0xb07aff, 0x7a4ae0];
@@ -1003,6 +1005,30 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Up or down a house's stairs (see world/upstairs.ts): a short fade, and
+   * behind it `swap` changes the floor shown and says where the hero steps
+   * off. `done` once it has (or it couldn't: a fall meanwhile).
+   */
+  climb(swap: () => { x: number; y: number } | null, done: () => void): void {
+    const cam = this.cameras.main;
+    cam.fadeEffect.reset();
+    cam.fadeOut(CLIMB_FADE, 7, 8, 13);
+    cam.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      const to = this.running ? swap() : null;
+      if (to) {
+        this.hero.x = to.x;
+        this.hero.y = to.y;
+        this.pushX = this.pushY = 0;
+        this.followHero();
+      }
+      cam.fadeEffect.reset();
+      cam.fadeIn(CLIMB_FADE + 80, 7, 8, 13);
+      cam.once(Phaser.Cameras.Scene2D.Events.FADE_IN_COMPLETE, () => cam.fadeEffect.reset());
+      done();
+    });
+  }
+
   get arenaDef(): ArenaDef {
     return this.arena;
   }
@@ -1113,7 +1139,7 @@ export class WorldScene extends Phaser.Scene {
   footing(x: number, y: number): Footing {
     // What was built underfoot first: a bridge's deck, a floor laid.
     if (this.places && !this.forest) {
-      const e = this.places.edits;
+      const e = this.places.showing;
       if (e.bridges.at(x, y) === Deck.Walk) return 'wood';
       const laid = floorFooting(e.floorAt(Math.floor(x / CELL), Math.floor(y / CELL)));
       if (laid) return laid;
