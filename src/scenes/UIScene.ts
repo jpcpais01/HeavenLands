@@ -908,7 +908,7 @@ export class UIScene extends Phaser.Scene {
     // By a fishing rod in the Home it's the rod's button instead.
     const rod = fishHud.near;
     // Then the farm's, then Heaven Lands' pastimes' (a seat, an instrument, a find...), then the net's.
-    const icon = rod ? 'icon_rod' : homeAct.near === 'harvest' ? 'icon_harvest' : homeAct.near === 'cook' ? 'icon_cook' : pastimeHud.near || 'icon_net';
+    const icon = rod ? 'icon_rod' : homeAct.near === 'harvest' ? 'icon_harvest' : homeAct.near === 'cook' ? 'icon_cook' : homeAct.near === 'juice' ? 'icon_juice' : pastimeHud.near || 'icon_net';
     if (this.netIcon.texture.key !== icon && this.textures.exists(icon)) this.netIcon.setTexture(icon);
     const want = (critterHud.near || rod || homeAct.near || pastimeHud.near) && !controls.mouse && !pastimeHud.busy ? 1 : 0;
     this.netShown = Phaser.Math.Clamp(this.netShown + (want ? 1 : -1) * (delta / 160), 0, 1);

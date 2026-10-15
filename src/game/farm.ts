@@ -146,6 +146,6 @@ export function rollSeedDrop(kind: string, odds = 1, rand = Math.random): string
 // Home, as the world (world/Farm.ts) works it out for the HUD (UIScene shows
 // its button) and itself.
 export const homeAct = {
-  /** Pick the ripe crops in reach, or open the kitchen at a stove or cooking pot; '' for nothing. */
-  near: '' as '' | 'harvest' | 'cook',
+  /** Pick the ripe crops in reach, or open the kitchen at a stove or cooking pot (or the juice press); '' for nothing. */
+  near: '' as '' | 'harvest' | 'cook' | 'juice',
 };

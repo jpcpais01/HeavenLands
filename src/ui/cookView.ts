@@ -1,4 +1,4 @@
-// The kitchen's counter, at a stove or a cooking pot in the Home (see
+// The kitchen's counter, at a stove, a cooking pot or the juice press (see
 // game/cooking.ts), opened like the keepers' counters (keeperHud.ts). It's
 // the cookbook too:
 //
@@ -17,7 +17,7 @@
 import Phaser from 'phaser';
 import { sound } from '../audio';
 import { collection } from '../game/collection';
-import { RECIPES, canCook, cook, cookHud, cropKey, dishKey, fishKey, have, ingredientName, madeKey, syncLunch, type Ingredient, type RecipeDef } from '../game/cooking';
+import { bookFor, canCook, cook, cookHud, cropKey, dishKey, fishKey, have, ingredientName, madeKey, syncLunch, type Ingredient, type RecipeDef } from '../game/cooking';
 import { CROPS } from '../game/farm';
 import { FISH } from '../game/fish';
 import { FINDS, findKey } from '../game/finds';
@@ -80,6 +80,9 @@ export class CookView extends Phaser.GameObjects.Container {
   private sparks: Phaser.GameObjects.Particles.ParticleEmitter;
   private flash: Phaser.GameObjects.BitmapText;
   private picked = 0;
+  /** The recipes this station makes: the juices at the juice press, the rest at the stove and the pot. */
+  private book: RecipeDef[];
+  private juicer: boolean;
   private infoX = 0;
   private cooking = 0;
   private press: { x: number; y: number; moved: boolean; button: Button | null } | null = null;
@@ -89,9 +92,11 @@ export class CookView extends Phaser.GameObjects.Container {
   constructor(scene: Phaser.Scene) {
     super(scene, 0, 0);
     const fire = cookHud.station === 'fire';
+    this.juicer = cookHud.station === 'juicer';
+    this.book = bookFor(cookHud.station);
     this.alcove = scene.add.image(0, 0, panelTexture(scene, 'ck_alcove', 38, HEAD_H - 2, PANEL_INSET)).setOrigin(0);
-    this.station = scene.add.image(0, 0, 'icon_cook').setScale(2);
-    this.title = pixelText(scene, 0, 0, fire ? 'The cooking pot' : 'The kitchen stove', WARM);
+    this.station = scene.add.image(0, 0, this.juicer ? 'icon_juice' : 'icon_cook').setScale(2);
+    this.title = pixelText(scene, 0, 0, this.juicer ? 'The juice press' : fire ? 'The cooking pot' : 'The kitchen stove', WARM);
     this.lunchBox = scene.add.image(0, 0, '__DEFAULT').setOrigin(0);
     this.lunchIcon = scene.add.image(0, 0, '__DEFAULT').setOrigin(0);
     this.lunchText = pixelText(scene, 0, 0, '', CREAM);
@@ -112,7 +117,7 @@ export class CookView extends Phaser.GameObjects.Container {
     this.flash = pixelText(scene, 0, 0, '', CREAM).setAlpha(0);
     this.add([this.alcove, this.station, this.title, this.lunchBox, this.lunchIcon, this.lunchText, this.dishName, this.does, this.larder, this.cookBtn, this.takeBtn, this.pantryTitle]);
     // Open on something that can be cooked now, else the first.
-    this.picked = Math.max(0, RECIPES.findIndex((r) => canCook(r)));
+    this.picked = Math.max(0, this.book.findIndex((r) => canCook(r)));
     this.unwatch = collection.watch(() => this.refresh());
     this.once(Phaser.GameObjects.Events.DESTROY, () => this.unwatch());
     scene.add.existing(this);
@@ -132,7 +137,8 @@ export class CookView extends Phaser.GameObjects.Container {
     this.lunchText.setPosition(w - lunchW + 23, 6);
     for (const t of this.says) t.destroy();
     const chars = Math.floor((w - tx - lunchW - 70) / CH);
-    this.says = wrap('Cook what you grow and catch. The dish you take along waits in your hotbar.'.toUpperCase(), Math.max(12, chars))
+    const say = this.juicer ? 'Press what you grow and find into something cold. The one you take along waits in your hotbar.' : 'Cook what you grow and catch. The dish you take along waits in your hotbar.';
+    this.says = wrap(say.toUpperCase(), Math.max(12, chars))
       .slice(0, 2)
       .map((s, i) => pixelText(scene, tx, 15 + i * LINE, s, DIM));
     this.add(this.says);
@@ -141,13 +147,13 @@ export class CookView extends Phaser.GameObjects.Container {
     const top = HEAD_H + 4;
     const room = h - top - PANTRY_H - 4;
     // Four columns when they fit, more as the cookbook grows past the room for them.
-    const fits = (c: number, ts: number) => Math.ceil(RECIPES.length / c) * (ts + GAP) - GAP <= room;
+    const fits = (c: number, ts: number) => Math.ceil(this.book.length / c) * (ts + GAP) - GAP <= room;
     const cols = fits(4, 36) ? 4 : [4, 5, 6, 7].find((c) => fits(c, 20)) ?? 7;
     this.iconScale = fits(cols, 36) ? 2 : 1;
     this.tileSize = this.iconScale === 2 ? 36 : 20;
     const ts = this.tileSize;
     for (const t of this.tiles) t.box.destroy();
-    this.tiles = RECIPES.map((r, i) => {
+    this.tiles = this.book.map((r, i) => {
       const x = (i % cols) * (ts + GAP);
       const y = top + Math.floor(i / cols) * (ts + GAP);
       const bg = scene.add.image(0, 0, panelTexture(scene, 'ck_tile', ts, ts, PANEL_INSET)).setOrigin(0);
@@ -196,7 +202,7 @@ export class CookView extends Phaser.GameObjects.Container {
 
   /** The picked recipe on the right: name, what it does, what goes in, and its buttons. */
   private drawInfo(): void {
-    const r = RECIPES[this.picked];
+    const r = this.book[this.picked];
     const x = this.infoX;
     const w = this.usedW - x;
     const chars = Math.max(8, Math.floor(w / CH));
@@ -208,7 +214,7 @@ export class CookView extends Phaser.GameObjects.Container {
     this.does.setText(fit(r.does.toUpperCase())).setPosition(x, y);
     y += LINE;
     for (const t of this.line) t.destroy();
-    this.line = wrap((made ? r.line : 'Not cooked yet: gather what it needs.').toUpperCase(), chars)
+    this.line = wrap((made ? r.line : this.juicer ? 'Not made yet: gather what it needs.' : 'Not cooked yet: gather what it needs.').toUpperCase(), chars)
       .slice(0, 2)
       .map((s, i) => pixelText(this.scene, x, y + i * LINE, s, made ? DIM : SOFT));
     this.add(this.line);
@@ -234,7 +240,7 @@ export class CookView extends Phaser.GameObjects.Container {
     this.larder.setVisible(y + r.needs.length * 17 <= by - LINE);
     const bw = Math.min(70, Math.floor((w - 4) / 2));
     const ready = canCook(r) && !this.cooking;
-    this.cookBtn.set(this.cooking ? 'Cooking...' : 'Cook', bw, BTN_H, ready).dim(!ready).setPosition(x, by);
+    this.cookBtn.set(this.cooking ? (this.juicer ? 'Pressing...' : 'Cooking...') : this.juicer ? 'Press' : 'Cook', bw, BTN_H, ready).dim(!ready).setPosition(x, by);
     const taken = collection.lunch === r.id;
     this.takeBtn.set(taken ? 'Taken along' : 'Take along', bw, BTN_H, false).dim(taken || !made).setPosition(x + bw + 4, by);
   }
@@ -289,7 +295,7 @@ export class CookView extends Phaser.GameObjects.Container {
 
   private finish(): void {
     this.cooking = 0;
-    const r = RECIPES[this.picked];
+    const r = this.book[this.picked];
     const t = this.tiles[this.picked];
     t?.icon.setAngle(0);
     const first = cook(r);
@@ -305,7 +311,7 @@ export class CookView extends Phaser.GameObjects.Container {
     this.scene.tweens.add({ targets: t.icon, scale: { from: this.iconScale * 1.4, to: this.iconScale }, duration: 420, ease: 'Back.Out' });
     const f = this.flash;
     this.scene.tweens.killTweensOf(f);
-    f.setText((first ? `New dish: ${r.name}` : `+1 ${r.name}`).toUpperCase()).setTint(first ? 0xfff0a0 : CREAM).setAlpha(1);
+    f.setText((first ? `${this.juicer ? 'New juice' : 'New dish'}: ${r.name}` : `+1 ${r.name}`).toUpperCase()).setTint(first ? 0xfff0a0 : CREAM).setAlpha(1);
     const fx = Phaser.Math.Clamp(Math.round(x + this.tileSize / 2 - f.width / 2), 0, this.usedW - f.width);
     f.setPosition(fx, y - 4);
     this.bringToTop(f);
@@ -339,7 +345,7 @@ export class CookView extends Phaser.GameObjects.Container {
     if (p.button) {
       p.button.press(false);
       if (!p.button.hit(x, y)) return;
-      const r = RECIPES[this.picked];
+      const r = this.book[this.picked];
       if (p.button === this.cookBtn && canCook(r) && !this.cooking) {
         this.cooking = COOK_MS;
         sound.brew();

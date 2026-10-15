@@ -16,7 +16,7 @@ const id = (list: { id: string }[], i: number): string => list[i]?.id ?? list[0]
 
 // ---------------------------------------------------------------- poses
 
-export type AnimName = 'idle' | 'walk' | 'wave' | 'cheer' | 'dance' | 'sit' | 'seat' | 'heart' | 'hug' | 'bow' | 'clap' | 'lantern' | 'strum' | 'play' | 'gaze' | 'lie' | 'doze';
+export type AnimName = 'idle' | 'walk' | 'wave' | 'cheer' | 'dance' | 'sit' | 'seat' | 'heart' | 'hug' | 'bow' | 'clap' | 'lantern' | 'strum' | 'play' | 'gaze' | 'lie' | 'doze' | 'tablet';
 
 export interface AnimDef {
   name: AnimName;
@@ -53,6 +53,8 @@ export const ANIMS: AnimDef[] = [
   // In bed, tucked in to the chest: awake and looking about, or asleep.
   { name: 'lie', frames: 8, fps: 3, loop: true, views: ['down'] },
   { name: 'doze', frames: 4, fps: 1.5, loop: true, views: ['down'] },
+  // Looking down at the tablet held up at the chest, tapping and swiping.
+  { name: 'tablet', frames: 8, fps: 4, loop: true, views: ['down'] },
 ];
 
 /** Where the shoulders are: `sit` lowers them on the ground (true) or on a seat ('seat'). */
@@ -327,6 +329,22 @@ export function pose(k: Kit, anim: AnimName, view: View, i: number): Pose {
       { x: 12 + k.sw - 0.6, y: s + 1.6 },
     ];
     p.carry = false;
+    return p;
+  }
+  if (anim === 'tablet') {
+    // The tablet held in both hands at the chest; now and then the right thumb taps or swipes.
+    const bob = [0, 0, 0, 1, 1, 1, 1, 0][i];
+    const p = standing(k, 'down', bob);
+    const s = shY(k, bob);
+    const tap = [0, 0, 1, 0, 0, 0.5, 1, 0][i];
+    p.hands = [
+      { x: 12 - 4, y: s + 5.4 },
+      { x: 12 + 4 - tap * 1.4, y: s + 5.4 - tap * 0.6 },
+    ];
+    p.carry = false;
+    p.tablet = true;
+    p.face = 'content';
+    p.sway = [0, 0, 0.1, 0.15, 0.1, 0, -0.1, -0.05][i];
     return p;
   }
   if (anim === 'hug') {
@@ -1979,6 +1997,43 @@ function tuckIn(c: PixelCanvas, k: Kit, g: Geo): void {
   for (const h of g.hands) c.ellipse(h.x, cut - 0.6, 1, 0.8, k.skin, { bias: 1 });
 }
 
+const TABLET_CASE = mat('#b8a8e0', { shine: true });
+const TABLET_RIM = mat('#e6dbf5', { shine: true });
+const TABLET_LENS = flat('#2a2236');
+
+/**
+ * The tablet, held up at the chest with its screen to the wanderer: its
+ * lilac case toward us, a pale rim, the camera's lens in a corner, a little
+ * heart on the back; the hands drawn again over its sides.
+ */
+function tablet(c: PixelCanvas, k: Kit, g: Geo): void {
+  const [l, r] = g.hands;
+  const x0 = Math.round(g.cx - 4.5);
+  const x1 = x0 + 9;
+  const y0 = Math.round(Math.min(l.y, r.y) - 3);
+  const y1 = y0 + 6;
+  c.part();
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const corner = (x === x0 || x === x1 - 1) && (y === y0 || y === y1 - 1);
+      if (corner) continue;
+      const edge = x === x0 || x === x1 - 1 || y === y0 || y === y1 - 1;
+      // Tipped back a little, so the top edge catches the light.
+      c.px(x, y, edge ? TABLET_RIM : TABLET_CASE, { x: (x - g.cx) * 0.06, y: y === y0 ? 0.5 : 0.15, z: 0.9 }, { bias: y === y0 ? 1 : y === y1 - 1 ? -1 : 0 });
+    }
+  }
+  c.px(x0 + 1.5, y0 + 1.5, TABLET_LENS, FLAT);
+  // A small heart on the back.
+  c.px(g.cx - 1, y0 + 2.5, TABLET_RIM, FLAT);
+  c.px(g.cx + 1, y0 + 2.5, TABLET_RIM, FLAT);
+  c.px(g.cx, y0 + 3.5, TABLET_RIM, FLAT);
+  c.px(g.cx, y0 + 2.5, TABLET_RIM, FLAT);
+  for (const h of [l, r]) {
+    c.part();
+    c.ellipse(h.x, h.y, 1.2, 1.1, k.skin);
+  }
+}
+
 export function drawFigure(c: PixelCanvas, k: Kit, g: Geo, L: Layers): void {
   const w = wearOf(k);
   c.offset(BX, BY);
@@ -1992,6 +2047,7 @@ export function drawFigure(c: PixelCanvas, k: Kit, g: Geo, L: Layers): void {
     arm(c, k, g, w, 1);
     cloak(c, k, g, w);
     if (g.pose.lute) lute(c, k, g);
+    if (g.pose.tablet) tablet(c, k, g);
     L.neck(c, k, g);
     head(c, k, g);
     L.hairFront(c, k, g);

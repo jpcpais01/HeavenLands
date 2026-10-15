@@ -53,7 +53,7 @@ export class Farm {
   private steam: Phaser.GameObjects.Particles.ParticleEmitter;
   private label: Phaser.GameObjects.BitmapText;
   private labelFor = '';
-  private stations: { x0: number; y0: number; x1: number; y1: number; kind: 'stove' | 'fire'; steamX: number; steamY: number }[] = [];
+  private stations: { x0: number; y0: number; x1: number; y1: number; kind: 'stove' | 'fire' | 'juicer'; steamX: number; steamY: number }[] = [];
   private steamT = 0;
   /** The kitchen this hero opened, until they walk off. */
   private cooking: { x: number; y: number } | null = null;
@@ -288,14 +288,14 @@ export class Farm {
     this.steamT -= dt;
     if (this.steamT <= 0) {
       this.steamT = 420;
-      for (const s of this.stations) this.steam.emitParticleAt(s.steamX + (Math.random() - 0.5) * 3, s.steamY);
+      for (const s of this.stations) if (s.kind !== 'juicer') this.steam.emitParticleAt(s.steamX + (Math.random() - 0.5) * 3, s.steamY);
     }
 
     // What E would do here: pick the ripe crops in reach, or cook.
     const busy = build.on;
     const ripe = !busy && this.tend && this.ripeNear().length > 0;
     const station = busy ? null : this.stationNear();
-    homeAct.near = ripe ? 'harvest' : station ? 'cook' : '';
+    homeAct.near = ripe ? 'harvest' : station ? (station.kind === 'juicer' ? 'juice' : 'cook') : '';
     this.showLabel();
     // Walked away from the kitchen: it closes.
     if (this.cooking && Math.hypot(heroX - this.cooking.x, heroY - this.cooking.y) > COOK_LEAVE) {
@@ -323,14 +323,14 @@ export class Farm {
   /** Over what E would do, with a keyboard. */
   private showLabel(): void {
     const act = homeAct.near;
-    const text = !controls.mouse || !act ? '' : act === 'harvest' ? 'E: HARVEST' : 'E: COOK';
+    const text = !controls.mouse || !act ? '' : act === 'harvest' ? 'E: HARVEST' : act === 'juice' ? 'E: MAKE JUICE' : 'E: COOK';
     if (text !== this.labelFor) {
       this.labelFor = text;
       this.label.setText(text).setTint(act === 'harvest' ? 0xc8ff8a : 0xffd08a);
     }
     this.label.setVisible(!!text);
     if (!text) return;
-    const s = act === 'cook' ? this.stationNear() : null;
+    const s = act === 'cook' || act === 'juice' ? this.stationNear() : null;
     const x = s ? (s.x0 + s.x1) / 2 : this.hero.x;
     const y = s ? s.y0 - 26 : this.hero.y - 40;
     this.label.setPosition(Math.round(x), Math.round(y + Math.sin(this.scene.time.now * 0.004) * 1.5));

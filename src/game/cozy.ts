@@ -83,6 +83,10 @@ export const pastimeHud = {
   jam: false,
   /** Asleep in a bed: the hero doesn't stir, whatever's pressed. */
   asleep: false,
+  /** The tablet is out: its button is lit. */
+  tablet: false,
+  /** The tablet button (or its key) was pressed: the world takes it out or puts it away. */
+  pad: false,
 };
 
 /** An endless land's map for the minimap (scenes/MapScene.ts): tiles of `size` map pixels, one map pixel per MAP_CELL px of ground. */
