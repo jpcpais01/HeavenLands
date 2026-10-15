@@ -11,6 +11,7 @@ import type { WorldScene } from '../scenes/WorldScene';
 import type { Clearable, Forest } from './Forest';
 import { CHUNK } from './forestGen';
 import { Deck } from './bridge';
+import { BLOCKED, FITS, Hold, footprint, lookGhost, markHeld } from './buildCursor';
 import { footOn, type BuildLand } from './buildLand';
 import { UP, applyPatch, diff, readPatch, snapOf, thingKey, type BuildPatch, type BuildSnap, type PatchTarget } from './buildPatch';
 import { BuiltView } from './BuiltView';
@@ -140,6 +141,7 @@ export class PlaceBuild implements RodHost, LinkHost {
   private rodSpots: RodSpot[] | null = null;
   private cursor: Phaser.GameObjects.Graphics;
   private ghost: Img;
+  private hold = new Hold();
   /** The place's own thing the eraser is over, tinted to show it'll go. */
   private marked: Img | Phaser.GameObjects.Sprite | null = null;
   /** Each stroke's change backwards, to undo it. */
@@ -321,6 +323,8 @@ export class PlaceBuild implements RodHost, LinkHost {
     if (!on) {
       this.cursor.setVisible(false);
       this.ghost.setVisible(false);
+      build.held = null;
+      build.heldAt.shown = false;
       this.mark(null);
       build.pressed = build.released = false;
       this.lastCell = null;
@@ -333,9 +337,10 @@ export class PlaceBuild implements RodHost, LinkHost {
       this.undo();
     }
     const p = build.pointer;
-    const w = this.world.cameras.main.getWorldPoint(p.x, p.y);
-    const cx = Math.floor(w.x / CELL);
-    const cy = Math.floor(w.y / CELL);
+    const cam = this.world.cameras.main;
+    const w = cam.getWorldPoint(p.x, p.y);
+    let cx = Math.floor(w.x / CELL);
+    let cy = Math.floor(w.y / CELL);
     const pick = build.pick;
     const erase = p.erase || !pick;
     const picked = !erase && pick?.layer === 'thing' ? (partById(pick.id) ?? null) : null;
@@ -343,6 +348,10 @@ export class PlaceBuild implements RodHost, LinkHost {
     const thing = picked?.bridge ? null : picked;
     const turn = thing?.turns ? build.turn : 0;
     const size = thing ? extent(thing, turn) : { w: 1, h: 1 };
+    // On a touch screen a thing waits as a ghost where the finger lifts, till its tick builds it.
+    const at = this.hold.step(thing, size, cx, cy);
+    cx = at.x;
+    cy = at.y;
     // A thing's footprint hangs from the cell under the pointer by its middle, so the pointer is at its foot.
     const fx = cx - Math.floor((size.w - 1) / 2);
     const fy = cy - (size.h - 1);
@@ -355,21 +364,28 @@ export class PlaceBuild implements RodHost, LinkHost {
     if (p.down && !thing) this.stroke(cx, cy, erase);
     if (build.released) {
       build.released = false;
-      if (thing) this.placeThing(thing, fx, fy, turn);
-      else this.stroke(cx, cy, erase);
+      if (thing && !at.holding) this.placeThing(thing, fx, fy, turn);
+      else if (!thing) this.stroke(cx, cy, erase);
       this.lastCell = null;
+      this.endStroke();
+    }
+    if (at.place && thing) {
+      this.before ??= this.snap();
+      if (this.placeThing(thing, fx, fy, turn)) build.held = null;
       this.endStroke();
     }
 
     // The cursor: the footprint, green where it can go and red where it can't, and a ghost of the thing; or what the eraser would take.
-    const show = p.over || p.down;
+    const show = p.over || p.down || at.holding;
     this.cursor.setVisible(show);
     this.ghost.setVisible(show && !!thing);
     if (!show) {
+      build.heldAt.shown = false;
       this.mark(null);
       return;
     }
     const g = this.cursor.clear();
+    build.heldAt.shown = false;
     if (erase) {
       const target = this.eraseTarget(cx, cy, w.x, w.y);
       const clear = typeof target === 'object' && target && 'of' in target ? target : null;
@@ -392,11 +408,7 @@ export class PlaceBuild implements RodHost, LinkHost {
     }
     this.mark(null);
     const ok = thing ? this.canPlace(thing, fx, fy, turn) : this.canPaint(cx, cy);
-    const col = ok ? 0x9cff8a : 0xff6a6a;
-    g.fillStyle(col, 0.16);
-    g.fillRect(fx * CELL, fy * CELL, size.w * CELL, size.h * CELL);
-    g.lineStyle(1, col, 0.85);
-    g.strokeRect(fx * CELL + 0.5, fy * CELL + 0.5, size.w * CELL - 1, size.h * CELL - 1);
+    footprint(g, fx * CELL, fy * CELL, size.w * CELL, size.h * CELL, ok ? FITS : BLOCKED, !!build.held);
     const part = thing ? partById(thing.id) : null;
     if (part?.ward) {
       // A ward shows how far it keeps the creatures off: a soft moonlit ring.
@@ -412,16 +424,13 @@ export class PlaceBuild implements RodHost, LinkHost {
     }
     if (thing?.critter) {
       this.ghost.setTexture('critters', `${thing.critter}_0`).setOrigin(CRITTER_OX / CRITTER_W, CRITTER_OY / CRITTER_H).setFlipX(false);
-      this.ghost.setPosition((fx + 0.5) * CELL, (fy + 1) * CELL - 5).setTint(ok ? 0xffffff : 0xff8080);
+      this.ghost.setPosition((fx + 0.5) * CELL, (fy + 1) * CELL - 5);
     } else if (thing) {
       const look = thingLook({ id: thing.id, x: fx, y: fy, flip: build.flip && !!thing.flip, turn });
-      this.ghost
-        .setTexture(look.key, look.frame)
-        .setOrigin(look.ox, look.oy)
-        .setFlipX(look.flipX)
-        .setPosition(look.x - PLOT_X, look.y - PLOT_Y)
-        .setTint(ok ? 0xffffff : 0xff8080);
+      this.ghost.setTexture(look.key, look.frame).setOrigin(look.ox, look.oy).setFlipX(look.flipX).setPosition(look.x - PLOT_X, look.y - PLOT_Y);
     }
+    if (thing) lookGhost(this.ghost, ok, this.world.time.now);
+    markHeld(cam, this.ghost, (fy + size.h) * CELL, ok, !!build.held && !p.down);
   }
 
   /** Tint the place's own thing the eraser is over (and let the last one go). */
@@ -516,14 +525,15 @@ export class PlaceBuild implements RodHost, LinkHost {
     return !e.things.some((t) => partById(t.id)?.stairs && e.houseAt(t.x, t.y) === h);
   }
 
-  private placeThing(p: PartDef, fx: number, fy: number, turn: number): void {
-    if (!this.canPlace(p, fx, fy, turn)) return;
+  private placeThing(p: PartDef, fx: number, fy: number, turn: number): boolean {
+    if (!this.canPlace(p, fx, fy, turn)) return false;
     this.shown.things.push({ id: p.id, x: fx, y: fy, flip: build.flip && !!p.flip, turn });
     this.shown.index();
     this.touchCells(fx, fy, 1);
     this.settle();
     // A critter is let out with its own sparkle and chirp (HomeCritters).
     if (!p.critter) sound.thud(0);
+    return true;
   }
 
   /** Can the stroke's pick go on cell (cx, cy): a wall, a floor or a bridge's cell? */

@@ -8,11 +8,16 @@ import { BLOOM_ART, BLOOM_TURNS } from '../src/art/homeBloom';
 import { GARDEN_ART, GARDEN_TURNS } from '../src/art/homeGarden';
 import { HOUSE_ART, HOUSE_TURNS } from '../src/art/homeHouse';
 import { TRIM_ART, TRIM_TURNS } from '../src/art/homeTrim';
+import { GADGET_ART } from '../src/art/homeGadgets';
+import { STAIRS_ART, secretCase, secretCaseIcon, secretWallIcon } from '../src/art/homeStairs';
 import { encodePNG } from './png';
 
 const out = process.argv[2] ?? 'home.png';
 const S = Number(process.argv[3] ?? 4);
-const LATER: Record<string, PropArt> = { ...YARD_ART, ...ROOM_ART, ...BLOOM_ART, ...GARDEN_ART, ...HOUSE_ART, ...TRIM_ART };
+// The secret doors aren't props: their pictures (and the bookcase as it slides) stand in for them here.
+const one = (draw: () => ReturnType<PropArt['draw']>): PropArt => ({ w: 16, h: 44, dx: 0, dy: 0, frames: 1, fps: 1, draw });
+const SECRETS: Record<string, PropArt> = { secretwall: one(secretWallIcon), secretshelf: one(secretCaseIcon), secretcase: one(secretCase) };
+const LATER: Record<string, PropArt> = { ...YARD_ART, ...ROOM_ART, ...BLOOM_ART, ...GARDEN_ART, ...HOUSE_ART, ...TRIM_ART, ...GADGET_ART, ...STAIRS_ART, ...SECRETS };
 const ART: Record<string, PropArt> = { ...PROP_ART, ...LATER };
 const TURNS = { ...PROP_TURNS, ...YARD_TURNS, ...ROOM_TURNS, ...BLOOM_TURNS, ...GARDEN_TURNS, ...HOUSE_TURNS, ...TRIM_TURNS };
 const ids = process.argv[4] ? process.argv[4].split(',') : Object.keys(LATER);

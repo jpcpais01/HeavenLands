@@ -62,14 +62,19 @@ const stairs = art('stairs', 2, WALL_H + 8, (c, g) => {
     const front = g.y1 - k * TREAD;
     const z = Math.round((k + 1) * RISE);
     const below = Math.round(k * RISE);
-    box(c, x0 + 1, x1 - 1, front - TREAD, front, 0, z, OAKW, { topBias: 1 });
+    box(c, x0 + 1, x1 - 1, front - TREAD, front, 0, z, OAKW, { topBias: 2, bias: -2 });
     grain(c, x0 + 1, x1 - 1, front - TREAD - z, front - z, 401 + k);
+    // The nosing catches the light; the riser under it sits in its shadow.
+    for (let x = x0 + 1; x < x1 - 1; x++) {
+      c.shade(x, front - z - 1, 1);
+      c.shade(x, front - z, -1);
+    }
     // The runner over the tread and down its riser, a brass rod in the crook at its back.
     for (let x = x0 + 1; x < x1 - 1; x++) {
       if (!onRunner(x, x0, x1)) continue;
       const edge = x === x0 + RUNNER_IN || x === x1 - RUNNER_IN - 1 ? -1 : 0;
-      for (let y = front - TREAD - z; y < front - z; y++) c.px(x, y, RUNNER, TOP, { bias: edge + (y === front - z - 1 ? 1 : 0) });
-      for (let y = front - z; y < front - below; y++) c.px(x, y, RUNNER, FACE, { bias: edge - 1 });
+      for (let y = front - TREAD - z; y < front - z; y++) c.px(x, y, RUNNER, TOP, { bias: edge + 1 + (y === front - z - 1 ? 1 : 0) });
+      for (let y = front - z; y < front - below; y++) c.px(x, y, RUNNER, FACE, { bias: edge - 2 - (y === front - z ? 1 : 0) });
       c.px(x, front - TREAD - z, BRASS, TOP, { bias: 1 });
     }
     // Rod ends catching the light.
@@ -86,10 +91,14 @@ const stairs = art('stairs', 2, WALL_H + 8, (c, g) => {
       for (let y = mid - z - RAIL_Z + 2; y < mid - z + 1; y++) c.px(x, y, DARKW, FACE, { bias: lit });
     }
     c.part();
-    const top = g.y1 - STEPS * TREAD - Math.round(STEPS * RISE) - RAIL_Z;
+    const top = g.y1 - STEPS * TREAD - Math.round(STEPS * RISE) + 2;
     const foot = g.y1 - RAIL_Z - 4;
     for (let y = top; y <= foot; y++) c.px(x, y, OAKW, n3(lit * 0.4, 0.2, 0.9), { bias: 1 + lit });
   }
+  // Brass knobs where the rails meet the floor above.
+  c.part();
+  const head = g.y1 - STEPS * TREAD - Math.round(STEPS * RISE) + 1;
+  for (const x of [x0, x1 - 1]) c.px(x, head, BRASS, TOP, { bias: x === x0 ? 2 : 0 });
   // Newel posts at the foot, square and capped in brass.
   for (const x of [x0, x1 - 2]) {
     box(c, x, x + 2, g.y1 - 3, g.y1, 0, RAIL_Z + 4, DARKW, { top: OAKW, topBias: 1 });
@@ -215,7 +224,7 @@ export function secretWallIcon(): PixelCanvas {
     for (let x = 8 - DOOR_HW - 1; x <= 8 + DOOR_HW; x++) {
       const dx = Math.abs(x + 0.5 - 8);
       const r = z < archTop - 3 ? dx : Math.hypot(dx, z - (archTop - 3));
-      if (Math.abs(r - DOOR_HW) < 0.6) c.shade(x, foot - z, -2);
+      if (Math.abs(r - DOOR_HW) < 0.6) c.shade(x, foot - z, -3);
     }
   }
   c.spark(8, foot - archTop - 2, [255, 236, 170], 0.9);

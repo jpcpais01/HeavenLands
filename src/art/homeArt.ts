@@ -21,6 +21,7 @@ import { BLOOM_ART, BLOOM_TURNS } from './homeBloom';
 import { GARDEN_ART, GARDEN_TURNS } from './homeGarden';
 import { HOUSE_ART, HOUSE_TURNS } from './homeHouse';
 import { TRIM_ART, TRIM_TURNS } from './homeTrim';
+import { GADGET_ART } from './homeGadgets';
 import { SECRET_SHELF, STAIRS_ART, secretCase, secretCaseIcon, secretWallIcon } from './homeStairs';
 import { DOOR_OX, DOOR_OY, DOOR_STEP, DOOR_STEPS, DOOR_WAYS, doorArt, doorFrame, doorIcon } from './homeDoor';
 import { GATE_MATS, GATE_WAYS, gateFrames } from './homeGate';
@@ -29,8 +30,8 @@ import { hash2 } from './env';
 import { CELL, PLOT_X, PLOT_Y, type Thing } from '../world/homeLayout';
 import { FLOORS, ROOFS, TENTS, WALLS, extent, partById } from '../world/homeParts';
 
-/** Every placed thing's drawing by part id, and the turning ones' other views (homeYard.ts, homeRoom.ts, homeBloom.ts, homeGarden.ts, homeHouse.ts and homeTrim.ts hold the later pieces). */
-export const PROP_ART: Record<string, PropArt> = { ...FIRST_ART, ...YARD_ART, ...ROOM_ART, ...BLOOM_ART, ...GARDEN_ART, ...HOUSE_ART, ...TRIM_ART, ...STAIRS_ART };
+/** Every placed thing's drawing by part id, and the turning ones' other views (homeYard.ts, homeRoom.ts, homeBloom.ts, homeGarden.ts, homeHouse.ts, homeTrim.ts and homeGadgets.ts hold the later pieces). */
+export const PROP_ART: Record<string, PropArt> = { ...FIRST_ART, ...YARD_ART, ...ROOM_ART, ...BLOOM_ART, ...GARDEN_ART, ...HOUSE_ART, ...TRIM_ART, ...GADGET_ART , ...STAIRS_ART };
 export const PROP_TURNS: Record<string, { side: PropArt; back: PropArt }> = { ...FIRST_TURNS, ...YARD_TURNS, ...ROOM_TURNS, ...BLOOM_TURNS, ...GARDEN_TURNS, ...HOUSE_TURNS, ...TRIM_TURNS };
 
 /** How wide the sheet is; it grows downward as frames are packed. */

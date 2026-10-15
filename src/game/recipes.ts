@@ -21,6 +21,8 @@ export interface RecipeDef {
   /** A buff it gives (its icon is the dish). */
   buff?: Omit<BuffDef, 'icon' | 'id'>;
   tint: number;
+  /** Made at the juice press rather than the stove or the pot. */
+  at?: 'juicer';
 }
 
 const SEC = 1000;
@@ -51,6 +53,18 @@ export const RECIPES: RecipeDef[] = [
   { id: 'pancakes', name: 'Cloudberry Pancakes', does: 'Swifter 3 min', line: 'A tall stack, light as the isle they came from.', needs: [{ find: 'cloudberry', n: 3 }, { crop: 'wheat', n: 2 }, { find: 'honey', n: 1 }], buff: { name: 'Light as Air', tint: 0xffa860, duration: 180 * SEC, mods: { speed: 1.18 } }, tint: 0xffa860 },
   { id: 'stirfry', name: 'Deep Garden Stir-fry', does: 'Much swifter 2 min', line: 'Crisp lotus and glowcaps, tossed hot.', needs: [{ find: 'glowcap', n: 2 }, { find: 'lotus', n: 2 }], buff: { name: 'Glimmer', tint: 0x6affc8, duration: 120 * SEC, mods: { speed: 1.22 } }, tint: 0x6affc8 },
   { id: 'stardrops', name: 'Star Sugar Drops', does: 'Much swifter 3 min', line: 'Little sweets that fell from the sky.', needs: [{ find: 'starsugar', n: 2 }, { find: 'honey', n: 1 }], buff: { name: 'Starstruck', tint: 0xfff2a8, duration: 180 * SEC, mods: { speed: 1.25 } }, tint: 0xfff2a8 },
+
+  // The juice press's juices: produce and finds pressed cold, a sip for the road.
+  { id: 'carrotjuice', at: 'juicer', name: 'Carrot Juice', does: 'Swifter 2 min', line: 'Sweet, bright orange and very good for you.', needs: [{ crop: 'carrot', n: 3 }], buff: { name: 'Sunny Sip', tint: 0xff9a3a, duration: 120 * SEC, mods: { speed: 1.1 } }, tint: 0xff9a3a },
+  { id: 'tomatojuice', at: 'juicer', name: 'Tomato Juice', does: 'Swifter 2 min', line: 'Red and savoury, a pinch of pink salt on top.', needs: [{ crop: 'tomato', n: 3 }, { find: 'salt', n: 1 }], buff: { name: 'Garden Zing', tint: 0xf04a3a, duration: 120 * SEC, mods: { speed: 1.12 } }, tint: 0xf05a46 },
+  { id: 'greenjuice', at: 'juicer', name: 'Green Juice', does: 'Swifter 3 min', line: 'Cabbage, carrot and wild mint. Tastes like a garden.', needs: [{ crop: 'cabbage', n: 1 }, { crop: 'carrot', n: 1 }, { find: 'mint', n: 1 }], buff: { name: 'Green Glow', tint: 0x8ad86a, duration: 180 * SEC, mods: { speed: 1.12 } }, tint: 0x8ad86a },
+  { id: 'smoothie', at: 'juicer', name: 'Strawberry Smoothie', does: 'Much swifter 90s', line: 'Thick and pink, with a spoon of honey.', needs: [{ crop: 'strawberry', n: 3 }, { find: 'honey', n: 1 }], buff: { name: 'Berry Bounce', tint: 0xff6a8a, duration: 90 * SEC, mods: { speed: 1.22 } }, tint: 0xff7a96 },
+  { id: 'sunrise', at: 'juicer', name: 'Sunrise Juice', does: 'Swifter 3 min', line: 'Carrot and strawberry poured in two layers, like the morning sky.', needs: [{ crop: 'carrot', n: 2 }, { crop: 'strawberry', n: 2 }], buff: { name: 'Daybreak', tint: 0xffa860, duration: 180 * SEC, mods: { speed: 1.15 } }, tint: 0xffa060 },
+  { id: 'cider', at: 'juicer', name: 'Pumpkin Cider', does: 'Swifter 4 min', line: 'Pressed pumpkin and honey, spiced and cosy.', needs: [{ crop: 'pumpkin', n: 1 }, { find: 'honey', n: 1 }], buff: { name: 'Harvest Warmth', tint: 0xf08a30, duration: 240 * SEC, mods: { speed: 1.12 } }, tint: 0xe88a3a },
+  { id: 'snowcooler', at: 'juicer', name: 'Snowberry Cooler', does: 'Swifter 3 min', line: 'Icy berries and mint, frost on the glass.', needs: [{ find: 'snowberry', n: 3 }, { find: 'mint', n: 1 }], buff: { name: 'Cool Breeze', tint: 0xd8ecff, duration: 180 * SEC, mods: { speed: 1.15 } }, tint: 0xcfe6ff },
+  { id: 'nectar', at: 'juicer', name: 'Cloudberry Nectar', does: 'Much swifter 2 min', line: 'Golden, sweet and light as a cloud.', needs: [{ find: 'cloudberry', n: 3 }, { find: 'honey', n: 1 }], buff: { name: 'Cloud Skip', tint: 0xffb86a, duration: 120 * SEC, mods: { speed: 1.2 } }, tint: 0xffb05a },
+  { id: 'glowpunch', at: 'juicer', name: 'Glow Punch', does: 'Much swifter 3 min', line: 'It glows in the glass. Best sipped under the stars.', needs: [{ find: 'lumenberry', n: 2 }, { find: 'glowpetal', n: 1 }], buff: { name: 'Lumen Rush', tint: 0x9aa8ff, duration: 180 * SEC, mods: { speed: 1.25 } }, tint: 0x9aa8ff },
+  { id: 'starfizz', at: 'juicer', name: 'Stardust Fizz', does: 'Much swifter 4 min', line: 'Star sugar fizzing in snowberry juice. It sparkles.', needs: [{ find: 'starsugar', n: 1 }, { find: 'snowberry', n: 2 }], buff: { name: 'Fizzy Stars', tint: 0xfff2a8, duration: 240 * SEC, mods: { speed: 1.25 } }, tint: 0xfff0b0 },
 ];
 
 export const recipeById = (id: string): RecipeDef | undefined => RECIPES.find((r) => r.id === id);

@@ -227,8 +227,8 @@ export interface PartDef {
   door?: boolean;
   /** A ward: no creature rises within this many cells of it (in the Everwood; see ForestEdits.warded). */
   ward?: number;
-  /** A place to cook (see game/cooking.ts): the kitchen stove indoors, or a pot over a fire in the garden. */
-  cook?: 'stove' | 'fire';
+  /** A place to cook (see game/cooking.ts): the kitchen stove indoors, a pot over a fire in the garden, or the juice press, which makes the juices. */
+  cook?: 'stove' | 'fire' | 'juicer';
   /** A bridge's cell: laid in strokes like a wall, joined with its neighbours into one bridge that shapes itself (see bridge.ts). */
   bridge?: boolean;
   /** A staircase in a house: it climbs to the house's upper floor, built and furnished like the one below (see upstairs.ts). */
@@ -407,6 +407,9 @@ export const PARTS: PartDef[] = [
   { id: 'sink', name: 'Kitchen sink', tab: 'furniture', shelf: 'kitchen', w: 1, h: 1, block: 'full' },
   { id: 'hutch', name: 'Dish hutch', tab: 'furniture', shelf: 'kitchen', w: 2, h: 1, block: 'full' },
   { id: 'teacart', name: 'Tea cart', tab: 'furniture', shelf: 'kitchen', w: 1, h: 1, block: 'post', flip: true },
+  // The juice press on its cabinet (the juices' kitchen), and the television (see heaven/pastimes: sat before, it plays real videos).
+  { id: 'juicer', name: 'Juice press', tab: 'furniture', shelf: 'kitchen', w: 1, h: 1, block: 'full', flip: true, cook: 'juicer' },
+  { id: 'tv', name: 'Television', tab: 'furniture', shelf: 'living', w: 2, h: 1, block: 'full' },
   { id: 'vanity', name: 'Vanity', tab: 'furniture', shelf: 'bedroom', w: 2, h: 1, block: 'full', flip: true },
   { id: 'rockinghorse', name: 'Rocking horse', tab: 'furniture', shelf: 'bedroom', w: 1, h: 1, block: 'post', flip: true },
   { id: 'bunkbed', name: 'Bunk bed', tab: 'furniture', shelf: 'bedroom', w: 1, h: 2, block: 'full' },

@@ -85,6 +85,7 @@ class GameSound {
   private rain = 0;
   private _muted = readMuted();
   private volume = { music: 1, sfx: 1 };
+  private hushed = false;
 
   get muted(): boolean {
     return this._muted;
@@ -153,19 +154,29 @@ class GameSound {
     this.fadeUntil = now + TRACK_FADE + 0.2;
   }
 
+  /** A video playing (the television, the tablet): the music and the world's sounds fall quiet under it. */
+  setHush(on: boolean): void {
+    if (on === this.hushed) return;
+    this.hushed = on;
+    if (this.ctx && this.mixer) safely('hush', () => this.applyVolumes(this.mixer!, this.ctx!.currentTime, HUSH_EASE));
+  }
+
   setVolumes(music: number, sfx: number): void {
     this.volume = { music, sfx };
     if (this.ctx && this.mixer) safely('volumes', () => this.applyVolumes(this.mixer!, this.ctx!.currentTime));
   }
 
-  private applyVolumes(m: Mixer, t: number): void {
+  private applyVolumes(m: Mixer, t: number, ease = 0.05): void {
     // Squared so the slider feels even to the ear.
-    const set = (g: GainNode, base: number, v: number) => g.gain.setTargetAtTime(base * v * v, t, 0.05);
-    set(m.music, MUSIC_LEVEL, this.volume.music);
+    const set = (g: GainNode, base: number, v: number) => g.gain.setTargetAtTime(base * v * v, t, ease);
+    // Under a video the music goes, the world's sounds drop to a murmur.
+    const music = this.hushed ? 0 : this.volume.music;
+    const world = this.volume.sfx * (this.hushed ? HUSHED : 1);
+    set(m.music, MUSIC_LEVEL, music);
     // The music's reverb has no base level of its own: it just follows the slider.
-    set(m.musicVerb, 1, this.volume.music);
-    set(m.ambience, AMBIENCE_LEVEL, this.volume.sfx);
-    set(m.sfx, SFX_LEVEL, this.volume.sfx);
+    set(m.musicVerb, 1, music);
+    set(m.ambience, AMBIENCE_LEVEL, world);
+    set(m.sfx, SFX_LEVEL, world);
   }
 
   /** 0 = night, 1 = day; crossfades the ambience. */
@@ -1338,6 +1349,9 @@ class GameSound {
 
 /** The mixer's own bus levels, which the player's volumes scale. */
 const MUSIC_LEVEL = 0.3;
+/** Under a video: how loud the world's sounds stay, and how slowly they fall and come back (s). */
+const HUSHED = 0.35;
+const HUSH_EASE = 0.4;
 const AMBIENCE_LEVEL = 0.55;
 const SFX_LEVEL = 0.75;
 

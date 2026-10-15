@@ -30,11 +30,11 @@ export type Emote = 'wave' | 'cheer' | 'dance' | 'sit' | 'heart' | 'hug' | 'bow'
 export const EMOTES: Emote[] = ['wave', 'cheer', 'dance', 'sit', 'heart', 'hug', 'bow', 'clap', 'lantern'];
 /** A friend this near (px) is hugged: the wanderer turns to face them. */
 const HUG_REACH = 30;
-/** The poses a pastime holds the wanderer in (see pastimes/): sat on a seat, strumming the lute, at an instrument, at a telescope. */
-export type Pose = 'seat' | 'strum' | 'play' | 'gaze';
-const POSES = new Set<string>(['seat', 'strum', 'play', 'gaze']);
+/** The poses a pastime holds the wanderer in (see pastimes/): sat on a seat, strumming the lute, at an instrument, at a telescope, in bed, on the tablet. */
+export type Pose = 'seat' | 'strum' | 'play' | 'gaze' | 'lie' | 'doze' | 'tablet';
+const POSES = new Set<string>(['seat', 'strum', 'play', 'gaze', 'lie', 'doze', 'tablet']);
 /** Emotes and poses that keep going until the wanderer walks off. */
-const LASTING = new Set<string>(['dance', 'sit', 'seat', 'strum', 'play', 'gaze']);
+const LASTING = new Set<string>(['dance', 'sit', 'seat', 'strum', 'play', 'gaze', 'lie', 'doze', 'tablet']);
 
 /** What the HUD and the keyboard ask for: the emote to make next. */
 export const emoteHud = { want: null as Emote | null, playing: null as Emote | null };
@@ -173,7 +173,7 @@ export class Wanderer implements Hero {
    * Hold a pastime's pose facing `dir` until walked off (or let go):
    * on a seat it's drawn `lift` px up, `depth` px in front of its feet.
    */
-  hold(p: Pose, dir: Dir = 'down', lift = 0, depth = 0): void {
+  hold(p: Pose | 'sit', dir: Dir = 'down', lift = 0, depth = 0): void {
     this.startEmote(p, dir, lift, depth);
   }
 

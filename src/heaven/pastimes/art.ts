@@ -9,6 +9,7 @@
 import type Phaser from 'phaser';
 import { PixelCanvas, type Material, type Vec3 } from '../../art/pixel';
 import { farmKit as K, moreIcons } from '../../art/farm';
+import './gadgetIcons';
 
 const { ICON, n3, UP, TOP, FACE, bowl, plate, steam, leaf, stem } = K;
 

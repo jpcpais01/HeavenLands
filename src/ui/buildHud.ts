@@ -138,6 +138,23 @@ const ICONS: Record<string, { map: string[]; pal: Record<string, string> }> = {
       '......k',
     ],
   },
+  build_cancel: {
+    pal: { W: '#ffd8de', w: '#c8405e' },
+    map: [
+      '',
+      '',
+      '',
+      '...WW.....WW',
+      '...wWW...WWw',
+      '....wWW.WWw',
+      '.....wWWWw',
+      '......WWw',
+      '.....WWWWw',
+      '....WWw.WWw',
+      '...WWw...WWw',
+      '...ww.....ww',
+    ],
+  },
   build_turn: {
     pal: { W: '#dfe6ff', w: '#8a93b8' },
     map: [
@@ -342,6 +359,9 @@ export class BuildHud {
   private undoBtn: Btn;
   private doneBtn: Btn;
   private twistBtn: Btn;
+  /** Over a thing held on a touch screen: the tick builds it, the cross lets it go (see world/buildCursor.ts). */
+  private placeBtn: Btn;
+  private dropBtn: Btn;
   private nameText: Phaser.GameObjects.BitmapText;
   private hintText: Phaser.GameObjects.BitmapText;
   private icons: Phaser.GameObjects.Image[] = [];
@@ -392,6 +412,8 @@ export class BuildHud {
     this.undoBtn = { rect: R(), icon: icon('build_undo'), text: null };
     this.doneBtn = { rect: R(), icon: icon('build_done'), text: text(0x14301a).setText('DONE') };
     this.twistBtn = { rect: R(), icon: icon('build_turn'), text: text(INK).setText('TURN') };
+    this.placeBtn = { rect: R(), icon: icon('build_done'), text: null };
+    this.dropBtn = { rect: R(), icon: icon('build_cancel'), text: null };
     this.nameText = text(CREAM);
     this.hintText = text(0x8a93b8);
 
@@ -421,7 +443,8 @@ export class BuildHud {
       this.nameRect.contains(x, y) ||
       this.undoBtn.rect.contains(x, y) ||
       this.doneBtn.rect.contains(x, y) ||
-      (this.twistable() && this.twistBtn.rect.contains(x, y))
+      (this.twistable() && this.twistBtn.rect.contains(x, y)) ||
+      (build.heldAt.shown && (this.placeBtn.rect.contains(x, y) || this.dropBtn.rect.contains(x, y)))
     );
   }
 
@@ -681,6 +704,16 @@ export class BuildHud {
       return true;
     }
     if (!build.on) return false;
+    if (build.heldAt.shown && grow(this.placeBtn.rect)) {
+      // A thing that doesn't fit there stays held: the red ghost says why.
+      if (build.heldAt.ok) build.place = true;
+      return true;
+    }
+    if (build.heldAt.shown && grow(this.dropBtn.rect)) {
+      build.held = null;
+      build.heldAt.shown = false;
+      return true;
+    }
     if (this.twistable() && this.twistBtn.rect.contains(p.x, p.y)) {
       this.twist();
       return true;
@@ -767,11 +800,15 @@ export class BuildHud {
     this.twistBtn.text!.setVisible(twist).setTint(lit ? 0x1a1206 : INK);
     this.nameText.setVisible(on);
     this.hintText.setVisible(on);
+    const held = on && build.heldAt.shown;
+    if (held) this.placeHeld();
+    this.placeBtn.icon!.setVisible(held).setScale(k).setAlpha(build.heldAt.ok ? 1 : 0.45);
+    this.dropBtn.icon!.setVisible(held).setScale(k);
     const list = on ? this.list() : [];
     const picked = this.picked.get(this.shelf.id) ?? 1;
     this.placeIcons(list);
 
-    const state = `${build.trayVer} ${build.tabs.join()} ${this.scene.scale.width} ${this.scene.scale.height} ${build.available} ${build.home} ${on} ${this.shelf.id} ${list.length} ${picked} ${this.hover} ${this.hoverSection} ${Math.round(this.scroll)} ${build.canUndo} ${twist} ${lit} ${this.nameRect.width} ${this.twistBtn.rect.width} ${this.pillsOwnRow}`;
+    const state = `${build.trayVer} ${build.tabs.join()} ${this.scene.scale.width} ${this.scene.scale.height} ${build.available} ${build.home} ${on} ${this.shelf.id} ${list.length} ${picked} ${this.hover} ${this.hoverSection} ${Math.round(this.scroll)} ${build.canUndo} ${twist} ${lit} ${this.nameRect.width} ${this.twistBtn.rect.width} ${this.pillsOwnRow} ${held ? `${this.placeBtn.rect.x} ${this.placeBtn.rect.y} ${build.heldAt.ok}` : ''}`;
     if (state === this.drawn) return;
     this.drawn = state;
     const g = this.g.clear();
@@ -850,6 +887,23 @@ export class BuildHud {
     if (twist) chip(this.twistBtn.rect, lit, lit ? GOLD : undefined);
     chip(this.undoBtn.rect, false);
     chip(this.doneBtn.rect, false, DONE);
+    if (held) {
+      // The held thing's tick and cross, on a soft dark pad with a little tail down to it.
+      const a = this.dropBtn.rect;
+      const b = this.placeBtn.rect;
+      const pad = Math.round(4 * D);
+      const below = a.y > build.heldAt.y;
+      const tx = (a.centerX + b.centerX) / 2;
+      const t = Math.round(5 * D);
+      g.fillStyle(BODY, 0.78);
+      g.fillRoundedRect(a.x - pad, a.y - pad, b.right - a.x + pad * 2, a.height + pad * 2, (a.height + pad * 2) / 2);
+      if (below) g.fillTriangle(tx - t, a.y - pad, tx + t, a.y - pad, tx, a.y - pad - t);
+      else g.fillTriangle(tx - t, a.bottom + pad, tx + t, a.bottom + pad, tx, a.bottom + pad + t);
+      g.lineStyle(line, EDGE, 0.5);
+      g.strokeRoundedRect(a.x - pad, a.y - pad, b.right - a.x + pad * 2, a.height + pad * 2, (a.height + pad * 2) / 2);
+      chip(a, false);
+      chip(b, false, build.heldAt.ok ? DONE : 0x4a4e68);
+    }
 
     // The parts' slots, cut off at the row's ends as they scroll.
     const row = this.row;
@@ -885,6 +939,24 @@ export class BuildHud {
     };
     if (this.scroll > 1) arrow(row.x + Math.round(4 * D), -1);
     if (this.scroll < this.maxScroll() - 1) arrow(row.right - Math.round(4 * D), 1);
+  }
+
+  /** The held thing's tick and cross: side by side over its picture, or under its feet when there's no room above; kept on the screen and off the tray. */
+  private placeHeld(): void {
+    const at = build.heldAt;
+    const size = Math.round(Math.max(30 * D, this.undoBtn.rect.height));
+    const gap = Math.round(10 * D);
+    const lift = Math.round(12 * D);
+    const edge = Math.round(8 * D);
+    const w = size * 2 + gap;
+    let y = Math.round(at.y - lift - size);
+    if (y < edge) y = Math.round(at.low + lift);
+    y = Math.max(edge, Math.min(y, this.nameRect.y - size - edge));
+    const x = Math.round(Math.max(edge, Math.min(at.x - w / 2, this.scene.scale.width - edge - w)));
+    this.dropBtn.rect.setTo(x, y, size, size);
+    this.placeBtn.rect.setTo(x + size + gap, y, size, size);
+    this.dropBtn.icon!.setPosition(Math.round(this.dropBtn.rect.centerX), Math.round(this.dropBtn.rect.centerY));
+    this.placeBtn.icon!.setPosition(Math.round(this.placeBtn.rect.centerX), Math.round(this.placeBtn.rect.centerY));
   }
 
   /** Each slot's picture, scaled to fit (whole steps when it's small) and cropped at the row's ends. */

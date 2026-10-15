@@ -18,6 +18,44 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    v: 12,
+    date: '2026-10-15',
+    title: 'Upstairs, and secret doors',
+    notes: [
+      'New Staircase in Build / Stairs: set it inside a house and walk up it to a whole second floor. Lay floors, build walls and furnish it like downstairs; the doorways out become windows up there, and the stairs come up through a railed well. Walk back onto the well to go down.',
+      'Friends see you only on the floor you are on, and everything upstairs saves and shows for them like the rest of your builds. Works in your Home and everywhere else you build.',
+      'Two secret doors in Build / Walls, hung in a house doorway like a door: the Hidden door looks just like the wall around it and sinks into the floor when you lean on it, and the Secret bookcase rolls aside. Both close again behind you.',
+    ],
+  },
+  {
+    v: 11,
+    date: '2026-10-15',
+    title: 'Juice, TV and a tablet',
+    notes: [
+      'New Juice press in Furniture / Kitchen: walk up and press E to make ten juices from your crops and finds, each a little boost to your step.',
+      'New Television in Furniture / Living room: sit on a seat facing it, or stand in front, and press E to watch YouTube. Paste a link or pick a radio channel; friends sat nearby see what you put on.',
+      'A tablet to carry everywhere: the new tablet button (or T) opens Videos, a pixel Sketchbook you can save as a picture, and Sky, which tells the time of day, the next shower and the next meteor shower.',
+    ],
+  },
+  {
+    v: 10,
+    date: '2026-10-15',
+    title: 'Lazy mornings',
+    notes: [
+      'Lie in bed any time of day: E by a bed tucks you in, head on the pillow, looking about. Friends see you there, and a double bed has room for two.',
+      'By night, E from bed (or the moon button) sleeps: you stay in bed with your eyes shut, and wake there in the morning. E by day or walking off gets you up.',
+    ],
+  },
+  {
+    v: 9,
+    date: '2026-10-15',
+    title: 'See it before you build it',
+    notes: [
+      'On phones and tablets a piece no longer goes down the moment you lift your finger: it waits as a see-through ghost, green where it fits and red where it doesn\'t. Drag it about, turn it, then tap the tick to build it (or the ghost again), or the cross to put it back.',
+      'The build cursor is clearer everywhere: the ghost breathes softly and its footprint has crisp corners.',
+    ],
+  },
+  {
     v: 8,
     date: '2026-10-11',
     title: 'Little things, put right',
