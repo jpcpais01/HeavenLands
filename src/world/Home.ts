@@ -8,6 +8,7 @@ import { CRITTER_H, CRITTER_OX, CRITTER_OY, CRITTER_W } from '../art/critters';
 import { pixelCanvas } from '../art/canvas';
 import { sound } from '../audio';
 import { TABS, build, stopBuilding } from '../game/build';
+import { BLOCKED, FITS, Hold, footprint, lookGhost, markHeld } from './buildCursor';
 import { collection } from '../game/collection';
 import { CRITTERS, critterById } from '../game/critters';
 import { daynight, type Phase } from '../game/daynight';
@@ -137,6 +138,7 @@ export class Home implements LinkHost {
   private grid: Phaser.GameObjects.Graphics;
   private cursor: Phaser.GameObjects.Graphics;
   private ghost: Img;
+  private hold = new Hold();
   /** Each stroke's change backwards, to undo it. */
   private undoStack: BuildPatch[] = [];
   private before: BuildSnap | null = null;
@@ -707,6 +709,8 @@ export class Home implements LinkHost {
     if (!on) {
       this.cursor.setVisible(false);
       this.ghost.setVisible(false);
+      build.held = null;
+      build.heldAt.shown = false;
       build.pressed = build.released = false;
       this.lastCell = null;
       // Building ended mid-stroke (Esc, Done, the switch turned off): what was laid so far is kept, sent and undoable all the same.
@@ -718,9 +722,10 @@ export class Home implements LinkHost {
       this.undo();
     }
     const p = build.pointer;
-    const w = this.scene.cameras.main.getWorldPoint(p.x, p.y);
-    const cx = Math.floor((w.x - PLOT_X) / CELL);
-    const cy = Math.floor((w.y - PLOT_Y) / CELL);
+    const cam = this.scene.cameras.main;
+    const w = cam.getWorldPoint(p.x, p.y);
+    let cx = Math.floor((w.x - PLOT_X) / CELL);
+    let cy = Math.floor((w.y - PLOT_Y) / CELL);
     const pick = build.pick;
     const erase = p.erase || !pick;
     const picked = !erase && pick?.layer === 'thing' ? partById(pick.id) ?? null : null;
@@ -728,6 +733,10 @@ export class Home implements LinkHost {
     const thing = picked?.bridge ? null : picked;
     const turn = thing?.turns ? build.turn : 0;
     const size = thing ? extent(thing, turn) : { w: 1, h: 1 };
+    // On a touch screen a thing waits as a ghost where the finger lifts, till its tick builds it.
+    const at = this.hold.step(thing, size, cx, cy);
+    cx = at.x;
+    cy = at.y;
     // A thing's footprint hangs from the cell under the pointer by its middle, so the pointer is at its foot.
     const fx = cx - Math.floor((size.w - 1) / 2);
     const fy = cy - (size.h - 1);
@@ -740,33 +749,36 @@ export class Home implements LinkHost {
     if (p.down && !thing) this.stroke(cx, cy, erase);
     if (build.released) {
       build.released = false;
-      if (thing) this.placeThing(thing, fx, fy, turn);
-      else this.stroke(cx, cy, erase);
+      if (thing && !at.holding) this.placeThing(thing, fx, fy, turn);
+      else if (!thing) this.stroke(cx, cy, erase);
       this.lastCell = null;
+      this.endStroke();
+    }
+    if (at.place && thing) {
+      this.before ??= this.snap();
+      if (this.placeThing(thing, fx, fy, turn)) build.held = null;
       this.endStroke();
     }
 
     // The cursor: the footprint, green where it can go and red where it can't, and a ghost of the thing.
-    const show = (p.over || p.down) && inPlot(cx, cy);
+    const show = (p.over || p.down || at.holding) && inPlot(cx, cy);
     this.cursor.setVisible(show);
     this.ghost.setVisible(show && !!thing);
-    if (!show) return;
+    if (!show) {
+      build.heldAt.shown = false;
+      return;
+    }
     const ok = erase ? this.canErase(cx, cy) : thing ? this.canPut(thing, fx, fy, turn) : this.canPaint(cx, cy);
-    const col = erase ? 0xff9a6a : ok ? 0x9cff8a : 0xff6a6a;
-    const bw = size.w * CELL;
-    const bh = size.h * CELL;
-    const g = this.cursor.clear();
-    g.fillStyle(col, 0.16);
-    g.fillRect(PLOT_X + fx * CELL, PLOT_Y + fy * CELL, bw, bh);
-    g.lineStyle(1, col, 0.85);
-    g.strokeRect(PLOT_X + fx * CELL + 0.5, PLOT_Y + fy * CELL + 0.5, bw - 1, bh - 1);
+    footprint(this.cursor.clear(), PLOT_X + fx * CELL, PLOT_Y + fy * CELL, size.w * CELL, size.h * CELL, erase ? 0xff9a6a : ok ? FITS : BLOCKED, !!build.held);
     if (thing?.critter) {
       this.ghost.setTexture('critters', `${thing.critter}_0`).setOrigin(CRITTER_OX / CRITTER_W, CRITTER_OY / CRITTER_H).setFlipX(false);
-      this.ghost.setPosition(PLOT_X + (fx + 0.5) * CELL, PLOT_Y + (fy + 1) * CELL - 5).setTint(ok ? 0xffffff : 0xff8080);
+      this.ghost.setPosition(PLOT_X + (fx + 0.5) * CELL, PLOT_Y + (fy + 1) * CELL - 5);
     } else if (thing) {
       const look = thingLook({ id: thing.id, x: fx, y: fy, flip: build.flip && !!thing.flip, turn });
-      this.ghost.setTexture(look.key, look.frame).setOrigin(look.ox, look.oy).setFlipX(look.flipX).setPosition(look.x, look.y).setTint(ok ? 0xffffff : 0xff8080);
+      this.ghost.setTexture(look.key, look.frame).setOrigin(look.ox, look.oy).setFlipX(look.flipX).setPosition(look.x, look.y);
     }
+    if (thing) lookGhost(this.ghost, ok, this.scene.time.now);
+    markHeld(cam, this.ghost, PLOT_Y + (fy + size.h) * CELL, ok, !!thing && !!build.held && !p.down);
   }
 
   /** Paint (or erase) every cell from the last one the pointer was on to this one. */
@@ -927,11 +939,12 @@ export class Home implements LinkHost {
     return !!(p.wall || p.door || p.critter) || !this.farm.covers(fx, fy, e.w, e.h);
   }
 
-  private placeThing(p: PartDef, fx: number, fy: number, turn: number): void {
-    if (!this.canPut(p, fx, fy, turn)) return;
+  private placeThing(p: PartDef, fx: number, fy: number, turn: number): boolean {
+    if (!this.canPut(p, fx, fy, turn)) return false;
     this.layout.things.push({ id: p.id, x: fx, y: fy, flip: build.flip && !!p.flip, turn });
     if (!p.critter) sound.thud(0);
     this.refresh();
+    return true;
   }
 
   private snap(): BuildSnap {

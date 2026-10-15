@@ -74,7 +74,18 @@ export const build = {
   /** Things that turn go down facing this way: 0 front, 1 right, 2 back, 3 left. */
   turn: 0,
   /** The pointer building on the world, in screen pixels: down, and whether it erases (a right click). */
-  pointer: { x: 0, y: 0, down: false, erase: false, over: false },
+  pointer: { x: 0, y: 0, down: false, erase: false, over: false, touch: false },
+  /**
+   * A thing waiting to go down. On a touch screen a thing isn't built where
+   * the finger lifts: it waits there as a ghost, to be dragged, turned and
+   * looked at, until its tick (or a tap on it) places it. The cell it hangs
+   * from is the world's own (see world/buildCursor.ts).
+   */
+  held: null as { id: string; x: number; y: number } | null,
+  /** Where the held thing's tick and cross go, in screen pixels, and whether it fits there. Set by the world each frame. */
+  heldAt: { x: 0, y: 0, low: 0, ok: false, shown: false },
+  /** The tick was tapped: the world places the held thing. */
+  place: false,
   /** Presses and releases since the world last looked. */
   pressed: false,
   released: false,
@@ -90,6 +101,8 @@ export function stopBuilding(): void {
   build.on = false;
   build.pointer.down = build.pointer.over = false;
   build.pressed = build.released = false;
+  build.held = null;
+  build.heldAt.shown = build.place = false;
 }
 
 export { TABS, WALLS };

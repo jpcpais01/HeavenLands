@@ -348,7 +348,7 @@ export class UIScene extends Phaser.Scene {
           this.knob.set(p.x, p.y);
         } else if (this.buildPointer === null) {
           this.buildPointer = p.id;
-          Object.assign(build.pointer, { x: p.x, y: p.y, down: true, erase: !p.wasTouch && p.rightButtonDown(), over: true });
+          Object.assign(build.pointer, { x: p.x, y: p.y, down: true, erase: !p.wasTouch && p.rightButtonDown(), over: true, touch: p.wasTouch });
           build.pressed = true;
         }
       } else if (p.wasTouch && this.netShown > 0.5 && Phaser.Math.Distance.Between(p.x, p.y, this.netPos.x, this.netPos.y) < this.R * 0.7) {
