@@ -43,6 +43,8 @@ export interface Pose {
   flap: number;
   /** A lute held across the body (the jam's strum). */
   lute?: boolean;
+  /** Lying in bed: only the head and shoulders show above the covers' turned-down edge, hands resting on it. */
+  bed?: boolean;
 }
 
 export interface Kit {

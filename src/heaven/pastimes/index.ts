@@ -4,7 +4,9 @@
 //
 // - Sitting on any seat that's built (benches and sofas seat two), seen by
 //   friends; E again or walking off stands up.
-// - Sleeping in a bed by night: the world fades out and wakes at morning.
+// - Lying in a bed, any time, tucked in and looking about; by night E (or the
+//   touch button) from there sleeps: the world fades out and wakes at
+//   morning, still in bed. E by day or walking off gets up.
 // - Jamming: the lute anywhere from its button, or sat at the piano or the
 //   harp; friends nearby hear every note (jam.ts, scenes/JamScene.ts).
 // - Stargazing at the telescope by night: join the stars into the twelve
@@ -49,8 +51,10 @@ type Doing =
   | { kind: 'seat'; spot: Spot; from: { x: number; y: number } }
   | { kind: 'play'; spot: Spot; from: { x: number; y: number } }
   | { kind: 'gaze'; spot: Spot; from: { x: number; y: number } }
+  | { kind: 'lie'; spot: Spot; from: { x: number; y: number } }
   | { kind: 'jam' }
-  | { kind: 'sleep'; spot: Spot; t: number; zT: number; woke: boolean };
+  // `tucked`: seen asleep in the bed (else, a bed turned away, hidden in it).
+  | { kind: 'sleep'; spot: Spot; from: { x: number; y: number }; t: number; zT: number; woke: boolean; tucked: boolean };
 
 type Near = { spot: Spot } | { find: Find } | { honey: string; spot: Spot } | null;
 
@@ -106,17 +110,25 @@ export class Pastimes implements CozyPastimes {
     }
     this.follow(hero, dt, daylight);
 
-    pastimeHud.busy = !!this.doing && this.doing.kind !== 'seat';
+    pastimeHud.busy = !!this.doing && this.doing.kind !== 'seat' && this.doing.kind !== 'lie';
     pastimeHud.asleep = this.doing?.kind === 'sleep' && !this.doing.woke;
     pastimeHud.jamming = this.doing?.kind === 'jam' || this.doing?.kind === 'play';
     this.near = this.doing || !this.free() ? null : this.lookAround(hero.x, hero.y);
     const n = this.near;
     pastimeHud.near = !n ? '' : 'find' in n ? `find_${n.find.def.id}` : 'honey' in n ? 'find_honey' : ICONS[n.spot.kind];
+    // Lying in bed by night, the touch button sleeps (by day, walking off gets up).
+    if (this.lying() === 'sleep') pastimeHud.near = 'icon_sleep';
     this.showLabel();
   }
 
   get engaged(): boolean {
     return !!this.doing;
+  }
+
+  /** Lying awake in bed: what E does from there now (sleep by night, get up by day). */
+  private lying(): 'sleep' | 'up' | null {
+    if (this.doing?.kind !== 'lie') return null;
+    return this.daylight <= SLEEPY && this.free() ? 'sleep' : 'up';
   }
 
   /** Nothing else has the hero: no build mode, no rod out, nothing the farm would do here. */
@@ -183,8 +195,10 @@ export class Pastimes implements CozyPastimes {
     const hero = this.hero;
     if (!hero) return false;
     if (this.doing) {
-      // E again: stand up, put the lute away, step away from the telescope. Asleep, nothing stirs.
-      if (this.doing.kind !== 'sleep') this.stop();
+      // E again: stand up, get out of bed, put the lute away, step away from the telescope. Asleep, nothing stirs.
+      const d = this.doing;
+      if (d.kind === 'lie' && this.lying() === 'sleep') this.doze(hero, d.spot, d.from);
+      else if (d.kind !== 'sleep') this.stop();
       return true;
     }
     const n = this.near;
@@ -224,11 +238,19 @@ export class Pastimes implements CozyPastimes {
         this.world.scene.launch('stars');
         return true;
       case 'bed':
+        // A bed facing us: in and tucked up, any time of day (sleep is a second E, by night).
+        if (s.rest) {
+          this.place(hero, s);
+          hero.hold('lie', 'down', s.lift, s.depth);
+          sound.sitDown(this.world.pan(s.x));
+          this.doing = { kind: 'lie', spot: s, from };
+          return true;
+        }
         if (daylight > SLEEPY) {
           this.say('NOT SLEEPY YET', 0xffe8b0);
           return true;
         }
-        this.doze(hero, s);
+        this.doze(hero, s, from);
         return true;
     }
     return false;
@@ -259,10 +281,12 @@ export class Pastimes implements CozyPastimes {
 
   // ---------------------------------------------------------------- Sleep
 
-  private doze(hero: Wanderer, s: Spot): void {
-    this.doing = { kind: 'sleep', spot: s, t: 0, zT: 0, woke: false };
+  private doze(hero: Wanderer, s: Spot, from: { x: number; y: number }): void {
+    const tucked = !!s.rest;
+    this.doing = { kind: 'sleep', spot: s, from, t: 0, zT: 0, woke: false, tucked };
     hero.x = s.x;
     hero.y = s.y;
+    if (tucked) hero.hold('doze', 'down', s.lift, s.depth);
     sound.sleep();
     this.world.cameras.main.fadeOut(DOZE_MS, 8, 8, 24);
   }
@@ -271,13 +295,16 @@ export class Pastimes implements CozyPastimes {
     const w = this.world;
     const s = d.spot;
     d.t += dt;
-    // Tucked in: hidden in the bed, and staying there whatever's pressed.
+    // Tucked in (eyes shut, or hidden in a bed turned away), and staying there whatever's pressed.
     hero.x = s.x;
     hero.y = s.y;
-    hero.alpha = d.woke ? 1 : 0;
+    hero.alpha = d.woke || d.tucked ? 1 : 0;
+    if (d.tucked && !d.woke && hero.posing !== 'doze') hero.hold('doze', 'down', s.lift, s.depth);
     if ((d.zT -= dt) <= 0 && !d.woke) {
       d.zT = 520;
-      this.zee((s.x0 + s.x1) / 2, s.y0 + 4);
+      // Off the pillow: over the sleeper's head, or the middle of the bed's head.
+      if (d.tucked) this.zee(s.x + 3, s.y - s.lift - 14);
+      else this.zee((s.x0 + s.x1) / 2, s.y0 + 4);
     }
     if (!d.woke && d.t >= DOZE_MS + DARK_MS) {
       d.woke = true;
@@ -290,13 +317,15 @@ export class Pastimes implements CozyPastimes {
         PHASES.forEach((p, i) => (daynight.mix[i] = p === 'morning' ? 1 : 0));
       }
       const cam = w.cameras.main;
+      // Waking still in bed, eyes open, to get up when they like.
+      if (d.tucked) hero.hold('lie', 'down', s.lift, s.depth);
       cam.fadeIn(WAKE_MS, 8, 8, 24);
       // A finished fade still draws over the screen every frame till it's cleared.
       cam.once(Phaser.Cameras.Scene2D.Events.FADE_IN_COMPLETE, () => cam.fadeEffect.reset());
       sound.wake();
     }
     if (d.woke && d.t >= DOZE_MS + DARK_MS + WAKE_MS * 0.6) {
-      this.doing = null;
+      this.doing = d.tucked ? { kind: 'lie', spot: s, from: d.from } : null;
       // A friend's home keeps their clock, and a place of endless night (Starwatch) has no morning: it was a nap.
       this.say(daynight.follower || !daynight.enabled ? 'WHAT A LOVELY NAP' : 'GOOD MORNING', 0xffe0a0);
     }
@@ -329,7 +358,6 @@ export class Pastimes implements CozyPastimes {
     if (d.kind === 'sleep') {
       hero.alpha = 1;
       this.world.cameras.main.resetFX();
-      return;
     }
     // Only the pastime's own pose: an emote that took over (a wave from the bench) plays on.
     if (hero.posing === poseOf(d)) hero.release();
@@ -346,7 +374,6 @@ export class Pastimes implements CozyPastimes {
     if (d.kind === 'sleep') {
       hero.alpha = 1;
       this.world.cameras.main.resetFX();
-      return;
     }
     if (hero.posing === poseOf(d)) hero.release();
     this.closeOverlays();
@@ -370,15 +397,18 @@ export class Pastimes implements CozyPastimes {
   /** Over what E would do, with a keyboard (as the farm's). */
   private showLabel(): void {
     const n = this.near;
-    const text = !controls.mouse || !n ? '' : 'find' in n ? 'E: PICK UP' : 'honey' in n ? 'E: HONEY' : LABELS[n.spot.kind];
+    const d = this.doing;
+    const lying = this.lying();
+    const text = !controls.mouse ? '' : lying ? (lying === 'sleep' ? 'E: SLEEP' : 'E: GET UP') : !n ? '' : 'find' in n ? 'E: PICK UP' : 'honey' in n ? 'E: HONEY' : n.spot.rest ? 'E: LIE DOWN' : LABELS[n.spot.kind];
     if (text !== this.labelFor) {
       this.labelFor = text;
       this.label.setText(text).setTint(n && 'find' in n ? 0xc8ff8a : n && 'honey' in n ? 0xffd860 : 0xffe8c0);
     }
     this.label.setVisible(!!text);
-    if (!text || !n) return;
-    const x = 'find' in n ? n.find.x : (n.spot.x0 + n.spot.x1) / 2;
-    const y = 'find' in n ? n.find.y - 16 : n.spot.y0 - 22;
+    const spot = d?.kind === 'lie' ? d.spot : n && 'spot' in n ? n.spot : null;
+    if (!text || (!spot && !(n && 'find' in n))) return;
+    const x = n && 'find' in n ? n.find.x : (spot!.x0 + spot!.x1) / 2;
+    const y = n && 'find' in n ? n.find.y - 16 : spot!.y0 - 22;
     this.label.setPosition(Math.round(x), Math.round(y + Math.sin(this.world.time.now * 0.004) * 1.5));
   }
 
@@ -398,4 +428,5 @@ export class Pastimes implements CozyPastimes {
 }
 
 /** The pose a pastime holds the hero in. */
-const poseOf = (d: Doing): string => (d.kind === 'seat' ? 'seat' : d.kind === 'play' ? 'play' : d.kind === 'gaze' ? 'gaze' : d.kind === 'jam' ? 'strum' : '');
+const POSE_OF: Record<Doing['kind'], string> = { seat: 'seat', play: 'play', gaze: 'gaze', jam: 'strum', lie: 'lie', sleep: 'doze' };
+const poseOf = (d: Doing): string => POSE_OF[d.kind];

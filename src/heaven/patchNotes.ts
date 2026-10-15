@@ -18,6 +18,15 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    v: 10,
+    date: '2026-10-15',
+    title: 'Lazy mornings',
+    notes: [
+      'Lie in bed any time of day: E by a bed tucks you in, head on the pillow, looking about. Friends see you there, and a double bed has room for two.',
+      'By night, E from bed (or the moon button) sleeps: you stay in bed with your eyes shut, and wake there in the morning. E by day or walking off gets you up.',
+    ],
+  },
+  {
     v: 9,
     date: '2026-10-15',
     title: 'See it before you build it',
