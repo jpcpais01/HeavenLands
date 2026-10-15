@@ -16,7 +16,7 @@ const id = (list: { id: string }[], i: number): string => list[i]?.id ?? list[0]
 
 // ---------------------------------------------------------------- poses
 
-export type AnimName = 'idle' | 'walk' | 'wave' | 'cheer' | 'dance' | 'sit' | 'seat' | 'heart' | 'hug' | 'bow' | 'clap' | 'lantern' | 'strum' | 'play' | 'gaze';
+export type AnimName = 'idle' | 'walk' | 'wave' | 'cheer' | 'dance' | 'sit' | 'seat' | 'heart' | 'hug' | 'bow' | 'clap' | 'lantern' | 'strum' | 'play' | 'gaze' | 'lie' | 'doze';
 
 export interface AnimDef {
   name: AnimName;
@@ -50,6 +50,9 @@ export const ANIMS: AnimDef[] = [
   { name: 'play', frames: 6, fps: 7, loop: true, views: ['up', 'side'] },
   // Bent to a telescope's eyepiece (from behind).
   { name: 'gaze', frames: 4, fps: 2, loop: true, views: ['up'] },
+  // In bed, tucked in to the chest: awake and looking about, or asleep.
+  { name: 'lie', frames: 8, fps: 3, loop: true, views: ['down'] },
+  { name: 'doze', frames: 4, fps: 1.5, loop: true, views: ['down'] },
 ];
 
 /** Where the shoulders are: `sit` lowers them on the ground (true) or on a seat ('seat'). */
@@ -239,6 +242,28 @@ export function pose(k: Kit, anim: AnimName, view: View, i: number): Pose {
     }
     p.carry = false;
     p.blink = i === 3;
+    return p;
+  }
+  if (anim === 'lie' || anim === 'doze') {
+    // Head on the pillow, the covers up to the chest, hands folded on top; a slow breath lifts the chest.
+    const asleep = anim === 'doze';
+    const bob = asleep ? [0, 0, 1, 1][i] : [0, 0, 0, 1, 1, 1, 0, 0][i];
+    const p = standing(k, 'down', bob);
+    const s = shY(k, bob);
+    p.bed = true;
+    p.carry = false;
+    p.hands = [
+      { x: 12 - k.sw + 0.9, y: s + 3 },
+      { x: 12 + k.sw - 0.9, y: s + 3 },
+    ];
+    // Awake: a look to one side now and then, and a blink; asleep, eyes shut and a little smile.
+    if (asleep) {
+      p.blink = true;
+      p.face = 'content';
+    } else {
+      p.dx = i === 4 || i === 5 ? 0.4 : 0;
+      p.blink = i === 6;
+    }
     return p;
   }
   if (anim === 'strum') {
@@ -1939,6 +1964,21 @@ function lute(c: PixelCanvas, k: Kit, g: Geo): void {
   }
 }
 
+/**
+ * In bed: everything below the chest is under the covers (the bed's own
+ * quilt shows there), so it's cut away, and the covers' turned-down linen
+ * edge is laid across the chest with the hands resting on it.
+ */
+function tuckIn(c: PixelCanvas, k: Kit, g: Geo): void {
+  const cut = Math.round(g.sh + 3.5);
+  for (let y = cut + 1; y < 40; y++) for (let x = -4; x < 28; x++) c.erase(x, y);
+  const half = k.sw + 2.4;
+  c.part();
+  rows(c, cut - 0.5, cut + 1, () => [g.cx - half, g.cx + half], k.linen, (_x, _y, t) => cyl(t, 0.7), (_x, y) => (y >= cut + 1 ? -1 : y <= cut - 1 ? 1 : 0));
+  c.part();
+  for (const h of g.hands) c.ellipse(h.x, cut - 0.6, 1, 0.8, k.skin, { bias: 1 });
+}
+
 export function drawFigure(c: PixelCanvas, k: Kit, g: Geo, L: Layers): void {
   const w = wearOf(k);
   c.offset(BX, BY);
@@ -1955,10 +1995,12 @@ export function drawFigure(c: PixelCanvas, k: Kit, g: Geo, L: Layers): void {
     L.neck(c, k, g);
     head(c, k, g);
     L.hairFront(c, k, g);
-    L.hat(c, k, g);
+    // Hats come off for bed.
+    if (!g.pose.bed) L.hat(c, k, g);
     L.face(c, k, g);
     L.held(c, k, g);
     L.over(c, k, g);
+    if (g.pose.bed) tuckIn(c, k, g);
   } else if (g.view === 'up') {
     L.held(c, k, g);
     legs(c, k, g, w);

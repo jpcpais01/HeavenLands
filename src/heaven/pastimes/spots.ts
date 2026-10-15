@@ -1,6 +1,6 @@
 // Where the pastimes happen among the things built (the Home's plot, the
 // Everwood's builds): every seat's places to sit (a bench or a sofa seats
-// two, side by side), beds to sleep in, the piano and the harp to play, the
+// two, side by side), beds to lie in and sleep in, the piano and the harp to play, the
 // telescope, the beehives. Worked out from the grid's things whenever they
 // change, in world positions: where the hero sits or stands, which way they
 // face, how high a seat lifts them and how they sort against the thing.
@@ -30,6 +30,8 @@ export interface Spot {
   depth: number;
   /** The thing itself (a hive's, for its honey). */
   thing: Thing;
+  /** A bed the wanderer can be seen lying in (head on the pillow, facing us), awake or asleep. */
+  rest?: boolean;
 }
 
 /**
@@ -54,6 +56,18 @@ const SEATS: Record<string, { z: number; dy?: number; apart?: number }> = {
 
 /** How far a seated wanderer's hips are above their feet (the rig's 'seat' pose), so the hips rest on the seat. */
 const SIT_HIP = 5;
+
+/**
+ * Beds to lie in: how far down from the footprint's top the lying wanderer's
+ * feet point is drawn (so the head lands on the pillow and the covers' edge
+ * on the turned-down quilt), and where each sleeper lies across it (px from
+ * its left edge; the double bed takes two). The bunk bed's is its top bunk.
+ */
+const BEDS: Record<string, { off: number; at: number[] }> = {
+  bed: { off: 19, at: [8] },
+  bigbed: { off: 19, at: [8.5, 23.5] },
+  bunkbed: { off: 3, at: [8] },
+};
 
 /** Every spot among `land`'s things. */
 export function findSpots(land: BuildLand): Spot[] {
@@ -92,10 +106,24 @@ export function findSpots(land: BuildLand): Spot[] {
       }
       continue;
     }
+    const bed = BEDS[t.id];
+    if (bed) {
+      // Feet just below the foot of the bed; drawn lifted up onto the pillow, sorted in front of the bed.
+      const y = y1 + 4;
+      const turn = part.turns ? t.turn % 4 : 0;
+      if (turn !== 0) {
+        // Turned on its side or head to us, there's no lying in it to see: tucked away out of sight to sleep.
+        out.push({ ...base, kind: 'bed', key: `${t.x},${t.y}`, x: cx, y, dir: 'down', lift: 0, depth: 0 });
+        continue;
+      }
+      bed.at.forEach((bx, k) =>
+        out.push({ ...base, kind: 'bed', key: `${t.x},${t.y}:${k}`, x: x0 + bx, y, dir: 'down', lift: y - (y0 + bed.off), depth: foot.y + 0.5 - y, rest: true }),
+      );
+      continue;
+    }
     const at = (kind: SpotKind, x: number, y: number, dir: Dir) => out.push({ ...base, kind, key: `${t.x},${t.y}`, x, y, dir, lift: 0, depth: 0 });
-    if (t.id === 'bed' || t.id === 'bigbed' || t.id === 'bunkbed') at('bed', cx, y1 + 4, 'down');
     // At the piano's keys on its bench, from behind; beside the harp, facing its strings; at the telescope's eyepiece.
-    else if (t.id === 'piano') at('piano', cx, y1 + 4, 'up');
+    if (t.id === 'piano') at('piano', cx, y1 + 4, 'up');
     else if (t.id === 'harp') at('harp', t.flip ? x0 - 3 : x1 + 3, y1 - 3, t.flip ? 'right' : 'left');
     else if (t.id === 'telescope') at('telescope', cx + (t.flip ? -2 : 2), y1 + 3, 'up');
     else if (t.id === 'beehive') at('hive', cx, y1 + 4, 'up');
