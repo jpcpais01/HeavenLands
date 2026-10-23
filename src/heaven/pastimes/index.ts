@@ -20,6 +20,12 @@
 //   what's put on (screens.ts).
 // - The tablet, taken out anywhere from its button (or T): videos, a
 //   sketchbook and the sky, the wanderer looking down at it as they use it.
+// - Skimming stones: by any open water (a pond laid, the Everwood's streams,
+//   a land's sea), E throws a flat stone the longest way across it; it skips
+//   as many times as luck and the water allow, and the best is remembered.
+// - Toasting marshmallows: E at a campfire or a fireplace sits down with one
+//   on a stick over the flames; E again takes it off and eats it, the
+//   better for being golden (and not alight). Friends see theirs toasting.
 
 import Phaser from 'phaser';
 import { sound } from '../../audio';
@@ -40,6 +46,8 @@ import { findSpots, reachOf, type Spot } from './spots';
 import { Screens } from './screens';
 import { openScreen, type Clip, type ScreenHandle } from '../ui/screenPanel';
 import { CELL } from '../../world/homeLayout';
+import { BANKED } from '../Wanderer';
+import { ALIGHT, GOLDEN, SKIP_FIRST, skipPath } from '../toys';
 
 /** How often the built things are looked over again for seats and the rest, ms. */
 const SPOTS_MS = 500;
@@ -63,6 +71,18 @@ const TV_FAR = 7 * CELL;
 const TV_FLOOR = 12;
 /** E's label over a television stands clear of its aerials, px above its footprint. */
 const TV_LABEL = 38;
+/** How often the water round the hero is looked over for a stone's throw (ms), the ways tried, and how far out a run of water is followed (px). */
+const SKIM_MS = 300;
+const SKIM_WAYS = 16;
+const SKIM_FAR = 96;
+const SKIM_STEP = 6;
+/** The fewest steps of open water ahead worth a throw. */
+const SKIM_RUN = 3;
+/** Skips a throw is good for: 1 plus an exponential share this big, at most SKIP_MOST (the water may cut it short). */
+const SKIP_LUCK = 3.2;
+const SKIP_MOST = 15;
+/** The best throw yet, kept on the device (and in the cloud save). */
+const SKIPS_KEY = 'pixel-battle.skips';
 
 type Doing =
   | { kind: 'seat'; spot: Spot; from: { x: number; y: number } }
@@ -73,13 +93,14 @@ type Doing =
   // `tucked`: seen asleep in the bed (else, a bed turned away, hidden in it).
   | { kind: 'sleep'; spot: Spot; from: { x: number; y: number }; t: number; zT: number; woke: boolean; tucked: boolean }
   | { kind: 'watch'; spot: Spot; tv: Spot; from: { x: number; y: number }; pose: 'seat' | 'sit' }
-  | { kind: 'pad' };
+  | { kind: 'pad' }
+  | { kind: 'roast'; spot: Spot; from: { x: number; y: number } };
 
-type Near = { spot: Spot } | { find: Find } | { honey: string; spot: Spot } | null;
+type Near = { spot: Spot } | { find: Find } | { honey: string; spot: Spot } | { skim: number } | null;
 
 const PHASE_NAMES: Record<string, string> = { morning: 'Morning', day: 'Daytime', sunset: 'Sunset', night: 'Night' };
-const ICONS: Record<string, string> = { seat: 'icon_sit', bed: 'icon_sleep', piano: 'icon_music', harp: 'icon_music', telescope: 'icon_stars', tv: 'icon_tv' };
-const LABELS: Record<string, string> = { seat: 'E: SIT', bed: 'E: SLEEP', piano: 'E: PLAY', harp: 'E: PLAY', telescope: 'E: STARGAZE', tv: 'E: WATCH TV' };
+const ICONS: Record<string, string> = { seat: 'icon_sit', bed: 'icon_sleep', piano: 'icon_music', harp: 'icon_music', telescope: 'icon_stars', tv: 'icon_tv', fire: 'icon_mallow' };
+const LABELS: Record<string, string> = { seat: 'E: SIT', bed: 'E: SLEEP', piano: 'E: PLAY', harp: 'E: PLAY', telescope: 'E: STARGAZE', tv: 'E: WATCH TV', fire: 'E: TOAST A MARSHMALLOW' };
 
 export class Pastimes implements CozyPastimes {
   private spots: Spot[] = [];
@@ -97,6 +118,9 @@ export class Pastimes implements CozyPastimes {
   private screen: ScreenHandle | null = null;
   /** Sat on a seat facing a television: E switches it on. */
   private seatTv: Spot | null = null;
+  /** The way a stone would be skimmed from here (radians), or null with no open water near; looked over now and then. */
+  private skim: number | null = null;
+  private skimT = 0;
 
   constructor(
     private world: WorldScene,
@@ -143,16 +167,21 @@ export class Pastimes implements CozyPastimes {
     }
     this.follow(hero, dt, daylight);
 
-    pastimeHud.busy = !!this.doing && this.doing.kind !== 'seat' && this.doing.kind !== 'lie';
+    pastimeHud.busy = !!this.doing && this.doing.kind !== 'seat' && this.doing.kind !== 'lie' && this.doing.kind !== 'roast';
     pastimeHud.asleep = this.doing?.kind === 'sleep' && !this.doing.woke;
     pastimeHud.jamming = this.doing?.kind === 'jam' || this.doing?.kind === 'play';
     pastimeHud.tablet = this.doing?.kind === 'pad';
+    if ((this.skimT -= dt) <= 0) {
+      this.skimT = SKIM_MS;
+      this.skim = this.at.land ? this.throwFrom(hero.x, hero.y) : null;
+    }
     this.near = this.doing || !this.free() ? null : this.lookAround(hero.x, hero.y);
     this.seatTv = this.doing?.kind === 'seat' ? this.tvFacing(this.doing.spot) : null;
     const n = this.near;
-    pastimeHud.near = this.seatTv ? ICONS.tv : !n ? '' : 'find' in n ? `find_${n.find.def.id}` : 'honey' in n ? 'find_honey' : ICONS[n.spot.kind];
-    // Lying in bed by night, the touch button sleeps (by day, walking off gets up).
+    pastimeHud.near = this.seatTv ? ICONS.tv : !n ? '' : 'find' in n ? `find_${n.find.def.id}` : 'honey' in n ? 'find_honey' : 'skim' in n ? 'icon_stone' : ICONS[n.spot.kind];
+    // Lying in bed by night, the touch button sleeps (by day, walking off gets up); at the fire, it eats the marshmallow.
     if (this.lying() === 'sleep') pastimeHud.near = 'icon_sleep';
+    if (this.doing?.kind === 'roast') pastimeHud.near = 'icon_mallow';
     this.showLabel();
   }
 
@@ -221,7 +250,7 @@ export class Pastimes implements CozyPastimes {
       bd = d;
       best = s;
     }
-    if (!best) return null;
+    if (!best) return this.skim !== null ? { skim: this.skim } : null;
     if (best.kind === 'hive') return { honey: this.hives!.ready(best.thing)!, spot: best };
     return { spot: best };
   }
@@ -236,6 +265,11 @@ export class Pastimes implements CozyPastimes {
         this.watch(hero, this.seatTv, d.spot, d.from);
         return true;
       }
+      // At the fire, E takes the marshmallow off the stick and eats it (walking off gets up).
+      if (d.kind === 'roast') {
+        this.eat(hero);
+        return true;
+      }
       // E again: stand up, get out of bed, put the lute away, step away from the telescope. Asleep, nothing stirs.
       if (d.kind === 'lie' && this.lying() === 'sleep') this.doze(hero, d.spot, d.from);
       else if (d.kind !== 'sleep') this.stop();
@@ -248,6 +282,10 @@ export class Pastimes implements CozyPastimes {
       return true;
     }
     if ('honey' in n) return this.hives?.collect(n.honey) ?? false;
+    if ('skim' in n) {
+      this.throwStone(hero, n.skim);
+      return true;
+    }
     const s = n.spot;
     const from = { x: hero.x, y: hero.y };
     const daylight = this.daylight;
@@ -279,6 +317,12 @@ export class Pastimes implements CozyPastimes {
         return true;
       case 'tv':
         this.watch(hero, s, this.bestSeat(s), from);
+        return true;
+      case 'fire':
+        this.place(hero, s);
+        hero.hold('roast', 'up');
+        sound.sitDown(this.world.pan(s.x));
+        this.doing = { kind: 'roast', spot: s, from };
         return true;
       case 'bed':
         // A bed facing us: in and tucked up, any time of day (sleep is a second E, by night).
@@ -314,6 +358,88 @@ export class Pastimes implements CozyPastimes {
     jamHud.stop = false;
     jamHud.open = true;
     this.world.scene.launch('jam');
+  }
+
+  // ---------------------------------------------------------------- Stones and marshmallows
+
+  /** Is there water at a world point here? */
+  private water(x: number, y: number): boolean {
+    const l = this.at.land!;
+    return l.isWater(Math.floor((x - l.ox) / CELL), Math.floor((y - l.oy) / CELL));
+  }
+
+  /** The way across the most open water from where the hero stands (its first touch must land on water), or null. */
+  private throwFrom(x: number, y: number): number | null {
+    let near = false;
+    for (let dy = -2; dy <= 2 && !near; dy++) for (let dx = -2; dx <= 2 && !near; dx++) near = this.water(x + dx * CELL, y + dy * CELL);
+    if (!near) return null;
+    let best: number | null = null;
+    let run = SKIM_RUN - 1;
+    for (let k = 0; k < SKIM_WAYS; k++) {
+      const a = (k / SKIM_WAYS) * Math.PI * 2;
+      const first = skipPath(x, y, a, 0)[0];
+      if (!this.water(first.x, first.y)) continue;
+      const cx = Math.cos(a);
+      const cy = Math.sin(a) * 0.75;
+      let n = 0;
+      for (let d = SKIP_FIRST + 6 + SKIM_STEP; d <= SKIM_FAR && this.water(x + cx * d, y + cy * d); d += SKIM_STEP) n++;
+      if (n > run) {
+        run = n;
+        best = a;
+      }
+    }
+    return best;
+  }
+
+  /** Skim a stone `angle` across the water: luck says how many skips it's good for, the water how many it gets. */
+  private throwStone(hero: Wanderer, angle: number): void {
+    if (hero.posing === 'toss') return;
+    let skips = Math.min(SKIP_MOST, 1 + Math.floor(-Math.log(1 - Math.random()) * SKIP_LUCK));
+    let bank = false;
+    const path = skipPath(hero.x, hero.y, angle, skips);
+    for (let i = 0; i < path.length; i++) {
+      if (this.water(path[i].x, path[i].y)) continue;
+      // It meets the shore there: every touch before it was a skip.
+      skips = i;
+      bank = true;
+      break;
+    }
+    const c = Math.cos(angle);
+    const dir = c > 0.6 ? 'right' : c < -0.6 ? 'left' : Math.sin(angle) < 0 ? 'up' : 'down';
+    const deg = Math.round(((angle * 180) / Math.PI + 360) % 360);
+    hero.onStone = (n, banked) => this.skimmed(n, banked);
+    hero.hold('toss', dir, deg, skips + (bank ? BANKED : 0));
+  }
+
+  /** The stone's done: how it went, and a new best remembered. */
+  private skimmed(n: number, bank: boolean): void {
+    let best = 0;
+    try {
+      best = Number(localStorage.getItem(SKIPS_KEY)) || 0;
+    } catch {
+      /* no storage: no best kept */
+    }
+    this.say(n === 0 ? (bank ? 'CLONK!' : 'PLOP!') : `${n} SKIP${n > 1 ? 'S' : ''}!`, n >= 7 ? 0xffd860 : 0xd8f4ff);
+    if (n > best && n > 1) {
+      try {
+        localStorage.setItem(SKIPS_KEY, String(n));
+      } catch {
+        /* no storage */
+      }
+      this.world.time.delayedCall(420, () => this.say('NEW BEST!', 0xffe08a));
+    }
+  }
+
+  /** The marshmallow off the stick and eaten, as toasted as it got; a fresh one goes on. */
+  private eat(hero: Wanderer): void {
+    const t = hero.roast?.toast ?? 0;
+    const [text, tint, tier] =
+      t < 0.2 ? ['STILL GOOEY', 0xfff4e0, 0] : t < GOLDEN[0] ? ['LIGHTLY TOASTED', 0xffe8b8, 1] : t <= GOLDEN[1] ? ['PERFECTLY GOLDEN!', 0xffc850, 2] : t < ALIGHT ? ['NICE AND TOASTY', 0xe8b070, 1] : ['A BIT CHARCOAL...', 0xb09484, 0];
+    sound.mallowEat(tier);
+    this.say(text, tint);
+    if (tier === 2) hero.float('heart', 3);
+    // A fresh one on the stick (friends see it start again, too).
+    hero.hold('roast', 'up');
   }
 
   // ---------------------------------------------------------------- Screens
@@ -552,16 +678,19 @@ export class Pastimes implements CozyPastimes {
     const n = this.near;
     const d = this.doing;
     const lying = this.lying();
-    const text = !controls.mouse ? '' : lying ? (lying === 'sleep' ? 'E: SLEEP' : 'E: GET UP') : !n ? '' : 'find' in n ? 'E: PICK UP' : 'honey' in n ? 'E: HONEY' : n.spot.rest ? 'E: LIE DOWN' : LABELS[n.spot.kind];
+    const roasting = d?.kind === 'roast';
+    const text = !controls.mouse ? '' : lying ? (lying === 'sleep' ? 'E: SLEEP' : 'E: GET UP') : roasting ? 'E: EAT IT' : !n ? '' : 'find' in n ? 'E: PICK UP' : 'honey' in n ? 'E: HONEY' : 'skim' in n ? 'E: SKIM A STONE' : n.spot.rest ? 'E: LIE DOWN' : LABELS[n.spot.kind];
     if (text !== this.labelFor) {
       this.labelFor = text;
-      this.label.setText(text).setTint(n && 'find' in n ? 0xc8ff8a : n && 'honey' in n ? 0xffd860 : 0xffe8c0);
+      this.label.setText(text).setTint(n && 'find' in n ? 0xc8ff8a : n && 'honey' in n ? 0xffd860 : n && 'skim' in n ? 0xd8f4ff : 0xffe8c0);
     }
     this.label.setVisible(!!text);
-    const spot = d?.kind === 'lie' ? d.spot : n && 'spot' in n ? n.spot : null;
-    if (!text || (!spot && !(n && 'find' in n))) return;
-    const x = n && 'find' in n ? n.find.x : (spot!.x0 + spot!.x1) / 2;
-    const y = n && 'find' in n ? n.find.y - 16 : spot!.y0 - (spot!.kind === 'tv' ? TV_LABEL : 22);
+    const spot = d?.kind === 'lie' || d?.kind === 'roast' ? d.spot : n && 'spot' in n ? n.spot : null;
+    const skim = n && 'skim' in n;
+    if (!text || (!spot && !(n && 'find' in n) && !skim)) return;
+    const hero = this.world.player;
+    const x = skim ? hero.x : n && 'find' in n ? n.find.x : (spot!.x0 + spot!.x1) / 2;
+    const y = skim ? hero.y - 36 : n && 'find' in n ? n.find.y - 16 : spot!.y0 - (spot!.kind === 'tv' ? TV_LABEL : 22);
     this.label.setPosition(Math.round(x), Math.round(y + Math.sin(this.world.time.now * 0.004) * 1.5));
   }
 
@@ -584,5 +713,5 @@ export class Pastimes implements CozyPastimes {
 }
 
 /** The pose a pastime holds the hero in. */
-const POSE_OF: Record<Exclude<Doing['kind'], 'watch'>, string> = { seat: 'seat', play: 'play', gaze: 'gaze', jam: 'strum', lie: 'lie', sleep: 'doze', pad: 'tablet' };
+const POSE_OF: Record<Exclude<Doing['kind'], 'watch'>, string> = { seat: 'seat', play: 'play', gaze: 'gaze', jam: 'strum', lie: 'lie', sleep: 'doze', pad: 'tablet', roast: 'roast' };
 const poseOf = (d: Doing): string => (d.kind === 'watch' ? d.pose : POSE_OF[d.kind]);

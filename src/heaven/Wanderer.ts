@@ -1,9 +1,9 @@
 // The wanderer: Heaven Lands' one character, dressed however the player
 // likes. It walks, stands, and makes little emotes (a wave, a cheer, a dance,
-// sitting down, a heart, a hug, a bow, a clap, a sky lantern let go) that
-// friends in the same room see too. A hug turns to the nearest friend close
-// by and wraps its arms round them. No fighting: the world never hands it an
-// attack.
+// sitting down, a heart, a hug, a bow, a clap, a sky lantern let go, a high
+// five) and plays with toys (bubbles, a kite, a sparkler; see toys.ts) that
+// friends in the same room see too. A hug or a high five turns to the
+// nearest friend close by. No fighting: the world never hands it an attack.
 
 import Phaser from 'phaser';
 import { snap } from '../game/display';
@@ -13,7 +13,10 @@ import { sound } from '../audio';
 import { stand } from '../game/rest';
 import type { Aim, Hero } from '../game/characters';
 import type { WorldScene } from '../scenes/WorldScene';
-import { ensureWanderer, W_ORIGIN, type Dir } from './art/sheet';
+import { ensureWanderer, W_ORIGIN, WFH, WFW, type Dir } from './art/sheet';
+import { ANIMS, BX, BY, HIGHFIVE_MEET, pose, SPARKLER_TIP, TOSS_RELEASE, type AnimName } from './art/rig';
+import { makeKit, type Kit, type View } from './art/kit';
+import { Bubbles, highFive, Kite, kitePalette, Roast, SkipStone, Sparkler, type Toy } from './toys';
 
 export type { Dir } from './art/sheet';
 import type { Appearance } from './look';
@@ -26,15 +29,22 @@ const FOOTFALLS = new Set([1, 4]);
 /** A stop this long (ms) after the last footfall brings the other foot down too. */
 const SETTLE_AFTER = 140;
 
-export type Emote = 'wave' | 'cheer' | 'dance' | 'sit' | 'heart' | 'hug' | 'bow' | 'clap' | 'lantern';
-export const EMOTES: Emote[] = ['wave', 'cheer', 'dance', 'sit', 'heart', 'hug', 'bow', 'clap', 'lantern'];
-/** A friend this near (px) is hugged: the wanderer turns to face them. */
+export type Emote = 'wave' | 'cheer' | 'dance' | 'sit' | 'heart' | 'hug' | 'bow' | 'clap' | 'lantern' | 'highfive' | 'bubbles' | 'kite' | 'sparkler';
+export const EMOTES: Emote[] = ['wave', 'cheer', 'dance', 'sit', 'heart', 'hug', 'bow', 'clap', 'lantern', 'highfive', 'bubbles', 'kite', 'sparkler'];
+/** The emotes that are toys, played with till walked off (or pressed again). */
+export const TOYS: Emote[] = ['bubbles', 'kite', 'sparkler'];
+/** A friend this near (px) is hugged or high-fived: the wanderer turns to face them. */
 const HUG_REACH = 30;
-/** The poses a pastime holds the wanderer in (see pastimes/): sat on a seat, strumming the lute, at an instrument, at a telescope, in bed, on the tablet. */
-export type Pose = 'seat' | 'strum' | 'play' | 'gaze' | 'lie' | 'doze' | 'tablet';
-const POSES = new Set<string>(['seat', 'strum', 'play', 'gaze', 'lie', 'doze', 'tablet']);
+/** The poses a pastime holds the wanderer in (see pastimes/): sat on a seat, strumming the lute, at an instrument, at a telescope, in bed, on the tablet, skimming a stone, toasting a marshmallow. */
+export type Pose = 'seat' | 'strum' | 'play' | 'gaze' | 'lie' | 'doze' | 'tablet' | 'toss' | 'roast';
+const POSES = new Set<string>(['seat', 'strum', 'play', 'gaze', 'lie', 'doze', 'tablet', 'toss', 'roast']);
 /** Emotes and poses that keep going until the wanderer walks off. */
-const LASTING = new Set<string>(['dance', 'sit', 'seat', 'strum', 'play', 'gaze', 'lie', 'doze', 'tablet']);
+const LASTING = new Set<string>(['dance', 'sit', 'seat', 'strum', 'play', 'gaze', 'lie', 'doze', 'tablet', 'bubbles', 'kite', 'sparkler', 'roast']);
+/** A skimmed stone's tag carries its throw: the angle in degrees as the lift, the skips (plus BANKED if it lands on the shore) as the depth. */
+export const BANKED = 100;
+
+/** A skimmed stone leaves the hand TOSS_RELEASE frames in, at the throw's frame rate. */
+const TOSS_FPS = ANIMS.find((a) => a.name === 'toss')!.fps;
 
 /** What the HUD and the keyboard ask for: the emote to make next. */
 export const emoteHud = { want: null as Emote | null, playing: null as Emote | null };
@@ -84,7 +94,16 @@ export class Wanderer implements Hero {
   private depthOff = 0;
   private emotes = 0;
   /** This one is played by this device (the HUD's emotes reach it). */
-  private mine: boolean;
+  readonly mine: boolean;
+  private kit: Kit;
+  /** The toy in hand (see toys.ts), while its emote lasts. */
+  private toy: Toy | null = null;
+  /** Hears how many times this player's skimmed stone skipped, once it's done. */
+  onStone: ((skips: number, bank: boolean) => void) | null = null;
+  /** The marshmallow on the stick, while toasting one. */
+  get roast(): Roast | null {
+    return this.toy instanceof Roast ? this.toy : null;
+  }
   /** How hard the stick is pushed (0..1): a slow walk treads softer. */
   private pace = 0;
   private moving = false;
@@ -101,6 +120,7 @@ export class Wanderer implements Hero {
     this.x = x;
     this.y = y;
     const k = (this.key = ensureWanderer(world, look));
+    this.kit = makeKit(look);
     emoteArt(world);
     const { x: ox, y: oy } = W_ORIGIN;
     this.shadow = world.add.image(x, y, 'shadow').setDepth(1);
@@ -122,6 +142,13 @@ export class Wanderer implements Hero {
         sound.clap(this.world.pan(this.x));
       }
       if (anim.key === `${k}_lantern_down` && frame.index === 5) sound.lanternRise(this.world.pan(this.x));
+      if (anim.key.startsWith(`${k}_highfive_`) && frame.index === HIGHFIVE_MEET + 1) {
+        // Side on, it's met a friend's palm; facing us, it's thrown up to the sky.
+        const side = this.dir !== 'down';
+        const h = this.hand(side ? 0 : 1);
+        highFive(this.world, h.x, h.y - 1, this.y, side);
+        if (side) this.float('star', 2);
+      }
     });
     this.body.on(Phaser.Animations.Events.ANIMATION_COMPLETE, (anim: Phaser.Animations.Animation) => {
       if (this.emote && anim.key === this.emoteAnim && !LASTING.has(this.emote)) this.endEmote();
@@ -138,7 +165,11 @@ export class Wanderer implements Hero {
     if (this.mine && emoteHud.want) {
       const e = emoteHud.want;
       emoteHud.want = null;
-      if (!moving) this.startEmote(e);
+      // A toy pressed again is put away.
+      if (!moving) {
+        if (e === this.emote && LASTING.has(e)) this.endEmote();
+        else this.startEmote(e);
+      }
     }
     if (moving && this.emote) this.endEmote();
     this.sinceStep += dt;
@@ -182,6 +213,25 @@ export class Wanderer implements Hero {
     if (this.emote) this.endEmote();
   }
 
+  /** Where a hand is in the world now, from the pose of the frame showing: 0 the left (a side view's near one), 1 the right. */
+  hand(i: 0 | 1): { x: number; y: number } {
+    const anim = this.body.anims.currentAnim;
+    const name = anim?.key.slice(this.key.length + 1, anim.key.lastIndexOf('_')) as AnimName | undefined;
+    const dir = (anim?.key.slice(anim.key.lastIndexOf('_') + 1) ?? 'down') as Dir;
+    const view: View = dir === 'left' || dir === 'right' ? 'side' : dir;
+    const p = pose(this.kit, name ?? 'idle', view, Math.max(0, (this.body.anims.currentFrame?.index ?? 1) - 1));
+    const fx = BX + p.hands[i].x;
+    const fy = BY + p.hands[i].y;
+    // Facing right is the left-facing frame mirrored.
+    const x = dir === 'right' ? WFW - fx : fx;
+    return { x: this.body.x + x - W_ORIGIN.x * WFW, y: this.body.y + fy - W_ORIGIN.y * WFH };
+  }
+
+  /** The frame of the animation showing, from 0. */
+  private frameIndex(): number {
+    return (this.body.anims.currentFrame?.index ?? 1) - 1;
+  }
+
   /** Another player's emote or pose, as their tag says: `<what>.<facing>.<lift>.<depth>:<count>`. */
   netEmote(tag: string): void {
     const [what, d, l, dp] = tag.split(':')[0].split('.');
@@ -213,10 +263,13 @@ export class Wanderer implements Hero {
   private startEmote(e: string, facing?: Dir, lift = 0, depth = 0): void {
     this.emote = e;
     const emote = EMOTES.includes(e as Emote);
-    const dir: Dir = e === 'hug' ? (facing ?? (this.mine ? this.hugSide() : 'down')) : emote && e !== 'sit' ? 'down' : (facing ?? 'down');
+    const faces = e === 'hug' || e === 'highfive';
+    const dir: Dir = faces ? (facing ?? (this.mine ? this.hugSide() : 'down')) : emote && e !== 'sit' ? 'down' : (facing ?? 'down');
     this.dir = dir;
-    this.lift = lift;
-    this.depthOff = depth;
+    // A skimmed stone's lift and depth are its throw, not where it's drawn.
+    const toss = e === 'toss';
+    this.lift = toss ? 0 : lift;
+    this.depthOff = toss ? 0 : depth;
     this.emoteAnim = `${this.key}_${e}_${dir}`;
     this.body.play(this.emoteAnim);
     if (this.mine) {
@@ -227,10 +280,35 @@ export class Wanderer implements Hero {
     }
     if (e === 'wave' || e === 'cheer') this.float(e === 'wave' ? 'star' : 'spark', 1);
     if (e === 'lantern') this.world.addEffect(new SkyLantern(this.world, this.x, this.y, () => ({ x: this.x, y: this.y })));
+    this.toy?.stop();
+    this.toy = this.makeToy(e);
+    if (this.toy) this.world.addEffect(this.toy);
+    if (toss) {
+      const bank = depth >= BANKED;
+      const skips = Math.round(depth) % BANKED;
+      const done = this.mine ? (n: number) => this.onStone?.(n, bank) : undefined;
+      this.world.addEffect(new SkipStone(this.world, this.x, this.y, (lift * Math.PI) / 180, skips, bank, (TOSS_RELEASE / TOSS_FPS) * 1000, done));
+    }
+  }
+
+  /** The toy an emote or pose takes up, if it's one. */
+  private makeToy(e: string): Toy | null {
+    const w = this.world;
+    if (e === 'bubbles') return new Bubbles(w, this, () => this.frameIndex());
+    if (e === 'kite') return new Kite(w, this, kitePalette(this.key));
+    if (e === 'roast') return new Roast(w, this);
+    if (e === 'sparkler')
+      return new Sparkler(w, this, () => {
+        const h = this.hand(1);
+        return { x: h.x + SPARKLER_TIP.x, y: h.y + SPARKLER_TIP.y };
+      });
+    return null;
   }
 
   private endEmote(): void {
     this.emote = null;
+    this.toy?.stop();
+    this.toy = null;
     this.lift = this.depthOff = 0;
     if (this.mine) {
       emoteHud.playing = null;
@@ -242,7 +320,7 @@ export class Wanderer implements Hero {
   }
 
   /** A few little things floating up over the head. */
-  private float(frame: string, n: number): void {
+  float(frame: string, n: number): void {
     for (let i = 0; i < n; i++) {
       const img = this.world.add
         .image(snap(this.x) + Phaser.Math.Between(-7, 7), snap(this.y) - 30 + Phaser.Math.Between(-3, 2), 'hl_emote', frame)

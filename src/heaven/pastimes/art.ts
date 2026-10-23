@@ -64,6 +64,10 @@ const CUSHION = m('#2a0a14', '#6a1a30', '#a02c4a', '#c8466a', '#e66a8a', '#f894a
 const MOON = glowing(shiny(m('#3a3010', '#8a7a34', '#c4b058', '#e8d684', '#f8ecb0', '#fffbe0')), 0.5);
 const NOTE_GOLD = shiny(m('#2a1802', '#6a4206', '#a8700e', '#d89a1e', '#f4c03a', '#ffe070', '#fff4b8'));
 const BRASS = shiny(m('#1e1404', '#4a3008', '#7a5410', '#a87a1c', '#d0a030', '#eac454', '#fae08a', '#fff4c4'));
+const PEBBLE = shiny(m('#1e2228', '#3a404a', '#5a626e', '#7c8490', '#9ea6b2', '#c2c8d2', '#e2e6ec'));
+const RIPPLE = { ...m('#4a7a9a', '#7ab4d4', '#a8dcf4', '#d4f2ff', '#f4fcff'), noOutline: true, noAO: true };
+const SPRAY = { ...m('#9ad0ea', '#c8ecff', '#ecfaff', '#ffffff'), noOutline: true };
+const MALLOW = m('#4a2a10', '#9a5a20', '#d08a34', '#f0b456', '#fcd488', '#fff0c8', '#fffaee');
 const STARGLOW = glowing({ ...m('#3a3a20', '#a8a060', '#e8e09a', '#fff8d0', '#ffffff'), noOutline: true }, 1);
 
 const FLATN: Vec3 = { x: 0, y: 0, z: 1 };
@@ -514,6 +518,35 @@ const BUTTON_ART: Record<string, () => PixelCanvas> = {
     c.px(2, 11, BRASS, FACE, { bias: -1 });
     c.part();
     for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]] as const) c.px(14 + dx, 2 + dy, STARGLOW, FLATN, { bias: dx || dy ? 0 : 2 });
+  }),
+  icon_stone: icon((c) => {
+    // A flat grey stone skipping off the water, a ring spreading where it touched and a splash.
+    c.part();
+    for (let k = 0; k < 18; k++) {
+      const a = (k / 18) * Math.PI * 2;
+      c.px(5 + Math.cos(a) * 4.2, 12.5 + Math.sin(a) * 1.8, RIPPLE, TOP, { bias: Math.sin(a) < 0 ? -1 : 1 });
+    }
+    c.px(4, 10, SPRAY, FLATN, { bias: 2 });
+    c.px(6, 9, SPRAY, FLATN, { bias: 2 });
+    c.px(3, 8, SPRAY, FLATN, { bias: 1 });
+    c.part();
+    c.ellipse(11, 6, 3.4, 1.7, PEBBLE, { normal: (_x, _y, dx, dy) => n3(dx * 0.5, -0.6 - dy * 0.3, 0.7) });
+    c.shade(10, 5, 2);
+    c.part();
+    for (const [x, y] of [[8, 9], [7, 10]] as const) c.px(x, y, RIPPLE, FLATN, { bias: 2 });
+  }),
+  icon_mallow: icon((c) => {
+    // A golden marshmallow on the end of a green stick, a wisp of steam curling off it.
+    c.part();
+    c.line(1, 15, 8, 8, TWIG, () => n3(-0.3, -0.5, 0.8), { bias: 1 });
+    c.line(2, 15, 9, 8, TWIG, () => FACE, { bias: -1 });
+    c.part();
+    c.shape(4, 9, (y) => (y === 4 || y === 9 ? [8.5, 13.5] : [8, 14]), MALLOW, (_x, y, t) => n3(t * 0.6, y < 6 ? -0.6 : 0.3, 0.75), { bias: 0 });
+    for (let x = 8; x <= 13; x++) c.shade(x, 9, -2);
+    for (let x = 9; x <= 13; x++) c.shade(x, 8, -1);
+    c.shade(9, 5, 2);
+    c.part();
+    steam(c, 11, 1);
   }),
 };
 

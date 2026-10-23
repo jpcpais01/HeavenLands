@@ -47,6 +47,9 @@ export interface Pose {
   bed?: boolean;
   /** A tablet held up at the chest (the wanderer's own, see pastimes). */
   tablet?: boolean;
+  /** A toy in the hand (see toyInHand in rig.ts), or a stone about to be skimmed. */
+  toy?: 'wand' | 'spool' | 'sparkler';
+  pebble?: boolean;
 }
 
 export interface Kit {

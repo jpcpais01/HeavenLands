@@ -1,7 +1,8 @@
 // Where the pastimes happen among the things built (the Home's plot, the
 // Everwood's builds): every seat's places to sit (a bench or a sofa seats
 // two, side by side), beds to lie in and sleep in, the piano and the harp
-// to play, the telescope, the beehives, the television. Worked out from the grid's things whenever they
+// to play, the telescope, the beehives, the television, and fires to toast
+// marshmallows at (the campfire, the fireplace). Worked out from the grid's things whenever they
 // change, in world positions: where the hero sits or stands, which way they
 // face, how high a seat lifts them and how they sort against the thing.
 
@@ -11,7 +12,7 @@ import { CELL, type Thing } from '../../world/homeLayout';
 import { extent, partById } from '../../world/homeParts';
 import type { Dir } from '../Wanderer';
 
-export type SpotKind = 'seat' | 'bed' | 'piano' | 'harp' | 'telescope' | 'hive' | 'tv';
+export type SpotKind = 'seat' | 'bed' | 'piano' | 'harp' | 'telescope' | 'hive' | 'tv' | 'fire';
 
 export interface Spot {
   kind: SpotKind;
@@ -68,6 +69,11 @@ const BEDS: Record<string, { off: number; at: number[] }> = {
   bigbed: { off: 19, at: [8.5, 23.5] },
   bunkbed: { off: 3, at: [8] },
 };
+
+/** Sat at a fire to toast a marshmallow: this far below its footprint (px), a little to one side so the flames show past the head. */
+const FIRE_GAP = 18;
+export const FIRE_SIDE = 5;
+const FIRES = new Set(['campfire', 'fireplace']);
 
 /** Every spot among `land`'s things. */
 export function findSpots(land: BuildLand): Spot[] {
@@ -128,6 +134,7 @@ export function findSpots(land: BuildLand): Spot[] {
     else if (t.id === 'telescope') at('telescope', cx + (t.flip ? -2 : 2), y1 + 3, 'up');
     else if (t.id === 'beehive') at('hive', cx, y1 + 4, 'up');
     else if (t.id === 'tv') at('tv', cx, y1 + 4, 'up');
+    else if (FIRES.has(t.id)) at('fire', cx - FIRE_SIDE, y1 + FIRE_GAP, 'up');
   }
   return out;
 }

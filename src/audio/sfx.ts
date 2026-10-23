@@ -1232,6 +1232,96 @@ export class Sfx {
     this.sparkle(out, t + 0.5, 4, 0.12);
   }
 
+  /** Heaven Lands' bubbles: a soft breath through the wand. */
+  bubbleBlow(t: number, pan: number): void {
+    const out = this.out(pan, 0.3, 0.3);
+    this.burstNoise(out, t, 'bandpass', 700, 1300, 0.8, 0.07, 0.32, true);
+  }
+
+  /** A soap bubble popping: the tiniest wet plip. */
+  bubblePop(t: number, pan: number): void {
+    const out = this.out(pan, 0.3, 0.25);
+    this.chirp(out, t, 'sine', 1900, 2900, 0.03, 0.035);
+    this.burstNoise(out, t, 'highpass', 5000, 7000, 1, 0.03, 0.02);
+  }
+
+  /** A kite let out: a rush of wind filling it, and the cloth snapping taut. */
+  kiteUp(t: number, pan: number): void {
+    const out = this.out(pan, 0.35, 0.5);
+    this.burstNoise(out, t, 'bandpass', 400, 1100, 0.7, 0.07, 0.9, true);
+    for (let i = 0; i < 3; i++) this.burstNoise(out, t + 0.35 + i * 0.13, 'bandpass', 1600, 1200, 1.4, 0.05, 0.05);
+    this.bell(out, t + 0.5, 1568, 0.016, 1.1);
+  }
+
+  /** A sparkler lit: a match struck, and the fizz catching. */
+  sparklerLight(t: number, pan: number): void {
+    const out = this.out(pan, 0.4, 0.3);
+    this.burstNoise(out, t, 'bandpass', 2600, 1800, 1.2, 0.12, 0.08);
+    this.burstNoise(out, t + 0.07, 'highpass', 3500, 6000, 0.7, 0.06, 0.5);
+    this.sparkle(out, t + 0.12, 3, 0.05);
+  }
+
+  /** A sparkler burning: a handful of tiny crackles. */
+  sparklerCrackle(t: number, pan: number): void {
+    const out = this.out(pan, 0.25, 0.15);
+    for (let i = 0; i < 5; i++) this.burstNoise(out, t + i * 0.035 * rand(0.6, 1.4), 'highpass', rand(4000, 7000), 8000, 1, 0.035 * rand(0.5, 1), 0.012);
+  }
+
+  /** A high five: a bright smack of palms, and two notes leaping up. */
+  highFive(t: number, pan: number): void {
+    const out = this.out(pan, 0.5, 0.35);
+    this.burstNoise(out, t, 'bandpass', 2000, 1400, 1, 0.34, 0.045);
+    this.burstNoise(out, t, 'lowpass', 900, 500, 1, 0.16, 0.05);
+    this.bell(out, t + 0.05, 1319, 0.03, 0.7);
+    this.bell(out, t + 0.13, 1976, 0.03, 0.9);
+    this.sparkle(out, t + 0.18, 3, 0.05);
+  }
+
+  /** A flat stone thrown low: a little whoosh. */
+  stoneThrow(t: number, pan: number): void {
+    const out = this.out(pan, 0.3, 0.15);
+    this.burstNoise(out, t, 'bandpass', 900, 2600, 1.2, 0.07, 0.16);
+  }
+
+  /** The stone kissing the water and leaping on: a quick bright plip. */
+  stoneSkip(t: number, pan: number): void {
+    const out = this.out(pan, 0.4, 0.3);
+    this.chirp(out, t, 'sine', 950, 1500, 0.06, 0.05);
+    this.burstNoise(out, t, 'bandpass', 2800, 1800, 1.4, 0.06, 0.04);
+  }
+
+  /** The stone going under at last: a deep round plunk. */
+  stoneSink(t: number, pan: number): void {
+    const out = this.out(pan, 0.45, 0.4);
+    this.chirp(out, t, 'sine', 520, 170, 0.11, 0.14);
+    this.burstNoise(out, t, 'lowpass', 1400, 400, 1, 0.08, 0.18);
+    this.chirp(out, t + 0.1, 'sine', 900, 1200, 0.02, 0.06);
+  }
+
+  /** The stone clattering onto the far bank. */
+  stoneClack(t: number, pan: number): void {
+    const out = this.out(pan, 0.4, 0.2);
+    this.burstNoise(out, t, 'bandpass', 2400, 2000, 3, 0.14, 0.03);
+    this.burstNoise(out, t + 0.09, 'bandpass', 2600, 2200, 3, 0.07, 0.025);
+  }
+
+  /** A marshmallow catching fire: a soft whoomph. */
+  mallowFlare(t: number, pan: number): void {
+    const out = this.out(pan, 0.35, 0.25);
+    this.burstNoise(out, t, 'lowpass', 600, 1800, 0.8, 0.1, 0.35, true);
+  }
+
+  /** A marshmallow eaten: two soft munches, and for a golden one (`tier` 2) a sweet run of bells. */
+  mallowEat(t: number, tier: number): void {
+    const out = this.out(0, 0.4, 0.4);
+    for (let i = 0; i < 2; i++) this.burstNoise(out, t + i * 0.16, 'bandpass', 700, 450, 1.1, 0.12, 0.08, true);
+    if (tier === 2) {
+      [1047, 1319, 1568, 2093].forEach((f, i) => this.bell(out, t + 0.3 + i * 0.07, f, 0.03, 1.1));
+      this.sparkle(out, t + 0.5, 4, 0.06);
+    } else if (tier === 1) this.bell(out, t + 0.3, 1175, 0.025, 0.8);
+    else this.chirp(out, t + 0.32, 'triangle', 330, 220, 0.04, 0.2);
+  }
+
   /**
    * The White Stag: `appear` a soft rising chime as it steps out of the
    * trees; `reveal` a wider, slower bloom of bells as its secret place opens;

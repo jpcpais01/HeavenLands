@@ -16,7 +16,7 @@ const id = (list: { id: string }[], i: number): string => list[i]?.id ?? list[0]
 
 // ---------------------------------------------------------------- poses
 
-export type AnimName = 'idle' | 'walk' | 'wave' | 'cheer' | 'dance' | 'sit' | 'seat' | 'heart' | 'hug' | 'bow' | 'clap' | 'lantern' | 'strum' | 'play' | 'gaze' | 'lie' | 'doze' | 'tablet';
+export type AnimName = 'idle' | 'walk' | 'wave' | 'cheer' | 'dance' | 'sit' | 'seat' | 'heart' | 'hug' | 'bow' | 'clap' | 'lantern' | 'strum' | 'play' | 'gaze' | 'lie' | 'doze' | 'tablet' | 'bubbles' | 'kite' | 'sparkler' | 'highfive' | 'toss' | 'roast';
 
 export interface AnimDef {
   name: AnimName;
@@ -55,7 +55,25 @@ export const ANIMS: AnimDef[] = [
   { name: 'doze', frames: 4, fps: 1.5, loop: true, views: ['down'] },
   // Looking down at the tablet held up at the chest, tapping and swiping.
   { name: 'tablet', frames: 8, fps: 4, loop: true, views: ['down'] },
+  // The toys (see heaven/toys): blowing bubbles through a wand, flying a kite from its reel, writing in the air with a sparkler.
+  { name: 'bubbles', frames: 8, fps: 6, loop: true, views: ['down'] },
+  { name: 'kite', frames: 8, fps: 4, loop: true, views: ['down'] },
+  { name: 'sparkler', frames: 8, fps: 7, loop: true, views: ['down'] },
+  // A high five: side on to a friend, or a hand thrown up to the sky.
+  { name: 'highfive', frames: 7, fps: 8, loop: false, views: ['down', 'side'] },
+  // A flat stone skimmed across the water, thrown any way.
+  { name: 'toss', frames: 7, fps: 10, loop: false, views: ['down', 'up', 'side'] },
+  // Sat cross-legged at a fire (from behind), a marshmallow held out on a stick.
+  { name: 'roast', frames: 4, fps: 2, loop: true, views: ['up'] },
 ];
+
+/** Where a toy's business end is from the hand holding it, in body pixels (the bubble wand's ring, the sparkler's tip). */
+export const WAND_RING = { x: 1, y: -3.5 };
+export const SPARKLER_TIP = { x: 2, y: -6 };
+/** The frame a stone leaves the hand. */
+export const TOSS_RELEASE = 3;
+/** The frame a high five's palms meet. */
+export const HIGHFIVE_MEET = 3;
 
 /** Where the shoulders are: `sit` lowers them on the ground (true) or on a seat ('seat'). */
 const shY = (k: Kit, bob: number, hop = 0, sit: boolean | 'seat' = false) => 18 - k.tall + bob - hop + (sit === 'seat' ? SEAT_DROP : sit ? GROUND_DROP : 0);
@@ -345,6 +363,143 @@ export function pose(k: Kit, anim: AnimName, view: View, i: number): Pose {
     p.tablet = true;
     p.face = 'content';
     p.sway = [0, 0, 0.1, 0.15, 0.1, 0, -0.1, -0.05][i];
+    return p;
+  }
+  if (anim === 'bubbles') {
+    // The wand dipped low by the bottle, raised to the lips and blown through, then waved out to the side for a last few.
+    const bob = [1, 0, 0, 0, 1, 0, 0, 1][i];
+    const p = standing(k, 'down', bob);
+    const s = shY(k, bob);
+    const wand = [
+      { x: 12 + k.sw - 0.4, y: s + 4.6 },
+      { x: 13.4, y: s + 2.6 },
+      { x: 12.6, y: s + 0.6 },
+      { x: 12.6, y: s + 0.4 },
+      { x: 12.8, y: s + 0.6 },
+      { x: 12 + k.sw + 1.4, y: s + 0.4 },
+      { x: 12 + k.sw + 3, y: s - 1.6 },
+      { x: 12 + k.sw + 1.6, y: s + 2.6 },
+    ][i];
+    p.hands = [{ x: 12 - k.sw - 0.2, y: s + 5 }, wand];
+    p.carry = false;
+    p.toy = 'wand';
+    p.face = i >= 2 && i <= 4 ? 'open' : 'content';
+    p.sway = [0, 0, 0.1, 0.1, 0.1, 0.25, 0.35, 0.1][i];
+    return p;
+  }
+  if (anim === 'kite') {
+    // The reel held at the waist, the line run up through the other hand raised high; a little tug now and then.
+    const tug = [0, 0, 0.6, 1, 0.4, 0, 0, 0][i];
+    const bob = [0, 0, 0, 1, 1, 1, 0, 0][i];
+    const p = standing(k, 'down', bob);
+    const s = shY(k, bob);
+    p.hands = [
+      { x: 12 - k.sw - 1.4, y: s - 2.6 + tug * 1.2 },
+      { x: 12 + k.sw + 0.4, y: s + 4.8 + tug * 0.4 },
+    ];
+    p.carry = false;
+    p.toy = 'spool';
+    p.face = 'content';
+    p.sway = [0, 0.1, 0.2, 0.3, 0.2, 0, -0.1, -0.1][i];
+    p.flap = i / 8;
+    return p;
+  }
+  if (anim === 'sparkler') {
+    // Held up in front and turned in slow loops, writing light in the air.
+    const a = (i / 8) * Math.PI * 2;
+    const bob = [0, 0, 1, 1, 0, 0, 1, 1][i];
+    const p = standing(k, 'down', bob);
+    const s = shY(k, bob);
+    p.hands = [
+      { x: 12 - k.sw - 0.85, y: s + 6.3 },
+      { x: 12 + k.sw + 0.6 + Math.cos(a) * 2.2, y: s + 0.6 + Math.sin(a) * 2.2 },
+    ];
+    p.carry = false;
+    p.toy = 'sparkler';
+    p.face = 'grin';
+    p.sway = Math.cos(a) * 0.2;
+    return p;
+  }
+  if (anim === 'highfive') {
+    // The hand drawn back, swung up to meet another (or the sky), held a moment, then down again.
+    const up = [0, 0.5, 0.9, 1, 1, 0.6, 0.1][i];
+    const bob = [1, 0, 0, 0, 0, 0, 1][i];
+    const p = standing(k, view, bob);
+    const s = shY(k, bob);
+    p.carry = false;
+    p.face = i >= 2 && i <= 5 ? 'grin' : undefined;
+    if (view === 'side') {
+      // Facing left: the near hand comes up and forward, palm out.
+      p.hands = [
+        { x: 12.6 - 1 - up * 3.6, y: s + 6.2 - up * 10 + (i === 3 ? 0.6 : 0) },
+        { x: 13.2, y: s + 6 },
+      ];
+      p.sway = i === 3 ? 0.3 : 0;
+      p.dx = i === 3 || i === 4 ? -0.4 : 0;
+      return p;
+    }
+    p.hands = [
+      { x: 12 - k.sw - 0.85, y: s + 6.3 },
+      { x: 12 + k.sw + 0.8 + up * 1.4, y: s + 6.3 - up * 11 },
+    ];
+    p.sway = i === 3 ? -0.3 : 0;
+    return p;
+  }
+  if (anim === 'toss') {
+    // A low sidearm throw: weight back, the arm whipped round, the stone let go at TOSS_RELEASE, a follow-through.
+    const bob = [1, 1, 0, 0, 1, 1, 0][i];
+    const p = standing(k, view, bob);
+    const s = shY(k, bob);
+    p.carry = false;
+    p.pebble = i < TOSS_RELEASE;
+    p.face = i >= TOSS_RELEASE && i <= 5 ? 'open' : undefined;
+    if (view === 'side') {
+      // Facing left, toward the water: the near hand goes back behind, round, and out low in front.
+      const hand = [
+        { x: 14.4, y: s + 5.6 },
+        { x: 16.6, y: s + 6.4 },
+        { x: 13.6, y: s + 6.2 },
+        { x: 9, y: s + 5.4 },
+        { x: 7.6, y: s + 4.2 },
+        { x: 9.6, y: s + 5.2 },
+        { x: 12.4, y: s + 6.2 },
+      ][i];
+      p.hands = [hand, { x: 13.2, y: s + 6 }];
+      p.feet = i >= 2 && i <= 5 ? [{ x: 10, y: 31 }, { x: 14, y: 31 }] : p.feet;
+      p.dx = [0.4, 0.8, 0, -0.6, -0.8, -0.4, 0][i];
+      p.sway = p.dx * 0.5;
+      return p;
+    }
+    // Toward us (or away): the arm wound up high by the shoulder, then brought down and across.
+    const away = view === 'up';
+    const hand = [
+      { x: 12 + k.sw + 1.4, y: s + 2 },
+      { x: 12 + k.sw + 1.8, y: s - 1.2 },
+      { x: 12 + k.sw + 0.8, y: s + 1 },
+      { x: 12 + 1, y: s + (away ? 1.4 : 5) },
+      { x: 12 - 1.4, y: s + (away ? 2.6 : 6.4) },
+      { x: 12 + 1.4, y: s + 6 },
+      { x: 12 + k.sw + 0.85, y: s + 6.3 },
+    ][i];
+    p.hands = [{ x: 12 - k.sw - 0.85, y: s + 6.3 }, hand];
+    p.dx = [0.3, 0.5, 0, -0.4, -0.5, -0.2, 0][i];
+    return p;
+  }
+  if (anim === 'roast') {
+    // From behind, sat cross-legged, both hands out in front holding the stick to the flames; it bobs a little.
+    const bob = [0, 0, 1, 1][i];
+    const p = standing(k, 'up', bob);
+    p.sit = true;
+    const s = shY(k, bob, 0, true);
+    p.feet = [
+      { x: 12.9, y: 31 },
+      { x: 11.1, y: 31 },
+    ];
+    p.hands = [
+      { x: 12 - 1.6, y: s + 3.4 + (i === 2 ? 0.4 : 0) },
+      { x: 12 + 1.6, y: s + 3 + (i === 2 ? 0.4 : 0) },
+    ];
+    p.carry = false;
     return p;
   }
   if (anim === 'hug') {
@@ -2034,6 +2189,70 @@ function tablet(c: PixelCanvas, k: Kit, g: Geo): void {
   }
 }
 
+
+const WAND = mat('#7ad0e8', { shine: true });
+const WAND_RING_M = mat('#f2a8d0', { shine: true });
+const VIAL = { ...mat('#cfeefa', { shine: true }), noAO: true };
+const SOAP = mat('#f6b8dc', { shine: true });
+const REEL = mat('#c48a52');
+const REEL_LINE = flat('#f4ecdc');
+const WIRE = mat('#9aa0a8', { shine: true });
+const PEBBLE = mat('#8a8e96', { shine: true });
+
+/**
+ * A toy in the hand: the bubble wand (a pink ring on a blue stick) with its
+ * little bottle of soap in the other hand, the kite's wooden reel wound with
+ * line, the sparkler's wire (its burning tip is drawn in the world), or a
+ * flat stone about to be skimmed.
+ */
+function toyInHand(c: PixelCanvas, k: Kit, g: Geo): void {
+  const t = g.pose.toy;
+  const [l, r] = g.hands;
+  if (g.pose.pebble) {
+    const h = g.view === 'side' ? l : r;
+    c.part();
+    c.ellipse(h.x - 0.4, h.y - 0.6, 1.1, 0.7, PEBBLE);
+    return;
+  }
+  if (t === 'wand') {
+    c.part();
+    c.line(r.x + 0.2, r.y - 0.6, r.x + WAND_RING.x * 0.6, r.y + WAND_RING.y + 1.6, WAND, () => ({ x: 0.4, y: 0, z: 0.9 }));
+    const cx = r.x + WAND_RING.x;
+    const cy = r.y + WAND_RING.y;
+    c.part();
+    for (const [dx, dy] of [[-1, -1], [0, -2], [1, -1], [1, 0], [0, 1], [-1, 0]] as const) c.px(Math.round(cx) + dx, Math.round(cy) + dy, WAND_RING_M, { x: dx * 0.5, y: dy * 0.4, z: 0.8 }, { bias: dy < 0 ? 1 : 0 });
+    // The bottle of soap in the other hand.
+    c.part();
+    c.shape(Math.round(l.y) - 2, Math.round(l.y) + 1, () => [l.x - 1, l.x + 1], VIAL, (_x, _y, tt) => ({ x: tt * 0.6, y: 0, z: 0.8 }));
+    c.px(l.x - 0.5, l.y, SOAP, FLAT);
+    c.px(l.x - 0.5, l.y - 3, REEL, FLAT);
+    c.part();
+    c.ellipse(l.x, l.y + 0.4, 1.1, 1, k.skin);
+    c.part();
+    c.ellipse(r.x, r.y, 1.1, 1, k.skin);
+    return;
+  }
+  if (t === 'spool') {
+    // A short wooden reel held across, line wound round it, the line running up to the raised hand.
+    c.part();
+    c.line(r.x - 1.6, r.y - 1, r.x - 1.6, r.y + 1, REEL, () => ({ x: -0.5, y: 0, z: 0.8 }), { bias: 1 });
+    c.line(r.x + 1.6, r.y - 1, r.x + 1.6, r.y + 1, REEL, () => ({ x: 0.5, y: 0, z: 0.8 }));
+    c.line(r.x - 0.6, r.y - 0.6, r.x + 0.6, r.y - 0.6, REEL_LINE, () => FLAT, { bias: 1 });
+    c.line(r.x - 0.6, r.y + 0.4, r.x + 0.6, r.y + 0.4, REEL_LINE, () => FLAT);
+    c.line(r.x, r.y - 1, l.x, l.y, REEL_LINE, () => FLAT);
+    c.part();
+    c.ellipse(r.x, r.y + 0.2, 1.1, 1, k.skin);
+    c.ellipse(l.x, l.y, 1.1, 1, k.skin);
+    return;
+  }
+  if (t === 'sparkler') {
+    c.part();
+    c.line(r.x, r.y - 0.4, r.x + SPARKLER_TIP.x, r.y + SPARKLER_TIP.y, WIRE, () => ({ x: 0.5, y: -0.2, z: 0.8 }));
+    c.part();
+    c.ellipse(r.x, r.y, 1.1, 1, k.skin);
+  }
+}
+
 export function drawFigure(c: PixelCanvas, k: Kit, g: Geo, L: Layers): void {
   const w = wearOf(k);
   c.offset(BX, BY);
@@ -2056,6 +2275,7 @@ export function drawFigure(c: PixelCanvas, k: Kit, g: Geo, L: Layers): void {
     L.face(c, k, g);
     L.held(c, k, g);
     L.over(c, k, g);
+    if (g.pose.toy || g.pose.pebble) toyInHand(c, k, g);
     if (g.pose.bed) tuckIn(c, k, g);
   } else if (g.view === 'up') {
     L.held(c, k, g);
@@ -2088,6 +2308,7 @@ export function drawFigure(c: PixelCanvas, k: Kit, g: Geo, L: Layers): void {
     cloak(c, k, g, w);
     L.held(c, k, g);
     L.over(c, k, g);
+    if (g.pose.pebble) toyInHand(c, k, g);
   }
   c.offset(0, 0);
 }
