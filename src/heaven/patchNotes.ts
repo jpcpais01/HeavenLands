@@ -18,6 +18,17 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    v: 13,
+    date: '2026-10-23',
+    title: 'Toys, stones and marshmallows',
+    notes: [
+      'A new toy box by the emote buttons (the pinwheel; keys =, O, U, Y): let go a sky lantern, blow soap bubbles that drift off and pop on whoever they touch, fly a kite high on the wind, or light a sparkler and write in the air with it. Press a toy again or walk off to put it away. Friends see your toys too.',
+      'High five (key H): turn to the friend beside you and slap palms, with a burst of stars.',
+      'Skim stones: stand by any open water (a pond, a stream, the sea) and press E to throw a flat stone across it. See how many times it skips; your best is remembered.',
+      'Toast marshmallows: press E at a Campfire or a Fireplace to sit down with one on a stick. Watch it go golden, then press E to eat it. Leave it too long and it catches fire!',
+    ],
+  },
+  {
     v: 12,
     date: '2026-10-15',
     title: 'Upstairs, and secret doors',

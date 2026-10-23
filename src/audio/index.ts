@@ -508,6 +508,56 @@ class GameSound {
     this.fx('lanternRise', 'lanternRise', [pan], 0);
   }
 
+  bubbleBlow(pan = 0): void {
+    this.fx('bubbleBlow', 'bubbleBlow', [pan], 0);
+  }
+
+  /** Each pop a little higher or lower, so a cloud of them patters. */
+  bubblePop(pan = 0): void {
+    this.fx('bubblePop', 'bubblePop', [pan], 0, { rate: rand(0.8, 1.3), level: rand(0.6, 1), delay: 0 });
+  }
+
+  kiteUp(pan = 0): void {
+    this.fx('kiteUp', 'kiteUp', [pan], 0);
+  }
+
+  sparklerLight(pan = 0): void {
+    this.fx('sparklerLight', 'sparklerLight', [pan], 0);
+  }
+
+  sparklerCrackle(pan = 0, level = 1): void {
+    this.fx('sparklerCrackle', 'sparklerCrackle', [pan], 0, { rate: rand(0.85, 1.2), level: level * rand(0.6, 1), delay: 0 });
+  }
+
+  highFive(pan = 0): void {
+    this.fx('highFive', 'highFive', [pan], 0);
+  }
+
+  stoneThrow(pan = 0): void {
+    this.fx('stoneThrow', 'stoneThrow', [pan], 0);
+  }
+
+  /** The `n`th skip (from 0) a touch higher than the last, as the stone tires and quickens. */
+  stoneSkip(n: number, pan = 0): void {
+    this.fx(`stoneSkip${n % 4}`, 'stoneSkip', [pan], 0, { rate: 1 + Math.min(n, 10) * 0.05, level: Math.max(0.45, 1 - n * 0.06), delay: 0 });
+  }
+
+  stoneSink(pan = 0): void {
+    this.fx('stoneSink', 'stoneSink', [pan], 0);
+  }
+
+  stoneClack(pan = 0): void {
+    this.fx('stoneClack', 'stoneClack', [pan], 0);
+  }
+
+  mallowFlare(pan = 0): void {
+    this.fx('mallowFlare', 'mallowFlare', [pan], 0);
+  }
+
+  mallowEat(tier: number): void {
+    this.fx('mallowEat', 'mallowEat', [tier]);
+  }
+
   stag(kind: 'appear' | 'reveal' | 'flee', pan = 0): void {
     this.fx(`stag_${kind}`, 'stag', [pan, kind], 0);
   }
