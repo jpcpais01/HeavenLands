@@ -40,6 +40,16 @@ const SHEET_W = 1024;
 /** Frames that glow, by their name without the frame number. */
 const glowing = new Set<string>();
 
+/** How far down each placed thing's frame its drawing reaches (to the bottom edge of its lowest painted row), read as the sheet is made. */
+const bottoms = new Map<string, number>();
+
+/**
+ * How far above the foot of its drawing a thing sorts against heroes: a hero
+ * whose feet are on or below the drawing's lowest row is in front of it, one
+ * a pixel higher behind it (never a tie, whatever the camera's zoom).
+ */
+const SORT_LIFT = 0.45;
+
 interface Packed {
   name: string;
   r: RenderedFrame;
@@ -182,6 +192,7 @@ function finishHome(scene: Phaser.Scene, list: Entry[]): void {
     const e = f.r.emissive;
     for (let i = 0; i < e.length && !glows; i += 4) if (e[i] > 6 || e[i + 1] > 6 || e[i + 2] > 6) glows = true;
     if (glows) glowing.add(f.name.replace(/:[mrbl]?\d+$/, ''));
+    if (f.name.startsWith('p:')) bottoms.set(f.name, lowestRow(f.r) + 1);
   }
   const sil = new Uint8ClampedArray(W * H * 4);
   for (let i = 0; i < W * H; i++) {
@@ -226,6 +237,12 @@ function finishHome(scene: Phaser.Scene, list: Entry[]): void {
   scene.textures.addCanvas('hs_bridge', pixelCanvas(bridge.w, bridge.h, bridge.px));
 }
 
+/** The lowest row of a frame with anything painted on it. */
+function lowestRow(r: RenderedFrame): number {
+  for (let y = r.h - 1; y >= 0; y--) for (let x = 0; x < r.w; x++) if (r.diffuse[(y * r.w + x) * 4 + 3] > 0) return y;
+  return r.h - 1;
+}
+
 /** Whether a frame on the sheet has anything that glows. */
 export const glows = (frame: string): boolean => glowing.has(frame) || glowing.has(frame.replace(/:[mrbl]?\d+$/, ''));
 
@@ -249,6 +266,12 @@ export interface ThingLook {
   y: number;
   ox: number;
   oy: number;
+  /**
+   * The line it sorts on against heroes: its foot, or where its drawing ends
+   * if that's higher up its footprint (a table's legs stop short of the
+   * cell's edge), so a hero who looks in front of it is drawn in front.
+   */
+  depth: number;
 }
 
 /** The forest's sheets: frame size, where a thing's foot is in its frame, and how many variants. */
@@ -276,11 +299,11 @@ export function thingLook(t: Thing): ThingLook {
   const foot = thingFoot(t);
   if (p.secret) {
     // As it looks shut, filling its doorway (the world hangs it: see world/secretDoor.ts).
-    return { key: 'home', frame: `p:${t.id}:${t.flip && p.flip ? 'm' : ''}0`, glow: null, anim: null, flipX: false, sway: null, x: PLOT_X + t.x * CELL, y: PLOT_Y + t.y * CELL - DOOR_OY, ox: 0, oy: 0 };
+    return { key: 'home', frame: `p:${t.id}:${t.flip && p.flip ? 'm' : ''}0`, glow: null, anim: null, flipX: false, sway: null, x: PLOT_X + t.x * CELL, y: PLOT_Y + t.y * CELL - DOOR_OY, ox: 0, oy: 0, depth: foot.y };
   }
   if (p.door) {
     // Shut, face on, standing in its doorway (the world swings it: see world/Home.ts).
-    return { key: 'home', frame: t.flip ? 'p:door:m0' : 'p:door:0', glow: 'home_e', anim: null, flipX: false, sway: null, x: PLOT_X + t.x * CELL, y: PLOT_Y + t.y * CELL - DOOR_OY, ox: 0, oy: 0 };
+    return { key: 'home', frame: t.flip ? 'p:door:m0' : 'p:door:0', glow: 'home_e', anim: null, flipX: false, sway: null, x: PLOT_X + t.x * CELL, y: PLOT_Y + t.y * CELL - DOOR_OY, ox: 0, oy: 0, depth: foot.y };
   }
   const r = REUSED[t.id];
   if (r) {
@@ -296,6 +319,7 @@ export function thingLook(t: Thing): ThingLook {
       y: foot.y,
       ox: r.fx / r.w,
       oy: r.fy / r.h,
+      depth: foot.y,
     };
   }
   // A turned part: its side or back view (a left turn is the right one mirrored).
@@ -306,9 +330,11 @@ export function thingLook(t: Thing): ThingLook {
   // The foot in the frame: the frame's corner sits at (dx, dy) from the footprint's.
   const fx = foot.x - (PLOT_X + t.x * CELL + a.dx);
   const fy = foot.y - (PLOT_Y + t.y * CELL + a.dy);
+  const frame = `p:${t.id}:${m}0`;
+  const bottom = bottoms.get(frame);
   return {
     key: 'home',
-    frame: `p:${t.id}:${m}0`,
+    frame,
     glow: glowing.has(`p:${t.id}`) ? 'home_e' : null,
     anim: a.frames > 1 ? `home_${t.id}${m ? '_m' : ''}` : null,
     flipX: false,
@@ -317,6 +343,7 @@ export function thingLook(t: Thing): ThingLook {
     y: foot.y,
     ox: fx / a.w,
     oy: fy / a.h,
+    depth: bottom === undefined ? foot.y : Math.min(foot.y, PLOT_Y + t.y * CELL + a.dy + bottom - SORT_LIFT),
   };
 }
 

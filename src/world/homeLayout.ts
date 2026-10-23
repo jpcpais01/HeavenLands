@@ -257,6 +257,16 @@ export function wallBoxes(mask: number, thick: number): { x0: number; y0: number
 /** A door runs across its wall: east-west unless the wall runs only north-south. */
 export const doorAcross = (mask: number): boolean => !!(mask & 10) || !(mask & 5);
 
+/**
+ * How far down its cell a wall sorts against heroes: the foot of its face,
+ * so a hero standing just south of a low picket fence (whose face ends higher
+ * up the cell than a house wall's) is drawn in front of it. A wall running
+ * north-south keeps a house wall's line, as heroes walk beside it.
+ */
+export function wallSortY(mask: number, thick: number): number {
+  return doorAcross(mask) ? Math.min(11, 8 + thick / 2) : 11;
+}
+
 /** The half-width of a doorway's opening. */
 export const DOOR_HW = 5;
 

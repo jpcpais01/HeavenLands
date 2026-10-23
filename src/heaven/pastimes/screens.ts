@@ -10,7 +10,7 @@ import Phaser from 'phaser';
 import { session, type Msg } from '../../net/session';
 import type { WorldScene } from '../../scenes/WorldScene';
 import { TV_SCREEN } from '../../art/homeGadgets';
-import { footOn } from '../../world/buildLand';
+import { depthOn } from '../../world/buildLand';
 import type { BuildLand } from '../../world/buildLand';
 import type { Clip } from '../ui/screenPanel';
 import type { Spot } from './spots';
@@ -150,7 +150,7 @@ export class Screens {
 
   private light(s: Spot, land: BuildLand): Lit {
     const w = this.world;
-    const foot = footOn(land, s.thing).y;
+    const foot = depthOn(land, s.thing);
     const x = s.x0 + TV_SCREEN.x;
     const y = s.y0 + TV_SCREEN.y;
     const rect = w.add.rectangle(x, y, TV_SCREEN.w, TV_SCREEN.h, 0xffffff, SCREEN_ALPHA).setOrigin(0).setBlendMode(Phaser.BlendModes.ADD).setDepth(foot + 0.3);

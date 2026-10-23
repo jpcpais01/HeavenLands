@@ -1,4 +1,4 @@
-import { thingFoot } from '../art/homeArt';
+import { thingFoot, thingLook } from '../art/homeArt';
 import { PLOT_X, PLOT_Y, type Thing } from './homeLayout';
 
 // A grid things are built on, the Home's plot or the Everwood: what the
@@ -27,4 +27,9 @@ export interface BuildLand {
 export function footOn(land: BuildLand, t: Thing): { x: number; y: number } {
   const f = thingFoot(t);
   return { x: f.x - PLOT_X + land.ox, y: f.y - PLOT_Y + land.oy };
+}
+
+/** The line a thing sorts on against heroes on this land (see `ThingLook.depth`). */
+export function depthOn(land: BuildLand, t: Thing): number {
+  return thingLook(t).depth - PLOT_Y + land.oy;
 }
