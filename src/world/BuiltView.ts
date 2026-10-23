@@ -12,7 +12,7 @@ import type { WorldScene } from '../scenes/WorldScene';
 import { BridgeView } from './BridgeView';
 import type { ForestEdits } from './forestEdits';
 import { ForestFloors } from './ForestFloors';
-import { CELL, PLOT_X, PLOT_Y, doorAcross, type Thing } from './homeLayout';
+import { CELL, PLOT_X, PLOT_Y, doorAcross, wallSortY, type Thing } from './homeLayout';
 import { WALLS, extent, partById, wallKind, wallMat, type PartDef } from './homeParts';
 import { RoofView } from './RoofView';
 import { SecretSet } from './secretDoor';
@@ -213,7 +213,7 @@ export class BuiltView {
       const x = look.x - PLOT_X;
       const y = look.y - PLOT_Y;
       // A hanging sorts just in front of its wall.
-      const depth = part.wall ? t.y * CELL + 11.2 : part.flat ? 1.5 : y;
+      const depth = part.wall ? t.y * CELL + 11.2 : part.flat ? 1.5 : look.depth - PLOT_Y;
       const sprite = add.sprite(x, y, look.key, look.frame).setOrigin(look.ox, look.oy).setFlipX(look.flipX).setPipeline('Lit').setDepth(depth);
       const tall = look.key === 'tree' || t.id === 'blossom';
       ch.placed.push({ obj: sprite, x0: x - 56, x1: x + 56, y0: y - (tall ? 130 : 70), y1: y + 8 });
@@ -263,7 +263,7 @@ export class BuiltView {
       const fk = wallFrameName(mat, frame);
       const x = cx * CELL;
       const y = cy * CELL - def.height;
-      const depth = cy * CELL + 11;
+      const depth = cy * CELL + wallSortY(mask, def.thick);
       const img = add.image(x, y, 'home', fk).setOrigin(0).setPipeline('Lit').setDepth(depth);
       ch.placed.push({ obj: img, x0: x, x1: x + CELL, y0: y, y1: (cy + 1) * CELL });
       let glow: Img | null = null;

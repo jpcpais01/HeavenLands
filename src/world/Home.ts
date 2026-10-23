@@ -30,7 +30,7 @@ import { UP_TABS, composeHome, findStorey, groundView, landingOf, liftHome, near
 import { WorldLink, type LinkHost } from './worldLink';
 import { treeLeaves } from './Scenery';
 import { Swing, hangGate } from './swing';
-import { CELL, COLS, HomeLayout, HomeMask, PLOT_H, PLOT_W, PLOT_X, PLOT_Y, ROWS, cellIndex, doorAcross, findHouses, inPlot, starterHome, type House, type Thing } from './homeLayout';
+import { CELL, COLS, HomeLayout, HomeMask, PLOT_H, PLOT_W, PLOT_X, PLOT_Y, ROWS, cellIndex, doorAcross, findHouses, inPlot, starterHome, wallSortY, type House, type Thing } from './homeLayout';
 import { FISH_REACH, FLOORS, WALLS, extent, partById, wallKind, wallMat, type PartDef } from './homeParts';
 
 type Img = Phaser.GameObjects.Image;
@@ -389,7 +389,7 @@ export class Home implements LinkHost {
         const H = WALLS[mat].height;
         const x = PLOT_X + cx * CELL;
         const y = PLOT_Y + cy * CELL - H;
-        const depth = PLOT_Y + cy * CELL + 11;
+        const depth = PLOT_Y + cy * CELL + wallSortY(l.wallMask(cx, cy), WALLS[mat].thick);
         const img = this.scene.add.image(x, y, 'home', key).setOrigin(0).setPipeline('Lit').setDepth(depth);
         const glow = glows(key) ? this.scene.add.image(x, y, 'home_e', key).setOrigin(0).setBlendMode(Phaser.BlendModes.ADD).setDepth(depth + 0.1) : null;
         const shadow = h < 0 ? sunShadow(this.scene.add.image(x + CELL / 2, PLOT_Y + (cy + 1) * CELL, 'home_s', key).setOrigin(0.5, 1)).setAlpha(SUN_SHADOW_ALPHA * Math.max(0, this.daylight)) : null;
@@ -459,7 +459,7 @@ export class Home implements LinkHost {
     }
     const look = thingLook(t);
     const add = this.scene.add;
-    const depth = part.wall ? PLOT_Y + t.y * CELL + 11.2 : part.flat ? 1.5 : look.y;
+    const depth = part.wall ? PLOT_Y + t.y * CELL + 11.2 : part.flat ? 1.5 : look.depth;
     const sprite = add.sprite(look.x, look.y, look.key, look.frame).setOrigin(look.ox, look.oy).setFlipX(look.flipX).setPipeline('Lit').setDepth(depth);
     if (look.sway) {
       if (this.scene.anims.exists(look.sway)) sway(sprite, look.sway);

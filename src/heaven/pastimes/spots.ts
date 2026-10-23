@@ -7,7 +7,7 @@
 // face, how high a seat lifts them and how they sort against the thing.
 
 import type { BuildLand } from '../../world/buildLand';
-import { footOn } from '../../world/buildLand';
+import { depthOn } from '../../world/buildLand';
 import { CELL, type Thing } from '../../world/homeLayout';
 import { extent, partById } from '../../world/homeParts';
 import type { Dir } from '../Wanderer';
@@ -86,7 +86,8 @@ export function findSpots(land: BuildLand): Spot[] {
     const y0 = land.oy + t.y * CELL;
     const x1 = x0 + e.w * CELL;
     const y1 = y0 + e.h * CELL;
-    const foot = footOn(land, t);
+    // Sitters and sleepers sort just in front of (or behind) the line the thing itself sorts on.
+    const line = depthOn(land, t);
     const base = { x0, y0, x1, y1, thing: t };
     const cx = (x0 + x1) / 2;
     const seat = SEATS[t.id];
@@ -100,14 +101,14 @@ export function findSpots(land: BuildLand): Spot[] {
         for (let k = 0; k < n; k++) {
           const x = cx + (k - (n - 1) / 2) * apart;
           const y = turn === 0 ? y1 - 1 : y0 + 3;
-          out.push({ ...base, kind: 'seat', key: `${t.x},${t.y}:${k}`, x, y, dir: turn === 0 ? 'down' : 'up', lift: y - SIT_HIP - (sy - seat.z), depth: turn === 0 ? foot.y + 0.5 - y : foot.y - 0.5 - y });
+          out.push({ ...base, kind: 'seat', key: `${t.x},${t.y}:${k}`, x, y, dir: turn === 0 ? 'down' : 'up', lift: y - SIT_HIP - (sy - seat.z), depth: turn === 0 ? line + 0.5 - y : line - 0.5 - y });
         }
       } else {
         // Side on: sitters one behind the other along it, drawn over it.
         for (let k = 0; k < e.h; k++) {
           const sy = y0 + (k + 0.5) * CELL + (seat.dy ?? 0) * 0.5;
           const y = sy + 3;
-          out.push({ ...base, kind: 'seat', key: `${t.x},${t.y}:${k}`, x: cx + (turn === 1 ? -1 : 1), y, dir: turn === 1 ? 'right' : 'left', lift: y - SIT_HIP - (sy - seat.z), depth: foot.y + 0.5 + k - y });
+          out.push({ ...base, kind: 'seat', key: `${t.x},${t.y}:${k}`, x: cx + (turn === 1 ? -1 : 1), y, dir: turn === 1 ? 'right' : 'left', lift: y - SIT_HIP - (sy - seat.z), depth: line + 0.5 + k - y });
         }
       }
       continue;
@@ -123,7 +124,7 @@ export function findSpots(land: BuildLand): Spot[] {
         continue;
       }
       bed.at.forEach((bx, k) =>
-        out.push({ ...base, kind: 'bed', key: `${t.x},${t.y}:${k}`, x: x0 + bx, y, dir: 'down', lift: y - (y0 + bed.off), depth: foot.y + 0.5 - y, rest: true }),
+        out.push({ ...base, kind: 'bed', key: `${t.x},${t.y}:${k}`, x: x0 + bx, y, dir: 'down', lift: y - (y0 + bed.off), depth: line + 0.5 - y, rest: true }),
       );
       continue;
     }
